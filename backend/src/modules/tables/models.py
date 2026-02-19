@@ -1,0 +1,54 @@
+import uuid
+
+from sqlalchemy import Enum, ForeignKey, Integer, String, Text, Boolean, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from src.common.base_model import BaseDBModel
+
+
+class FieldType:
+    TEXT = "text"
+    NUMBER = "number"
+    DATE = "date"
+    DATETIME = "datetime"
+    BOOLEAN = "boolean"
+    SELECT = "select"
+    MULTI_SELECT = "multi_select"
+    URL = "url"
+    EMAIL = "email"
+    PHONE = "phone"
+    FILE = "file"
+    RELATION = "relation"
+    FORMULA = "formula"
+
+    ALL = [TEXT, NUMBER, DATE, DATETIME, BOOLEAN, SELECT, MULTI_SELECT, URL, EMAIL, PHONE, FILE, RELATION, FORMULA]
+
+
+class Table(BaseDBModel):
+    __tablename__ = "tables"
+
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    color: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+
+    columns: Mapped[list["Column"]] = relationship("Column", back_populates="table", cascade="all, delete-orphan", order_by="Column.position")
+
+
+class Column(BaseDBModel):
+    __tablename__ = "table_columns"
+
+    table_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tables.id", ondelete="CASCADE"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    field_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_required: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)  # options for select, formula, etc.
+    default_value: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    table: Mapped["Table"] = relationship("Table", back_populates="columns")

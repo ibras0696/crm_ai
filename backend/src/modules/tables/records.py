@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, String, select, func
+from sqlalchemy import ForeignKey, Integer, String, func, select, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column
@@ -17,6 +17,7 @@ class Record(BaseDBModel):
     org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
     created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     data: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
 
 
 class RecordRepository:
@@ -40,7 +41,7 @@ class RecordRepository:
         stmt = (
             select(Record)
             .where(Record.table_id == table_id)
-            .order_by(Record.created_at.desc())
+            .order_by(Record.position.asc(), Record.created_at.desc())
             .limit(limit)
             .offset(offset)
         )
@@ -64,3 +65,44 @@ class RecordRepository:
         self.session.add_all(records)
         await self.session.flush()
         return records
+
+    async def get_max_position(self, table_id: uuid.UUID) -> int:
+        stmt = select(func.coalesce(func.max(Record.position), -1)).where(Record.table_id == table_id)
+        result = await self.session.execute(stmt)
+        return result.scalar() or 0
+
+    async def get_prev_in_table(self, table_id: uuid.UUID, position: int) -> Record | None:
+        stmt = (
+            select(Record)
+            .where(Record.table_id == table_id, Record.position < position)
+            .order_by(Record.position.desc())
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_next_in_table(self, table_id: uuid.UUID, position: int) -> Record | None:
+        stmt = (
+            select(Record)
+            .where(Record.table_id == table_id, Record.position > position)
+            .order_by(Record.position.asc())
+            .limit(1)
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def normalize_positions(self, table_id: uuid.UUID) -> None:
+        """Ensure deterministic contiguous positions per table."""
+        stmt = (
+            select(Record)
+            .where(Record.table_id == table_id)
+            .order_by(Record.position.asc(), Record.created_at.desc(), Record.id.asc())
+        )
+        rows = list((await self.session.execute(stmt)).scalars().all())
+        changed = False
+        for idx, rec in enumerate(rows):
+            if rec.position != idx:
+                rec.position = idx
+                changed = True
+        if changed:
+            await self.session.flush()

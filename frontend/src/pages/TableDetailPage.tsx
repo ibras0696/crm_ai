@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { tablesApi, recordsApi, TableInfo, RecordInfo, ColumnInfo } from '@/lib/api'
-import { ArrowLeft, Plus, Loader2, Trash2, X, Check, Type, Hash, Calendar, ToggleLeft, List, Link2, Mail, Phone, FileIcon, Download, Search, ArrowUpDown, ArrowUp, ArrowDown, Filter, ChevronLeft, ChevronRight } from 'lucide-react'
+import { ArrowLeft, Plus, Loader2, Trash2, X, Check, Type, Hash, Calendar, ToggleLeft, List, Link2, Mail, Phone, FileIcon, Download, Search, ArrowUpDown, ArrowUp, ArrowDown, Filter, ChevronLeft, ChevronRight, Pencil } from 'lucide-react'
 
 const FIELD_TYPES = [
   { value: 'text', label: 'Текст', icon: Type },
@@ -140,6 +140,11 @@ function TableDetailPageContent() {
   const [filterVal, setFilterVal] = useState<string>('')
   const [showFilter, setShowFilter] = useState(false)
   const [page, setPage] = useState(0)
+  const [editingColumnId, setEditingColumnId] = useState<string | null>(null)
+  const [editingColumnName, setEditingColumnName] = useState('')
+  const [editingColumnType, setEditingColumnType] = useState('text')
+  const [movingRecordId, setMovingRecordId] = useState<string | null>(null)
+  const moveLockRef = useRef(false)
 
   const load = useCallback(async () => {
     if (!tableId) return
@@ -192,6 +197,28 @@ function TableDetailPageContent() {
     await load()
   }
 
+  const startEditColumn = (col: ColumnInfo) => {
+    setEditingColumnId(col.id)
+    setEditingColumnName(col.name)
+    setEditingColumnType(col.field_type)
+  }
+
+  const cancelEditColumn = () => {
+    setEditingColumnId(null)
+    setEditingColumnName('')
+    setEditingColumnType('text')
+  }
+
+  const handleSaveColumn = async () => {
+    if (!tableId || !editingColumnId || !editingColumnName.trim()) return
+    await tablesApi.updateColumn(tableId, editingColumnId, {
+      name: editingColumnName.trim(),
+      field_type: editingColumnType,
+    })
+    cancelEditColumn()
+    await load()
+  }
+
   const handleAddRecord = async () => {
     if (!tableId) return
     setAddingRecord(true)
@@ -233,6 +260,47 @@ function TableDetailPageContent() {
     setTotal(prev => prev - 1)
   }
 
+  const handleMoveRecord = async (recordId: string, direction: 'up' | 'down') => {
+    if (!tableId) return
+    if (moveLockRef.current) return
+    moveLockRef.current = true
+    const before = records
+    const currentIdx = before.findIndex(r => r.id === recordId)
+    if (currentIdx === -1) return
+    const targetIdx = direction === 'up' ? currentIdx - 1 : currentIdx + 1
+    if (targetIdx < 0 || targetIdx >= before.length) return
+
+    // Optimistic UI: reorder instantly, so user sees movement without refresh.
+    const optimistic = [...before]
+    ;[optimistic[currentIdx], optimistic[targetIdx]] = [optimistic[targetIdx], optimistic[currentIdx]]
+    setRecords(optimistic)
+
+    setMovingRecordId(recordId)
+    try {
+      const resp = await recordsApi.move(tableId, recordId, direction)
+      if (!resp.data.ok) {
+        // Rollback if backend rejected move.
+        setRecords(before)
+        return
+      }
+
+      // Final sync to guarantee strict order from server without manual refresh.
+      const sync = await recordsApi.list(tableId, 500)
+      if (sync.data.ok && sync.data.data) {
+        const normalized = (sync.data.data.records ?? [])
+          .filter(isRecordInfo)
+          .map((r) => ({ ...r, data: safeRecordData(r.data) }))
+        setRecords(normalized)
+        setTotal(typeof sync.data.data.total === 'number' ? sync.data.data.total : normalized.length)
+      }
+    } catch {
+      setRecords(before)
+    } finally {
+      setMovingRecordId(null)
+      moveLockRef.current = false
+    }
+  }
+
   const columns = (Array.isArray(table?.columns) ? table.columns : [])
     .filter(isColumnInfo)
     .sort((a: ColumnInfo, b: ColumnInfo) => a.position - b.position)
@@ -267,6 +335,7 @@ function TableDetailPageContent() {
 
   const totalPages = Math.ceil(processedRecords.length / PAGE_SIZE)
   const pagedRecords = processedRecords.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
+  const canManualReorder = !search.trim() && !filterCol && !sortCol
 
   const handleSort = (colId: string) => {
     if (sortCol === colId) {
@@ -369,26 +438,49 @@ function TableDetailPageContent() {
                 const SortIcon = isSorted ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown
                 return (
                   <th key={col.id} className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap group">
-                    <div className="flex items-center gap-1.5">
-                      <Icon className="h-3.5 w-3.5 opacity-50" />
-                      <button
-                        onClick={() => handleSort(col.id)}
-                        className={`flex items-center gap-1 hover:text-foreground transition-colors ${
-                          isSorted ? 'text-primary' : ''
-                        }`}
-                      >
-                        <span>{col.name}</span>
-                        <SortIcon className={`h-3 w-3 ${
-                          isSorted ? 'opacity-100' : 'opacity-0 group-hover:opacity-40'
-                        }`} />
-                      </button>
-                      {col.is_required && <span className="text-destructive text-xs">*</span>}
-                      {!col.is_primary && (
-                        <button onClick={() => handleDeleteColumn(col.id)} className="ml-1 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity">
-                          <Trash2 className="h-3 w-3" />
+                    {editingColumnId === col.id ? (
+                      <div className="flex items-center gap-1">
+                        <input
+                          value={editingColumnName}
+                          onChange={e => setEditingColumnName(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') handleSaveColumn(); if (e.key === 'Escape') cancelEditColumn() }}
+                          className="h-7 w-[120px] px-2 text-xs rounded border border-primary/50 bg-background outline-none"
+                        />
+                        <select
+                          value={editingColumnType}
+                          onChange={e => setEditingColumnType(e.target.value)}
+                          className="h-7 rounded border border-input bg-background px-1 text-xs"
+                        >
+                          {FIELD_TYPES.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                        </select>
+                        <button onClick={handleSaveColumn} className="h-7 w-7 rounded bg-primary text-white flex items-center justify-center"><Check className="h-3.5 w-3.5" /></button>
+                        <button onClick={cancelEditColumn} className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:bg-secondary"><X className="h-3.5 w-3.5" /></button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <Icon className="h-3.5 w-3.5 opacity-50" />
+                        <button
+                          onClick={() => handleSort(col.id)}
+                          className={`flex items-center gap-1 hover:text-foreground transition-colors ${
+                            isSorted ? 'text-primary' : ''
+                          }`}
+                        >
+                          <span>{col.name}</span>
+                          <SortIcon className={`h-3 w-3 ${
+                            isSorted ? 'opacity-100' : 'opacity-0 group-hover:opacity-40'
+                          }`} />
                         </button>
-                      )}
-                    </div>
+                        <button onClick={() => startEditColumn(col)} className="opacity-0 group-hover:opacity-100 hover:text-foreground transition-opacity" title="Изменить название и тип">
+                          <Pencil className="h-3 w-3" />
+                        </button>
+                        {col.is_required && <span className="text-destructive text-xs">*</span>}
+                        {!col.is_primary && (
+                          <button onClick={() => handleDeleteColumn(col.id)} className="ml-1 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity">
+                            <Trash2 className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </th>
                 )
               })}
@@ -428,9 +520,27 @@ function TableDetailPageContent() {
                 ))}
                 <td />
                 <td className="px-2 py-0.5">
-                  <button onClick={() => handleDeleteRecord(record.id)} className="h-7 w-7 flex items-center justify-center opacity-0 group-hover/row:opacity-100 text-muted-foreground hover:text-destructive transition-opacity">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  <div className="flex items-center">
+                    <button
+                      onClick={() => handleMoveRecord(record.id, 'up')}
+                      disabled={!canManualReorder || !!movingRecordId || (page * PAGE_SIZE + idx) === 0}
+                      className="h-7 w-7 flex items-center justify-center opacity-0 group-hover/row:opacity-100 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-opacity"
+                      title={canManualReorder ? 'Переместить вверх' : 'Отключено при сортировке/фильтре/поиске'}
+                    >
+                      <ArrowUp className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleMoveRecord(record.id, 'down')}
+                      disabled={!canManualReorder || !!movingRecordId || (page * PAGE_SIZE + idx) === (processedRecords.length - 1)}
+                      className="h-7 w-7 flex items-center justify-center opacity-0 group-hover/row:opacity-100 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-opacity"
+                      title={canManualReorder ? 'Переместить вниз' : 'Отключено при сортировке/фильтре/поиске'}
+                    >
+                      <ArrowDown className="h-3.5 w-3.5" />
+                    </button>
+                    <button onClick={() => handleDeleteRecord(record.id)} className="h-7 w-7 flex items-center justify-center opacity-0 group-hover/row:opacity-100 text-muted-foreground hover:text-destructive transition-opacity">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

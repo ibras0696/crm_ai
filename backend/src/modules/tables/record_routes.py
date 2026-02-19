@@ -1,6 +1,7 @@
 """Record CRUD endpoints."""
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
@@ -23,6 +24,7 @@ class RecordOut(BaseModel):
     created_by: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+    position: int
 
     model_config = {"from_attributes": True}
 
@@ -38,6 +40,10 @@ class CreateRecordRequest(BaseModel):
 
 class UpdateRecordRequest(BaseModel):
     data: dict
+
+
+class MoveRecordRequest(BaseModel):
+    direction: Literal["up", "down"]
 
 
 async def _get_table_or_fail(table_id: uuid.UUID, org_id: uuid.UUID, uow) -> Table | None:
@@ -65,9 +71,11 @@ async def create_record(
             org_id=current_user.org_id,
             created_by=current_user.user_id,
             data=body.data,
+            position=(await repo.get_max_position(table_id)) + 1,
         )
         record = await repo.create(record)
         await uow.commit()
+        await uow.session.refresh(record)
         item = RecordOut.model_validate(record)
     return ApiResponse(data=item)
 
@@ -132,6 +140,7 @@ async def update_record(
         record.data = merged
         await repo.update(record)
         await uow.commit()
+        await uow.session.refresh(record)
         item = RecordOut.model_validate(record)
     return ApiResponse(data=item)
 
@@ -155,3 +164,38 @@ async def delete_record(
         await repo.delete(record)
         await uow.commit()
     return ApiResponse(data=None)
+
+
+@router.post("/{record_id}/move", response_model=ApiResponse[RecordOut])
+async def move_record(
+    table_id: uuid.UUID,
+    record_id: uuid.UUID,
+    body: MoveRecordRequest,
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+):
+    async with UnitOfWork() as uow:
+        table = await _get_table_or_fail(table_id, current_user.org_id, uow)
+        if not table:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "РўР°Р±Р»РёС†Р° РЅРµ РЅР°Р№РґРµРЅР°"})
+
+        repo = RecordRepository(uow.session)
+        await repo.normalize_positions(table_id)
+        record = await repo.get_by_id(record_id)
+        if not record or record.table_id != table_id:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Р—Р°РїРёСЃСЊ РЅРµ РЅР°Р№РґРµРЅР°"})
+
+        neighbor = (
+            await repo.get_prev_in_table(table_id, record.position)
+            if body.direction == "up"
+            else await repo.get_next_in_table(table_id, record.position)
+        )
+        if not neighbor:
+            await uow.session.refresh(record)
+            return ApiResponse(data=RecordOut.model_validate(record))
+
+        record.position, neighbor.position = neighbor.position, record.position
+        await repo.update(record)
+        await repo.update(neighbor)
+        await uow.commit()
+        await uow.session.refresh(record)
+        return ApiResponse(data=RecordOut.model_validate(record))

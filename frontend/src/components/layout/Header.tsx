@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+﻿import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { LogOut, Bell, Search, Sun, Moon, Menu, BellOff, CheckCheck } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
@@ -29,20 +29,47 @@ export default function Header({ onMenuToggle }: HeaderProps) {
 
   const loadNotifications = async () => {
     try {
-      const [listResp, countResp] = await Promise.all([
-        notificationsApi.list(20),
-        notificationsApi.unreadCount(),
-      ])
-      if (listResp.data.ok && listResp.data.data) setNotifications(listResp.data.data)
-      if (countResp.data.ok && countResp.data.data) setUnreadCount(countResp.data.data.count)
-    } catch { /* API not ready yet — fallback to empty */ }
+      const listResp = await notificationsApi.list(20)
+      if (listResp.data.ok && listResp.data.data) {
+        setNotifications(listResp.data.data)
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const loadUnreadCount = async () => {
+    try {
+      const countResp = await notificationsApi.unreadCount()
+      if (countResp.data.ok && countResp.data.data) {
+        setUnreadCount(countResp.data.data.count)
+      }
+    } catch {
+      // ignore
+    }
   }
 
   useEffect(() => {
-    loadNotifications()
-    const interval = setInterval(loadNotifications, 30000)
-    return () => clearInterval(interval)
+    loadUnreadCount()
+
+    const onVisibility = () => {
+      if (!document.hidden) loadUnreadCount()
+    }
+
+    document.addEventListener('visibilitychange', onVisibility)
+    const interval = setInterval(loadUnreadCount, 60000)
+
+    return () => {
+      clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [])
+
+  useEffect(() => {
+    if (notifOpen) {
+      loadNotifications()
+    }
+  }, [notifOpen])
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -58,16 +85,20 @@ export default function Header({ onMenuToggle }: HeaderProps) {
     try {
       await notificationsApi.markAllRead()
       setUnreadCount(0)
-      setNotifications(prev => prev.map(n => ({ ...n, is_read: true })))
-    } catch { /* ignore */ }
+      setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })))
+    } catch {
+      // ignore
+    }
   }
 
   const handleMarkRead = async (id: string) => {
     try {
       await notificationsApi.markRead(id)
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n))
-      setUnreadCount(prev => Math.max(0, prev - 1))
-    } catch { /* ignore */ }
+      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)))
+      setUnreadCount((prev) => Math.max(0, prev - 1))
+    } catch {
+      // ignore
+    }
   }
 
   const initials = user
@@ -76,43 +107,32 @@ export default function Header({ onMenuToggle }: HeaderProps) {
 
   return (
     <header className="sticky top-0 z-30 flex h-14 md:h-16 items-center gap-2 md:gap-4 border-b border-border bg-background/80 backdrop-blur-md px-3 md:px-6">
-      {/* Mobile menu button */}
       <Button variant="ghost" size="icon" className="md:hidden text-muted-foreground" onClick={onMenuToggle}>
         <Menu className="h-5 w-5" />
       </Button>
 
-      {/* Search */}
       <div className="relative flex-1 max-w-md hidden sm:block">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder="Поиск..."
-          className="pl-9 bg-secondary/50 border-none h-9 focus-visible:ring-1"
-        />
+        <Input placeholder="Поиск..." className="pl-9 bg-secondary/50 border-none h-9 focus-visible:ring-1" />
       </div>
 
       <div className="flex-1" />
 
-      {/* Theme toggle */}
       <Button variant="ghost" size="icon" onClick={toggleTheme} className="text-muted-foreground hover:text-foreground">
         {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
       </Button>
 
-      {/* Notifications */}
       <div className="relative" ref={notifRef}>
         <Button variant="ghost" size="icon" className="relative text-muted-foreground hover:text-foreground" onClick={() => setNotifOpen(!notifOpen)}>
           <Bell className="h-5 w-5" />
-          {unreadCount > 0 && (
-            <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary" />
-          )}
+          {unreadCount > 0 && <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-primary" />}
         </Button>
 
         {notifOpen && (
           <div className="absolute right-0 top-full mt-2 w-80 rounded-lg border border-border bg-popover shadow-lg z-50">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
               <span className="text-sm font-semibold">Уведомления</span>
-              {unreadCount > 0 && (
-                <Badge variant="default" className="text-[10px]">{unreadCount}</Badge>
-              )}
+              {unreadCount > 0 && <Badge variant="default" className="text-[10px]">{unreadCount}</Badge>}
             </div>
             {unreadCount > 0 && (
               <div className="px-4 py-2 border-b border-border">
@@ -128,7 +148,7 @@ export default function Header({ onMenuToggle }: HeaderProps) {
                   <span className="text-sm">Нет уведомлений</span>
                 </div>
               ) : (
-                notifications.map(n => (
+                notifications.map((n) => (
                   <div
                     key={n.id}
                     onClick={() => !n.is_read && handleMarkRead(n.id)}
@@ -145,14 +165,12 @@ export default function Header({ onMenuToggle }: HeaderProps) {
         )}
       </div>
 
-      {/* Plan badge */}
       {org && (
         <Badge variant={org.plan === 'free' ? 'secondary' : 'default'} className="uppercase text-[10px] hidden sm:inline-flex">
           {org.plan}
         </Badge>
       )}
 
-      {/* User */}
       <div className="flex items-center gap-2 md:gap-3 pl-2 border-l border-border ml-1 md:ml-2">
         <Avatar className="h-8 w-8">
           <AvatarFallback className="bg-primary/20 text-primary text-xs">{initials}</AvatarFallback>

@@ -248,3 +248,14 @@ class OrgService:
                     "role": m.role.value,
                 })
             return result
+
+    async def delete_org(
+        self,
+        org_id: uuid.UUID,
+    ) -> None:
+        async with UnitOfWork() as uow:
+            org = await uow.session.get(Organization, org_id)
+            if not org:
+                raise NotFoundError("Organization")
+            await uow.session.delete(org)
+            await uow.commit()

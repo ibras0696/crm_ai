@@ -27,6 +27,12 @@ async def get_current_org(current_user: CurrentUser = Depends(require_org)):
     return ApiResponse(data=OrgResponse.model_validate(org))
 
 
+@router.delete("/current", response_model=ApiResponse)
+async def delete_current_org(current_user: CurrentUser = Depends(require_roles(UserRole.OWNER))):
+    await _org_service.delete_org(current_user.org_id)
+    return ApiResponse(data=None)
+
+
 @router.get("/my", response_model=ApiResponse[list[dict]])
 async def get_my_orgs(current_user: CurrentUser = Depends(get_current_user)):
     orgs = await _org_service.get_user_orgs(current_user.user_id)

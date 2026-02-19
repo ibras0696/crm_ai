@@ -1,4 +1,5 @@
-import { useState } from 'react'
+﻿import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -7,16 +8,22 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Building2, User, CreditCard, Globe, Lock, Loader2, Check } from 'lucide-react'
-import api from '@/lib/api'
+import api, { orgApi } from '@/lib/api'
 
 export default function SettingsPage() {
-  const { user, org, refresh } = useAuth()
-  const [profileForm, setProfileForm] = useState({ first_name: user?.first_name ?? '', last_name: user?.last_name ?? '', timezone: user?.timezone ?? 'UTC' })
+  const { user, org, refresh, logout } = useAuth()
+  const navigate = useNavigate()
+  const [profileForm, setProfileForm] = useState({
+    first_name: user?.first_name ?? '',
+    last_name: user?.last_name ?? '',
+    timezone: user?.timezone ?? 'UTC',
+  })
   const [orgName, setOrgName] = useState(org?.name ?? '')
   const [profileLoading, setProfileLoading] = useState(false)
   const [profileSaved, setProfileSaved] = useState(false)
   const [orgLoading, setOrgLoading] = useState(false)
   const [orgSaved, setOrgSaved] = useState(false)
+  const [deleteLoading, setDeleteLoading] = useState(false)
 
   const saveProfile = async () => {
     setProfileLoading(true)
@@ -25,7 +32,11 @@ export default function SettingsPage() {
       await refresh()
       setProfileSaved(true)
       setTimeout(() => setProfileSaved(false), 2000)
-    } catch { /* ignore */ } finally { setProfileLoading(false) }
+    } catch {
+      // ignore
+    } finally {
+      setProfileLoading(false)
+    }
   }
 
   const saveOrg = async () => {
@@ -35,7 +46,28 @@ export default function SettingsPage() {
       await refresh()
       setOrgSaved(true)
       setTimeout(() => setOrgSaved(false), 2000)
-    } catch { /* ignore */ } finally { setOrgLoading(false) }
+    } catch {
+      // ignore
+    } finally {
+      setOrgLoading(false)
+    }
+  }
+
+  const deleteOrg = async () => {
+    if (!org) return
+    const confirmed = window.confirm(`Удалить организацию "${org.name}"? Это действие необратимо.`)
+    if (!confirmed) return
+
+    setDeleteLoading(true)
+    try {
+      await orgApi.deleteCurrent()
+      logout()
+      navigate('/login')
+    } catch {
+      window.alert('Не удалось удалить организацию. Проверьте права и попробуйте снова.')
+    } finally {
+      setDeleteLoading(false)
+    }
   }
 
   return (
@@ -45,7 +77,6 @@ export default function SettingsPage() {
         <p className="text-muted-foreground mt-1">Управление аккаунтом и организацией</p>
       </div>
 
-      {/* Profile */}
       <Card className="border-border/50">
         <CardHeader>
           <div className="flex items-center gap-3">
@@ -62,11 +93,19 @@ export default function SettingsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Имя</Label>
-              <Input value={profileForm.first_name} onChange={(e) => setProfileForm(p => ({...p, first_name: e.target.value}))} className="bg-secondary/50" />
+              <Input
+                value={profileForm.first_name}
+                onChange={(e) => setProfileForm((p) => ({ ...p, first_name: e.target.value }))}
+                className="bg-secondary/50"
+              />
             </div>
             <div className="space-y-2">
               <Label>Фамилия</Label>
-              <Input value={profileForm.last_name} onChange={(e) => setProfileForm(p => ({...p, last_name: e.target.value}))} className="bg-secondary/50" />
+              <Input
+                value={profileForm.last_name}
+                onChange={(e) => setProfileForm((p) => ({ ...p, last_name: e.target.value }))}
+                className="bg-secondary/50"
+              />
             </div>
           </div>
           <div className="space-y-2">
@@ -76,7 +115,11 @@ export default function SettingsPage() {
           </div>
           <div className="space-y-2">
             <Label>Часовой пояс</Label>
-            <Input value={profileForm.timezone} onChange={(e) => setProfileForm(p => ({...p, timezone: e.target.value}))} className="bg-secondary/50" />
+            <Input
+              value={profileForm.timezone}
+              onChange={(e) => setProfileForm((p) => ({ ...p, timezone: e.target.value }))}
+              className="bg-secondary/50"
+            />
           </div>
           <Button className="gradient-primary border-0 text-white" onClick={saveProfile} disabled={profileLoading}>
             {profileLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : profileSaved ? <Check className="h-4 w-4 mr-2" /> : null}
@@ -85,7 +128,6 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Organization */}
       <Card className="border-border/50">
         <CardHeader>
           <div className="flex items-center gap-3">
@@ -114,7 +156,6 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Billing */}
       <Card className="border-border/50">
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -139,7 +180,7 @@ export default function SettingsPage() {
                 <p className="font-semibold">Бесплатный план</p>
                 <p className="text-sm text-muted-foreground">Базовые функции для небольших команд</p>
               </div>
-              <p className="text-2xl font-bold">$0<span className="text-sm font-normal text-muted-foreground">/mo</span></p>
+              <p className="text-2xl font-bold">0 ₽<span className="text-sm font-normal text-muted-foreground">/мес</span></p>
             </div>
             <Separator className="bg-border/50" />
             <div className="grid grid-cols-2 gap-3 text-sm">
@@ -153,13 +194,12 @@ export default function SettingsPage() {
               </div>
             </div>
             <Button variant="outline" className="w-full" disabled>
-              Перейти на Team — Скоро
+              Перейти на Team - скоро
             </Button>
           </div>
         </CardContent>
       </Card>
 
-      {/* Danger Zone */}
       <Card className="border-destructive/20">
         <CardHeader>
           <CardTitle className="text-lg text-destructive">Опасная зона</CardTitle>
@@ -169,9 +209,11 @@ export default function SettingsPage() {
           <div className="flex items-center justify-between rounded-lg border border-destructive/20 p-4">
             <div>
               <p className="text-sm font-medium">Удалить организацию</p>
-              <p className="text-xs text-muted-foreground">Безвозвратно удалить организацию и все её данные</p>
+              <p className="text-xs text-muted-foreground">Безвозвратно удалить организацию и все ее данные</p>
             </div>
-            <Button variant="destructive" size="sm" disabled>Удалить</Button>
+            <Button variant="destructive" size="sm" onClick={deleteOrg} disabled={deleteLoading}>
+              {deleteLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Удалить'}
+            </Button>
           </div>
         </CardContent>
       </Card>

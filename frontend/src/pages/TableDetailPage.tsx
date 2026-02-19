@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+﻿import { useState, useEffect, useCallback, useRef, useMemo, Component, type ErrorInfo, type ReactNode } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -75,8 +75,52 @@ function AddColHeader({ onAdd }: { onAdd: (name: string, type: string) => Promis
 }
 
 const PAGE_SIZE = 50
+type PageErrorBoundaryState = {
+  hasError: boolean
+  message: string
+}
 
-export default function TableDetailPage() {
+class PageErrorBoundary extends Component<{ children: ReactNode }, PageErrorBoundaryState> {
+  state: PageErrorBoundaryState = { hasError: false, message: '' }
+
+  static getDerivedStateFromError(error: Error): PageErrorBoundaryState {
+    return { hasError: true, message: error?.message || 'Unknown render error' }
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    // Keep full stack/details in browser console for debugging.
+    console.error('TableDetailPage render error:', error, errorInfo)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+          Ошибка рендера таблицы: {this.state.message}
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
+
+function safeRecordData(data: unknown): Record<string, unknown> {
+  return data && typeof data === 'object' ? (data as Record<string, unknown>) : {}
+}
+
+function isColumnInfo(value: unknown): value is ColumnInfo {
+  if (!value || typeof value !== 'object') return false
+  const v = value as Partial<ColumnInfo>
+  return typeof v.id === 'string' && typeof v.name === 'string' && typeof v.field_type === 'string' && typeof v.position === 'number'
+}
+
+function isRecordInfo(value: unknown): value is RecordInfo {
+  if (!value || typeof value !== 'object') return false
+  const v = value as Partial<RecordInfo>
+  return typeof v.id === 'string' && typeof v.table_id === 'string'
+}
+
+function TableDetailPageContent() {
   const { tableId } = useParams<{ tableId: string }>()
   const navigate = useNavigate()
   const [table, setTable] = useState<TableInfo | null>(null)
@@ -112,12 +156,26 @@ export default function TableDetailPage() {
     setPage(0)
     setShowNewRow(false)
     try {
-      const [tR, rR] = await Promise.all([tablesApi.get(tableId), recordsApi.list(tableId, 2000)])
-      if (tR.data.ok && tR.data.data) setTable(tR.data.data)
-      else setLoadError(true)
-      if (rR.data.ok && rR.data.data) { setRecords(rR.data.data.records); setTotal(rR.data.data.total) }
-    } catch { setLoadError(true) }
-    setLoading(false)
+      const tR = await tablesApi.get(tableId)
+      if (!tR.data.ok || !tR.data.data) {
+        setLoadError(true)
+        return
+      }
+      setTable(tR.data.data)
+
+      const rR = await recordsApi.list(tableId, 500)
+      if (rR.data.ok && rR.data.data) {
+        const normalized = (rR.data.data.records ?? [])
+          .filter(isRecordInfo)
+          .map((r) => ({ ...r, data: safeRecordData(r.data) }))
+        setRecords(normalized)
+        setTotal(typeof rR.data.data.total === 'number' ? rR.data.data.total : normalized.length)
+      }
+    } catch {
+      setLoadError(true)
+    } finally {
+      setLoading(false)
+    }
   }, [tableId])
 
   useEffect(() => { load() }, [load])
@@ -153,7 +211,11 @@ export default function TableDetailPage() {
     if (!tableId) return
     const key = `${recordId}-${colId}`
     // Optimistic update — immediately reflect in UI
-    setRecords(prev => prev.map(r => r.id === recordId ? { ...r, data: { ...r.data, [colId]: value } } : r))
+    setRecords(prev =>
+      prev.map(r =>
+        r.id === recordId ? { ...r, data: { ...safeRecordData(r.data), [colId]: value } } : r,
+      ),
+    )
     setSavingCells(prev => new Set(prev).add(key))
     try {
       const resp = await recordsApi.update(tableId, recordId, { [colId]: value })
@@ -171,10 +233,9 @@ export default function TableDetailPage() {
     setTotal(prev => prev - 1)
   }
 
-  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
-  if (loadError || !table) return <div className="text-center py-20 text-muted-foreground"><p>Таблица не найдена</p><Button variant="ghost" className="mt-4" onClick={() => navigate('/tables')}><ArrowLeft className="h-4 w-4 mr-2" /> Назад</Button></div>
-
-  const columns = [...table.columns].sort((a: ColumnInfo, b: ColumnInfo) => a.position - b.position)
+  const columns = (Array.isArray(table?.columns) ? table.columns : [])
+    .filter(isColumnInfo)
+    .sort((a: ColumnInfo, b: ColumnInfo) => a.position - b.position)
 
   // --- Client-side search / filter / sort ---
   const processedRecords = useMemo(() => {
@@ -183,19 +244,19 @@ export default function TableDetailPage() {
     if (search.trim()) {
       const q = search.trim().toLowerCase()
       result = result.filter(r =>
-        columns.some(col => String(r.data[col.id] ?? '').toLowerCase().includes(q))
+        columns.some(col => String(safeRecordData(r.data)[col.id] ?? '').toLowerCase().includes(q))
       )
     }
     // Column filter
     if (filterCol && filterVal.trim()) {
       const fv = filterVal.trim().toLowerCase()
-      result = result.filter(r => String(r.data[filterCol] ?? '').toLowerCase().includes(fv))
+      result = result.filter(r => String(safeRecordData(r.data)[filterCol] ?? '').toLowerCase().includes(fv))
     }
     // Sort
     if (sortCol) {
       result.sort((a, b) => {
-        const av = String(a.data[sortCol] ?? '')
-        const bv = String(b.data[sortCol] ?? '')
+        const av = String(safeRecordData(a.data)[sortCol] ?? '')
+        const bv = String(safeRecordData(b.data)[sortCol] ?? '')
         const na = parseFloat(av), nb = parseFloat(bv)
         const cmp = !isNaN(na) && !isNaN(nb) ? na - nb : av.localeCompare(bv, 'ru')
         return sortDir === 'asc' ? cmp : -cmp
@@ -216,6 +277,9 @@ export default function TableDetailPage() {
     }
     setPage(0)
   }
+
+  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
+  if (loadError || !table) return <div className="text-center py-20 text-muted-foreground"><p>Таблица не найдена</p><Button variant="ghost" className="mt-4" onClick={() => navigate('/tables')}><ArrowLeft className="h-4 w-4 mr-2" /> Назад</Button></div>
 
   return (
     <div className="space-y-4">
@@ -359,7 +423,7 @@ export default function TableDetailPage() {
                 <td className="px-3 py-0.5 text-xs text-muted-foreground/50 select-none">{page * PAGE_SIZE + idx + 1}</td>
                 {columns.map((col: ColumnInfo) => (
                   <td key={col.id} className="px-2 py-0.5">
-                    <EditableCell value={String(record.data[col.id] ?? '')} fieldType={col.field_type} onSave={v => handleCellSave(record.id, col.id, v)} />
+                    <EditableCell value={String(safeRecordData(record.data)[col.id] ?? '')} fieldType={col.field_type} onSave={v => handleCellSave(record.id, col.id, v)} />
                   </td>
                 ))}
                 <td />
@@ -472,7 +536,7 @@ function ColumnCalculators({ columns, records }: { columns: ColumnInfo[]; record
   const [ops, setOps] = useState<Record<string, CalcOp>>({})
 
   const calc = (colId: string, op: CalcOp): string => {
-    const allVals = records.map(r => r.data[colId])
+    const allVals = records.map(r => safeRecordData(r.data)[colId])
     const filled = allVals.filter(v => v !== undefined && v !== null && v !== '')
     if (op === 'count')  return String(records.length)
     if (op === 'filled') return String(filled.length)
@@ -558,5 +622,15 @@ function ColumnCalculators({ columns, records }: { columns: ColumnInfo[]; record
         </table>
       </div>
     </div>
+  )
+}
+
+
+
+export default function TableDetailPage() {
+  return (
+    <PageErrorBoundary>
+      <TableDetailPageContent />
+    </PageErrorBoundary>
   )
 }

@@ -4,7 +4,7 @@ from src.config import settings
 
 celery = Celery(
     "crm_platform",
-    broker=settings.REDIS_URL,
+    broker=settings.RABBITMQ_URL,
     backend=settings.REDIS_URL,
 )
 

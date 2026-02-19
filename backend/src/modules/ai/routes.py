@@ -1,57 +1,38 @@
-"""AI Agent — Grok/OpenAI chat endpoint with token tracking."""
+"""AI API routes."""
+
 import uuid
-from datetime import datetime, timezone
 
+import httpx
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 
-from src.common.schemas import ApiResponse
 from src.common.enums import UserRole
+from src.common.schemas import ApiResponse
 from src.config import settings
-from src.modules.auth.dependencies import CurrentUser, require_roles
-from src.common.base_model import BaseDBModel
-from sqlalchemy import ForeignKey, String, Text, Integer
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlalchemy.orm import Mapped, mapped_column
 from src.infrastructure.uow import UnitOfWork
+from src.modules.ai.models import AIChatMessage, AIChatSession, AIUsageLog
+from src.modules.ai.schemas import (
+    ChatMessageOut,
+    ChatRequest,
+    ChatResponse,
+    ChatSessionOut,
+    ContextEstimateRequest,
+    CreateChatRequest,
+)
+from src.modules.ai.service import (
+    build_messages,
+    build_org_context,
+    call_openai_compatible_api,
+    extract_action_payload,
+    get_or_create_session,
+    handle_create_dashboard_action,
+)
+from src.modules.auth.dependencies import CurrentUser, require_roles
 from src.modules.knowledge.models import KBPage
-from src.modules.tables.models import Table, Column
-from src.modules.tables.records import Record
+from src.modules.tables.models import Table
 from sqlalchemy.orm import selectinload
 
 router = APIRouter(prefix="/ai", tags=["ai"])
-
-
-# --- Token usage model ---
-class AIUsageLog(BaseDBModel):
-    __tablename__ = "ai_usage_logs"
-
-    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    model: Mapped[str] = mapped_column(String(100), nullable=False)
-    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
-    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
-    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
-    message_preview: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-
-
-class ChatRequest(BaseModel):
-    message: str
-    history: list[ChatMessage] = []
-    system_prompt: str | None = None
-    include_context: bool = True  # auto-inject org knowledge & tables
-
-
-class ChatResponse(BaseModel):
-    reply: str
-    model: str
-    usage: dict | None = None
 
 
 @router.post("/chat", response_model=ApiResponse[ChatResponse])
@@ -59,155 +40,333 @@ async def ai_chat(
     body: ChatRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
 ):
-    """Send message to xAI Grok (or OpenAI-compatible API)."""
-    api_key = settings.OPENAI_API_KEY
-    if not api_key:
-        return ApiResponse(ok=False, data=None, error={"code": "AI_NOT_CONFIGURED", "message": "AI API ключ не настроен. Добавьте OPENAI_API_KEY в .env"})
-
-    import httpx
+    bearer_token = settings.OPENAI_BEARER_TOKEN or settings.OPENAI_API_KEY
+    if not bearer_token:
+        return ApiResponse(
+            ok=False,
+            data=None,
+            error={"code": "AI_NOT_CONFIGURED", "message": "AI API token is not configured. Set OPENAI_BEARER_TOKEN in .env"},
+        )
 
     system_prompt = body.system_prompt or settings.AI_SYSTEM_PROMPT
+    context_options = body.context_options or {}
 
-    # --- Build organization context ---
+    async with UnitOfWork() as uow:
+        session = await get_or_create_session(uow, current_user.org_id, current_user.user_id, body.chat_id, body.message)
+        db_messages = (
+            await uow.session.execute(
+                select(AIChatMessage)
+                .where(
+                    AIChatMessage.session_id == session.id,
+                    AIChatMessage.org_id == current_user.org_id,
+                    AIChatMessage.user_id == current_user.user_id,
+                )
+                .order_by(AIChatMessage.created_at.asc())
+                .limit(60)
+            )
+        ).scalars().all()
+
     org_context = ""
+    context_meta: dict | None = None
     if body.include_context:
-        org_context = await _build_org_context(current_user.org_id)
+        org_context, context_meta = await build_org_context(current_user.org_id, context_options)
 
-    messages = [{"role": "system", "content": system_prompt}]
-    if org_context:
-        messages.append({"role": "system", "content": f"Контекст организации пользователя (используй для ответов):\n\n{org_context}"})
-    for m in body.history[-10:]:
-        messages.append({"role": m.role, "content": m.content})
-    messages.append({"role": "user", "content": body.message})
-
-    base_url = settings.AI_BASE_URL
-    model = settings.OPENAI_MODEL
+    history_rows = [{"role": m.role, "content": m.content} for m in body.history]
+    messages = build_messages(system_prompt, org_context, db_messages, history_rows, body.message)
 
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                f"{base_url}/chat/completions",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"model": model, "messages": messages, "max_tokens": 2000, "temperature": 0.7},
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            reply = data["choices"][0]["message"]["content"]
-            usage = data.get("usage", {})
+        data = await call_openai_compatible_api(settings.AI_BASE_URL, bearer_token, settings.OPENAI_MODEL, messages)
+        reply_raw = data["choices"][0]["message"]["content"]
+        action_payload, reply = extract_action_payload(reply_raw)
+        usage = data.get("usage", {})
 
-            # Log token usage
-            async with UnitOfWork() as uow:
-                log = AIUsageLog(
+        async with UnitOfWork() as uow:
+            session = await get_or_create_session(uow, current_user.org_id, current_user.user_id, body.chat_id, body.message)
+            user_msg = AIChatMessage(
+                session_id=session.id,
+                org_id=current_user.org_id,
+                user_id=current_user.user_id,
+                role="user",
+                content=body.message,
+                token_count=None,
+                meta={"include_context": body.include_context, "context_options": context_options},
+            )
+            assistant_msg = AIChatMessage(
+                session_id=session.id,
+                org_id=current_user.org_id,
+                user_id=current_user.user_id,
+                role="assistant",
+                content=reply,
+                token_count=int(usage.get("total_tokens", 0) or 0),
+                meta={"action_requested": bool(action_payload)},
+            )
+            uow.session.add(user_msg)
+            uow.session.add(assistant_msg)
+            uow.session.add(
+                AIUsageLog(
                     org_id=current_user.org_id,
                     user_id=current_user.user_id,
-                    model=model,
-                    prompt_tokens=usage.get("prompt_tokens", 0),
-                    completion_tokens=usage.get("completion_tokens", 0),
-                    total_tokens=usage.get("total_tokens", 0),
+                    model=settings.OPENAI_MODEL,
+                    prompt_tokens=int(usage.get("prompt_tokens", 0) or 0),
+                    completion_tokens=int(usage.get("completion_tokens", 0) or 0),
+                    total_tokens=int(usage.get("total_tokens", 0) or 0),
                     message_preview=body.message[:200],
                 )
-                uow.session.add(log)
-                await uow.commit()
+            )
 
-            return ApiResponse(data=ChatResponse(reply=reply, model=model, usage=usage))
+            action_result = None
+            if action_payload and action_payload.get("action") == "create_dashboard":
+                action_result = await handle_create_dashboard_action(uow, current_user.org_id, current_user.user_id, action_payload)
+                assistant_msg.meta = {"action_requested": True, "action_result": action_result}
+
+            await uow.commit()
+
+        return ApiResponse(
+            data=ChatResponse(
+                reply=reply,
+                model=settings.OPENAI_MODEL,
+                usage=usage,
+                chat_id=str(session.id),
+                context_estimate=context_meta,
+                action_result=action_result,
+            )
+        )
     except httpx.HTTPStatusError as e:
         body_text = ""
         try:
             body_text = e.response.text[:300]
         except Exception:
             pass
-        return ApiResponse(ok=False, data=None, error={"code": "AI_ERROR", "message": f"AI API ошибка {e.response.status_code}: {body_text}"})
+        return ApiResponse(ok=False, data=None, error={"code": "AI_ERROR", "message": f"AI API error {e.response.status_code}: {body_text}"})
     except Exception as e:
-        return ApiResponse(ok=False, data=None, error={"code": "AI_ERROR", "message": f"Ошибка AI: {str(e)}"})
-
-
-async def _build_org_context(org_id: uuid.UUID) -> str:
-    """Fetch KB pages + table schemas + sample records for the org."""
-    parts: list[str] = []
-    try:
-        async with UnitOfWork() as uow:
-            # Knowledge base
-            kb_stmt = select(KBPage).where(KBPage.org_id == org_id, KBPage.is_published == True).order_by(KBPage.position).limit(30)
-            kb_rows = (await uow.session.execute(kb_stmt)).scalars().all()
-            if kb_rows:
-                parts.append("=== БАЗА ЗНАНИЙ ===")
-                for p in kb_rows:
-                    content_preview = (p.content or "")[:500]
-                    parts.append(f"--- {p.title} ---\n{content_preview}")
-
-            # Tables structure + sample data
-            tbl_stmt = (
-                select(Table)
-                .where(Table.org_id == org_id, Table.is_archived == False)
-                .options(selectinload(Table.columns))
-                .limit(20)
-            )
-            tbl_rows = (await uow.session.execute(tbl_stmt)).scalars().all()
-            if tbl_rows:
-                parts.append("\n=== ТАБЛИЦЫ ===")
-                for t in tbl_rows:
-                    col_names = [c.name for c in sorted(t.columns, key=lambda c: c.position)]
-                    parts.append(f"Таблица: {t.name} | Колонки: {', '.join(col_names)}")
-                    # Sample records (up to 5)
-                    rec_stmt = select(Record).where(Record.table_id == t.id).limit(5)
-                    recs = (await uow.session.execute(rec_stmt)).scalars().all()
-                    if recs:
-                        col_map = {str(c.id): c.name for c in t.columns}
-                        for rec in recs:
-                            row_parts = []
-                            for cid, val in (rec.data or {}).items():
-                                cname = col_map.get(cid, cid[:8])
-                                row_parts.append(f"{cname}={val}")
-                            parts.append(f"  Запись: {', '.join(row_parts[:10])}")
-    except Exception:
-        pass  # Don't break chat if context fails
-    return "\n".join(parts)[:4000]  # Cap at 4000 chars to save tokens
+        return ApiResponse(ok=False, data=None, error={"code": "AI_ERROR", "message": f"AI error: {str(e)}"})
 
 
 @router.get("/status", response_model=ApiResponse[dict])
 async def ai_status(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
 ):
-    """Check if AI is configured + token stats for org."""
-    configured = bool(settings.OPENAI_API_KEY)
+    configured = bool(settings.OPENAI_BEARER_TOKEN or settings.OPENAI_API_KEY)
     async with UnitOfWork() as uow:
-        stmt = select(
-            func.count(AIUsageLog.id),
-            func.coalesce(func.sum(AIUsageLog.total_tokens), 0),
-            func.coalesce(func.sum(AIUsageLog.prompt_tokens), 0),
-            func.coalesce(func.sum(AIUsageLog.completion_tokens), 0),
-        ).where(AIUsageLog.org_id == current_user.org_id)
-        row = (await uow.session.execute(stmt)).one()
-    return ApiResponse(data={
-        "configured": configured,
-        "model": settings.OPENAI_MODEL,
-        "base_url": settings.AI_BASE_URL,
-        "system_prompt": settings.AI_SYSTEM_PROMPT,
-        "stats": {
-            "total_requests": row[0],
-            "total_tokens": row[1],
-            "prompt_tokens": row[2],
-            "completion_tokens": row[3],
-        },
-    })
+        row = (
+            await uow.session.execute(
+                select(
+                    func.count(AIUsageLog.id),
+                    func.coalesce(func.sum(AIUsageLog.total_tokens), 0),
+                    func.coalesce(func.sum(AIUsageLog.prompt_tokens), 0),
+                    func.coalesce(func.sum(AIUsageLog.completion_tokens), 0),
+                ).where(AIUsageLog.org_id == current_user.org_id)
+            )
+        ).one()
+    return ApiResponse(
+        data={
+            "configured": configured,
+            "stats": {
+                "total_requests": row[0],
+                "total_tokens": row[1],
+                "prompt_tokens": row[2],
+                "completion_tokens": row[3],
+            },
+        }
+    )
 
 
 @router.get("/usage", response_model=ApiResponse[list[dict]])
 async def ai_usage_detail(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
 ):
-    """Detailed per-user token usage for org."""
     async with UnitOfWork() as uow:
-        stmt = (
-            select(
-                AIUsageLog.user_id,
-                func.count(AIUsageLog.id).label("requests"),
-                func.sum(AIUsageLog.total_tokens).label("tokens"),
+        rows = (
+            await uow.session.execute(
+                select(
+                    AIUsageLog.user_id,
+                    func.count(AIUsageLog.id).label("requests"),
+                    func.sum(AIUsageLog.total_tokens).label("tokens"),
+                )
+                .where(AIUsageLog.org_id == current_user.org_id)
+                .group_by(AIUsageLog.user_id)
+                .order_by(func.sum(AIUsageLog.total_tokens).desc())
             )
-            .where(AIUsageLog.org_id == current_user.org_id)
-            .group_by(AIUsageLog.user_id)
-            .order_by(func.sum(AIUsageLog.total_tokens).desc())
+        ).all()
+    return ApiResponse(data=[{"user_id": str(r.user_id), "requests": r.requests, "tokens": int(r.tokens or 0)} for r in rows])
+
+
+@router.get("/chats", response_model=ApiResponse[list[ChatSessionOut]])
+async def ai_chats(
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+):
+    async with UnitOfWork() as uow:
+        sessions = (
+            await uow.session.execute(
+                select(AIChatSession)
+                .where(AIChatSession.org_id == current_user.org_id, AIChatSession.user_id == current_user.user_id)
+                .order_by(AIChatSession.updated_at.desc())
+            )
+        ).scalars().all()
+        out: list[ChatSessionOut] = []
+        for session in sessions:
+            last = (
+                await uow.session.execute(
+                    select(AIChatMessage).where(AIChatMessage.session_id == session.id).order_by(AIChatMessage.created_at.desc()).limit(1)
+                )
+            ).scalar_one_or_none()
+            out.append(
+                ChatSessionOut(
+                    id=str(session.id),
+                    title=session.title,
+                    created_at=session.created_at,
+                    updated_at=session.updated_at,
+                    last_message_preview=(last.content[:80] if last else None),
+                )
+            )
+    return ApiResponse(data=out)
+
+
+@router.post("/chats", response_model=ApiResponse[ChatSessionOut])
+async def ai_create_chat(
+    body: CreateChatRequest,
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+):
+    title = (body.title or "\u041d\u043e\u0432\u044b\u0439 \u0447\u0430\u0442").strip()[:255] or "\u041d\u043e\u0432\u044b\u0439 \u0447\u0430\u0442"
+    async with UnitOfWork() as uow:
+        session = AIChatSession(org_id=current_user.org_id, user_id=current_user.user_id, title=title)
+        uow.session.add(session)
+        await uow.session.flush()
+        await uow.commit()
+        out = ChatSessionOut(
+            id=str(session.id),
+            title=session.title,
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+            last_message_preview=None,
         )
-        rows = (await uow.session.execute(stmt)).all()
-        result = [{"user_id": str(r.user_id), "requests": r.requests, "tokens": int(r.tokens or 0)} for r in rows]
-    return ApiResponse(data=result)
+    return ApiResponse(data=out)
+
+
+@router.delete("/chats/{chat_id}", response_model=ApiResponse[None])
+async def ai_delete_chat(
+    chat_id: str,
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+):
+    try:
+        chat_uuid = uuid.UUID(chat_id)
+    except ValueError:
+        return ApiResponse(ok=False, data=None, error={"code": "INVALID_ID", "message": "Invalid chat id"})
+
+    async with UnitOfWork() as uow:
+        session = (
+            await uow.session.execute(
+                select(AIChatSession).where(
+                    AIChatSession.id == chat_uuid,
+                    AIChatSession.org_id == current_user.org_id,
+                    AIChatSession.user_id == current_user.user_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not session:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Chat not found"})
+        await uow.session.delete(session)
+        await uow.commit()
+    return ApiResponse(data=None)
+
+
+@router.get("/chats/{chat_id}/messages", response_model=ApiResponse[list[ChatMessageOut]])
+async def ai_chat_messages(
+    chat_id: str,
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+):
+    try:
+        chat_uuid = uuid.UUID(chat_id)
+    except ValueError:
+        return ApiResponse(ok=False, data=None, error={"code": "INVALID_ID", "message": "Invalid chat id"})
+
+    async with UnitOfWork() as uow:
+        session = (
+            await uow.session.execute(
+                select(AIChatSession).where(
+                    AIChatSession.id == chat_uuid,
+                    AIChatSession.org_id == current_user.org_id,
+                    AIChatSession.user_id == current_user.user_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not session:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Chat not found"})
+        rows = (
+            await uow.session.execute(
+                select(AIChatMessage).where(AIChatMessage.session_id == chat_uuid).order_by(AIChatMessage.created_at.asc())
+            )
+        ).scalars().all()
+    return ApiResponse(
+        data=[
+            ChatMessageOut(
+                id=str(m.id),
+                role=m.role,
+                content=m.content,
+                token_count=m.token_count,
+                created_at=m.created_at,
+                meta=m.meta,
+            )
+            for m in rows
+        ]
+    )
+
+
+@router.post("/context-estimate", response_model=ApiResponse[dict])
+async def ai_context_estimate(
+    body: ContextEstimateRequest,
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+):
+    if not body.include_context:
+        return ApiResponse(
+            data={
+                "enabled": False,
+                "sources": {
+                    "kb": {"enabled": False, "chars": 0, "estimated_tokens": 0},
+                    "table_schema": {"enabled": False, "chars": 0, "estimated_tokens": 0},
+                    "table_records": {"enabled": False, "chars": 0, "estimated_tokens": 0},
+                },
+                "selected": {"kb_pages": [], "tables": []},
+                "model_overhead_tokens": 0,
+                "estimated_total_tokens": 0,
+            }
+        )
+    _, meta = await build_org_context(current_user.org_id, body.context_options)
+    return ApiResponse(data=meta)
+
+
+@router.get("/context-sources", response_model=ApiResponse[dict])
+async def ai_context_sources(
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+):
+    async with UnitOfWork() as uow:
+        kb_rows = (
+            await uow.session.execute(
+                select(KBPage)
+                .where(KBPage.org_id == current_user.org_id, KBPage.is_published.is_(True))
+                .order_by(KBPage.position.asc())
+                .limit(300)
+            )
+        ).scalars().all()
+        tables = (
+            await uow.session.execute(
+                select(Table)
+                .where(Table.org_id == current_user.org_id, Table.is_archived.is_(False))
+                .options(selectinload(Table.columns))
+                .order_by(Table.created_at.desc())
+                .limit(200)
+            )
+        ).scalars().all()
+    return ApiResponse(
+        data={
+            "kb_pages": [{"id": str(p.id), "title": p.title} for p in kb_rows],
+            "tables": [
+                {
+                    "id": str(t.id),
+                    "name": t.name,
+                    "columns": [{"id": str(c.id), "name": c.name} for c in sorted(t.columns, key=lambda x: x.position)],
+                }
+                for t in tables
+            ],
+        }
+    )

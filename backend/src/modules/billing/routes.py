@@ -1,21 +1,21 @@
-"""Billing: plans listing, current usage, YooKassa payment integration."""
+﻿"""Billing: plans listing, usage, YooKassa payment integration."""
 import uuid
-import httpx
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, Request, HTTPException
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 
-from src.common.schemas import ApiResponse
 from src.common.enums import UserRole
-from src.modules.auth.dependencies import CurrentUser, require_roles, require_org
+from src.common.schemas import ApiResponse
+from src.config import settings
+from src.infrastructure.uow import UnitOfWork
+from src.modules.auth.dependencies import CurrentUser, require_org, require_roles
 from src.modules.billing.models import Plan
+from src.modules.files.models import File
 from src.modules.tables.models import Table
 from src.modules.tables.records import Record
-from src.modules.files.models import File
-from src.infrastructure.uow import UnitOfWork
-from src.config import settings
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 
@@ -48,7 +48,7 @@ async def list_plans(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
 ):
     async with UnitOfWork() as uow:
-        stmt = select(Plan).where(Plan.is_active == True).order_by(Plan.price_monthly)
+        stmt = select(Plan).where(Plan.is_active.is_(True)).order_by(Plan.price_monthly)
         result = await uow.session.execute(stmt)
         plans = list(result.scalars().all())
         items = [PlanOut.model_validate(p) for p in plans]
@@ -59,12 +59,23 @@ async def list_plans(
 async def current_usage(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
 ):
+    from src.modules.org.models import Membership
+
     async with UnitOfWork() as uow:
-        from src.modules.org.models import Membership
-        mem_cnt = await uow.session.execute(select(func.count()).select_from(Membership).where(Membership.org_id == current_user.org_id))
-        tbl_cnt = await uow.session.execute(select(func.count()).select_from(Table).where(Table.org_id == current_user.org_id))
-        rec_cnt = await uow.session.execute(select(func.count()).select_from(Record).where(Record.org_id == current_user.org_id))
-        file_stmt = select(func.count(), func.coalesce(func.sum(File.size), 0)).select_from(File).where(File.org_id == current_user.org_id)
+        mem_cnt = await uow.session.execute(
+            select(func.count()).select_from(Membership).where(Membership.org_id == current_user.org_id)
+        )
+        tbl_cnt = await uow.session.execute(
+            select(func.count()).select_from(Table).where(Table.org_id == current_user.org_id)
+        )
+        rec_cnt = await uow.session.execute(
+            select(func.count()).select_from(Record).where(Record.org_id == current_user.org_id)
+        )
+        file_stmt = (
+            select(func.count(), func.coalesce(func.sum(File.size), 0))
+            .select_from(File)
+            .where(File.org_id == current_user.org_id)
+        )
         file_result = await uow.session.execute(file_stmt)
         file_row = file_result.one()
 
@@ -89,11 +100,21 @@ async def create_yookassa_payment(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER)),
 ):
     """Create YooKassa payment for plan upgrade."""
+    if body.period not in {"monthly", "yearly"}:
+        return ApiResponse(ok=False, data=None, error={"code": "INVALID_PERIOD", "message": "period должен быть monthly или yearly"})
+
     if not settings.YOOKASSA_SHOP_ID or not settings.YOOKASSA_SECRET_KEY:
-        return ApiResponse(ok=False, data=None, error={"code": "BILLING_NOT_CONFIGURED", "message": "Платёжный шлюз не настроен. Добавьте YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY в .env"})
+        return ApiResponse(
+            ok=False,
+            data=None,
+            error={
+                "code": "BILLING_NOT_CONFIGURED",
+                "message": "Платежный шлюз не настроен. Добавьте YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY в .env",
+            },
+        )
 
     async with UnitOfWork() as uow:
-        stmt = select(Plan).where(Plan.name == body.plan_name, Plan.is_active == True)
+        stmt = select(Plan).where(Plan.name == body.plan_name, Plan.is_active.is_(True))
         result = await uow.session.execute(stmt)
         plan = result.scalar_one_or_none()
 
@@ -107,10 +128,7 @@ async def create_yookassa_payment(
     idempotency_key = str(uuid.uuid4())
     payload = {
         "amount": {"value": f"{amount / 100:.2f}", "currency": "RUB"},
-        "confirmation": {
-            "type": "redirect",
-            "return_url": settings.YOOKASSA_RETURN_URL,
-        },
+        "confirmation": {"type": "redirect", "return_url": settings.YOOKASSA_RETURN_URL},
         "capture": True,
         "description": f"Тариф {plan.display_name} ({body.period})",
         "metadata": {
@@ -132,15 +150,17 @@ async def create_yookassa_payment(
             resp.raise_for_status()
             data = resp.json()
             confirmation_url = data.get("confirmation", {}).get("confirmation_url", "")
-            return ApiResponse(data={
-                "payment_id": data.get("id"),
-                "status": data.get("status"),
-                "confirmation_url": confirmation_url,
-                "amount": amount,
-                "plan": plan.display_name,
-            })
+            return ApiResponse(
+                data={
+                    "payment_id": data.get("id"),
+                    "status": data.get("status"),
+                    "confirmation_url": confirmation_url,
+                    "amount": amount,
+                    "plan": plan.display_name,
+                }
+            )
     except httpx.HTTPStatusError as e:
-        return ApiResponse(ok=False, data=None, error={"code": "PAYMENT_ERROR", "message": f"Ошибка платёжного шлюза: {e.response.status_code}"})
+        return ApiResponse(ok=False, data=None, error={"code": "PAYMENT_ERROR", "message": f"Ошибка платежного шлюза: {e.response.status_code}"})
     except Exception as e:
         return ApiResponse(ok=False, data=None, error={"code": "PAYMENT_ERROR", "message": str(e)})
 
@@ -151,24 +171,32 @@ async def get_subscription(
 ):
     """Get current org subscription."""
     from src.modules.org.models import Subscription
+
     async with UnitOfWork() as uow:
         stmt = select(Subscription).where(Subscription.org_id == current_user.org_id)
         sub = (await uow.session.execute(stmt)).scalar_one_or_none()
         if not sub:
             return ApiResponse(data={"plan": "free", "status": "active", "current_period_start": None, "current_period_end": None})
-        return ApiResponse(data={
-            "plan": sub.plan.value if sub.plan else "free",
-            "status": sub.status.value if sub.status else "active",
-            "current_period_start": sub.current_period_start.isoformat() if sub.current_period_start else None,
-            "current_period_end": sub.current_period_end.isoformat() if sub.current_period_end else None,
-            "external_id": sub.external_id,
-        })
+        return ApiResponse(
+            data={
+                "plan": sub.plan.value if sub.plan else "free",
+                "status": sub.status.value if sub.status else "active",
+                "current_period_start": sub.current_period_start.isoformat() if sub.current_period_start else None,
+                "current_period_end": sub.current_period_end.isoformat() if sub.current_period_end else None,
+                "external_id": sub.external_id,
+            }
+        )
 
 
 @router.post("/webhook/yookassa", include_in_schema=False)
 async def yookassa_webhook(request: Request):
     """Handle YooKassa payment notifications."""
     import logging
+    from datetime import timedelta, timezone as tz
+
+    from src.common.enums import PlanTier, SubscriptionStatus
+    from src.modules.org.models import Organization, Subscription
+
     logger = logging.getLogger("billing")
     try:
         body = await request.json()
@@ -183,17 +211,14 @@ async def yookassa_webhook(request: Request):
             payment_id = obj.get("id")
 
             if org_id and plan_name:
-                from src.modules.org.models import Subscription
-                from src.common.enums import PlanTier, SubscriptionStatus
-                from datetime import timezone, timedelta
-
-                plan_map = {"free": PlanTier.FREE, "team": PlanTier.TEAM}
+                plan_map = {"free": PlanTier.FREE, "team": PlanTier.TEAM, "business": PlanTier.BUSINESS}
                 plan_tier = plan_map.get(plan_name, PlanTier.FREE)
-                now = datetime.now(timezone.utc)
+                now = datetime.now(tz.utc)
                 period_end = now + (timedelta(days=365) if period == "yearly" else timedelta(days=30))
 
                 async with UnitOfWork() as uow:
-                    stmt = select(Subscription).where(Subscription.org_id == uuid.UUID(org_id))
+                    org_uuid = uuid.UUID(org_id)
+                    stmt = select(Subscription).where(Subscription.org_id == org_uuid)
                     sub = (await uow.session.execute(stmt)).scalar_one_or_none()
                     if sub:
                         sub.plan = plan_tier
@@ -203,7 +228,7 @@ async def yookassa_webhook(request: Request):
                         sub.external_id = payment_id
                     else:
                         sub = Subscription(
-                            org_id=uuid.UUID(org_id),
+                            org_id=org_uuid,
                             plan=plan_tier,
                             status=SubscriptionStatus.ACTIVE,
                             current_period_start=now,
@@ -211,20 +236,26 @@ async def yookassa_webhook(request: Request):
                             external_id=payment_id,
                         )
                         uow.session.add(sub)
+
+                    org_stmt = select(Organization).where(Organization.id == org_uuid)
+                    org = (await uow.session.execute(org_stmt)).scalar_one_or_none()
+                    if org:
+                        org.plan = plan_tier
+
                     await uow.commit()
-                logger.info(f"Payment succeeded: org={org_id} plan={plan_name} period={period}")
+                logger.info("Payment succeeded: org=%s plan=%s period=%s", org_id, plan_name, period)
 
         return {"status": "ok"}
     except Exception as e:
-        logger.error(f"Webhook error: {e}")
+        logger.error("Webhook error: %s", e)
         raise HTTPException(status_code=400, detail="Invalid webhook payload")
 
 
 @router.post("/cancel-subscription", response_model=ApiResponse)
-async def cancel_subscription(current_user: CurrentUser = Depends(require_org)):
-    """Downgrade org to free plan at end of period (immediate for now)."""
-    from src.modules.org.models import Organization, Subscription
+async def cancel_subscription(current_user: CurrentUser = Depends(require_roles(UserRole.OWNER))):
+    """Downgrade org to free plan immediately."""
     from src.common.enums import PlanTier, SubscriptionStatus
+    from src.modules.org.models import Organization, Subscription
 
     async with UnitOfWork() as uow:
         stmt = select(Subscription).where(Subscription.org_id == current_user.org_id)
@@ -243,7 +274,6 @@ async def cancel_subscription(current_user: CurrentUser = Depends(require_org)):
             )
             uow.session.add(sub)
 
-        # Also update org plan
         org_stmt = select(Organization).where(Organization.id == current_user.org_id)
         org = (await uow.session.execute(org_stmt)).scalar_one_or_none()
         if org:

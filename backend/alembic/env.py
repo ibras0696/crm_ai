@@ -21,8 +21,9 @@ from src.modules.tables.views import TableView  # noqa: F401
 from src.modules.knowledge.models import KBPage  # noqa: F401
 from src.modules.billing.models import Plan  # noqa: F401
 from src.modules.schedule.models import Event  # noqa: F401
-from src.modules.ai.routes import AIUsageLog  # noqa: F401
+from src.modules.ai.models import AIUsageLog, AIChatSession, AIChatMessage  # noqa: F401
 from src.modules.access.models import AccessRule  # noqa: F401
+from src.modules.reports.models import ReportDashboard, ReportWidget  # noqa: F401
 
 config = context.config
 

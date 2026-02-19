@@ -93,7 +93,7 @@ async def superadmin_dashboard(payload: dict = Depends(SuperadminDep)):
     from src.modules.tables.models import Table
     from src.modules.tables.records import Record
     from src.modules.files.models import File
-    from src.modules.ai.routes import AIUsageLog
+    from src.modules.ai.models import AIUsageLog
 
     async with UnitOfWork() as uow:
         orgs_count = (await uow.session.execute(select(func.count()).select_from(Organization))).scalar() or 0
@@ -251,7 +251,7 @@ async def superadmin_tables(
 @router.get("/ai-usage", response_model=ApiResponse[list])
 async def superadmin_ai_usage(payload: dict = Depends(SuperadminDep)):
     """AI usage stats per org."""
-    from src.modules.ai.routes import AIUsageLog
+    from src.modules.ai.models import AIUsageLog
     from src.modules.org.models import Organization
 
     async with UnitOfWork() as uow:
@@ -312,3 +312,18 @@ async def superadmin_set_plan(
         await uow.commit()
 
     return ApiResponse(data={"org_id": org_id, "plan": plan_name})
+
+@router.get("/ai-config", response_model=ApiResponse[dict])
+async def superadmin_ai_config(payload: dict = Depends(SuperadminDep)):
+    """Global AI provider/model/api configuration (superadmin only)."""
+    base_url = (settings.AI_BASE_URL or "").rstrip("/")
+    provider = "timeweb-agent-openai-compatible" if "agent.timeweb.cloud" in base_url else "openai-compatible"
+    key = settings.OPENAI_BEARER_TOKEN or settings.OPENAI_API_KEY or ""
+    return ApiResponse(data={
+        "provider": provider,
+        "base_url": base_url,
+        "official_provider_docs_url": "https://agent.timeweb.cloud/docs",
+        "model": settings.OPENAI_MODEL,
+        "key_configured": bool(key),
+        "key_prefix": f"{key[:4]}***" if key else "",
+    })

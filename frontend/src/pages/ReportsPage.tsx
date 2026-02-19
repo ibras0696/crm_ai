@@ -1,367 +1,547 @@
-﻿import { useState, useEffect } from 'react'
-import { reportsApi, type TableAggResponse, type TimeSeriesPoint } from '@/lib/api'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, Legend, AreaChart, Area } from 'recharts'
-import { BarChart3, Table2, FileText, Columns3, TrendingUp, RefreshCw, Search, ChevronDown, ChevronUp, Hash, Calendar } from 'lucide-react'
+﻿import { useEffect, useMemo, useState } from 'react'
+import {
+  reportsApi,
+  tablesApi,
+  type DashboardDataItem,
+  type DashboardDataResponse,
+  type DashboardFilter,
+  type DashboardInfo,
+  type DashboardWidget,
+  type DashboardWidgetConfig,
+  type TableInfo,
+} from '@/lib/api'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, CartesianGrid } from 'recharts'
+import { BarChart3, Plus, Trash2, RefreshCw, Save, LayoutDashboard } from 'lucide-react'
 
-const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4', '#f97316', '#14b8a6']
+const WIDGET_TYPES = [
+  { value: 'metric', label: 'Метрика' },
+  { value: 'bar', label: 'Гистограмма' },
+  { value: 'line', label: 'Линия' },
+  { value: 'pie', label: 'Круговая' },
+  { value: 'table', label: 'Таблица' },
+] as const
 
-interface Summary {
-  tables_count: number
-  records_count: number
-  columns_count: number
-  tables: { id: string; name: string; records_count: number; columns_count: number }[]
+const AGGREGATIONS = [
+  { value: 'count', label: 'Количество' },
+  { value: 'sum', label: 'Сумма' },
+  { value: 'avg', label: 'Среднее' },
+  { value: 'min', label: 'Минимум' },
+  { value: 'max', label: 'Максимум' },
+] as const
+
+const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6', '#f97316']
+
+const DEFAULT_CONFIG: DashboardWidgetConfig = {
+  aggregation: 'count',
+  value_column_id: null,
+  group_by_column_id: null,
+  filters: [],
+  limit: 10,
+  selected_column_ids: [],
 }
 
-export default function ReportsPage() {
-  const [data, setData] = useState<Summary | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [tab, setTab] = useState<'overview' | 'detail' | 'timeline'>('overview')
-  const [selectedTable, setSelectedTable] = useState<string>('')
-  const [tableAgg, setTableAgg] = useState<TableAggResponse | null>(null)
-  const [aggLoading, setAggLoading] = useState(false)
-  const [timeline, setTimeline] = useState<TimeSeriesPoint[]>([])
-  const [timelineDays, setTimelineDays] = useState(30)
-  const [timelineLoading, setTimelineLoading] = useState(false)
-  const [expandedCol, setExpandedCol] = useState<string | null>(null)
+function normalizeConfig(config?: Partial<DashboardWidgetConfig> | null): DashboardWidgetConfig {
+  return {
+    aggregation: config?.aggregation ?? 'count',
+    value_column_id: config?.value_column_id ?? null,
+    group_by_column_id: config?.group_by_column_id ?? null,
+    filters: Array.isArray(config?.filters) ? config!.filters : [],
+    limit: typeof config?.limit === 'number' ? config.limit : 10,
+    selected_column_ids: Array.isArray(config?.selected_column_ids) ? config!.selected_column_ids : [],
+  }
+}
 
-  const load = async () => {
-    try {
-      const r = await reportsApi.summary()
-      if (r.data.ok && r.data.data) setData(r.data.data as Summary)
-    } catch { /* ignore */ }
-    setLoading(false)
-    setRefreshing(false)
+function ChartCard({ item }: { item: DashboardDataItem }) {
+  const d = item.data
+  const type = String(d.type ?? item.widget.widget_type)
+
+  if (type === 'metric') {
+    return (
+      <div className="rounded-xl border border-border bg-card p-5">
+        <p className="text-sm text-muted-foreground">{item.widget.title}</p>
+        <p className="text-3xl font-bold mt-1">{String((d.value as number | string | null) ?? '—')}</p>
+      </div>
+    )
   }
 
-  useEffect(() => { load() }, [])
-
-  const refresh = () => { setRefreshing(true); load() }
-
-  const loadTableAgg = async (tableId: string) => {
-    if (!tableId) { setTableAgg(null); return }
-    setAggLoading(true)
-    try {
-      const r = await reportsApi.tableAnalytics(tableId)
-      if (r.data.ok && r.data.data) setTableAgg(r.data.data as TableAggResponse)
-    } catch { /* ignore */ }
-    setAggLoading(false)
+  if (type === 'table') {
+    const header = Array.isArray(d.header) ? (d.header as string[]) : []
+    const rows = Array.isArray(d.rows) ? (d.rows as string[][]) : []
+    return (
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="px-4 py-3 border-b border-border font-medium text-sm">{item.widget.title}</div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-secondary/30">
+              <tr>
+                {header.map((h) => <th key={h} className="px-3 py-2 text-left text-muted-foreground">{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, i) => (
+                <tr key={i} className="border-t border-border/40">
+                  {row.map((cell, idx) => <td key={idx} className="px-3 py-2">{cell || '—'}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )
   }
 
-  const loadTimeline = async (days: number) => {
-    setTimelineLoading(true)
-    try {
-      const r = await reportsApi.timeline(days)
-      if (r.data.ok && r.data.data) setTimeline(r.data.data as TimeSeriesPoint[])
-    } catch { /* ignore */ }
-    setTimelineLoading(false)
-  }
-
-  useEffect(() => { if (tab === 'timeline') loadTimeline(timelineDays) }, [tab, timelineDays])
-
-  useEffect(() => { if (selectedTable) loadTableAgg(selectedTable) }, [selectedTable])
-
-  if (loading) return (
-    <div className="flex items-center justify-center py-20">
-      <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-    </div>
-  )
-
-  const tableBarData = (data?.tables || []).map(t => ({ name: t.name.length > 12 ? t.name.slice(0, 12) + '…' : t.name, Записи: t.records_count, Поля: t.columns_count }))
-  const pieData = (data?.tables || []).filter(t => t.records_count > 0).map(t => ({ name: t.name, value: t.records_count }))
+  const points = Array.isArray(d.points) ? (d.points as Array<{ x: string; y: number }>) : []
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Отчёты и аналитика</h1>
-          <p className="text-muted-foreground text-sm mt-1">Сводная статистика по организации</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-0.5 rounded-lg border border-border p-0.5 bg-secondary/30">
-            {([['overview', 'Обзор'], ['detail', 'Детализация'], ['timeline', 'Динамика']] as const).map(([key, label]) => (
-              <button key={key} onClick={() => setTab(key)} className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === key ? 'bg-background shadow text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
-                {label}
-              </button>
-            ))}
-          </div>
-          <button onClick={refresh} disabled={refreshing} className="flex items-center gap-2 h-9 px-4 rounded-md border border-border text-sm hover:bg-secondary transition-colors disabled:opacity-50">
-            <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} /> Обновить
+    <div className="rounded-xl border border-border bg-card p-4">
+      <p className="text-sm font-medium mb-3">{item.widget.title}</p>
+      <ResponsiveContainer width="100%" height={260}>
+        {type === 'line' ? (
+          <LineChart data={points}>
+            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+            <XAxis dataKey="x" tick={{ fontSize: 11 }} />
+            <YAxis tick={{ fontSize: 11 }} />
+            <Tooltip />
+            <Line type="monotone" dataKey="y" stroke="#3b82f6" strokeWidth={2} />
+          </LineChart>
+        ) : type === 'pie' ? (
+          <PieChart>
+            <Pie data={points} dataKey="y" nameKey="x" outerRadius={90} labelLine={false}>
+              {points.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+            </Pie>
+            <Tooltip />
+          </PieChart>
+        ) : (
+          <BarChart data={points}>
+            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+            <XAxis dataKey="x" tick={{ fontSize: 11 }} />
+            <YAxis tick={{ fontSize: 11 }} />
+            <Tooltip />
+            <Bar dataKey="y" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        )}
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+function WidgetEditor({
+  widget,
+  tables,
+  onSave,
+  onDelete,
+}: {
+  widget: DashboardWidget
+  tables: TableInfo[]
+  onSave: (next: DashboardWidget) => Promise<void>
+  onDelete: () => Promise<void>
+}) {
+  const [draft, setDraft] = useState<DashboardWidget>(widget)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => setDraft(widget), [widget])
+
+  const table = useMemo(() => tables.find((t) => t.id === draft.table_id) || null, [tables, draft.table_id])
+  const columns = table?.columns || []
+  const cfg = normalizeConfig(draft.config)
+
+  const updateConfig = (patch: Partial<DashboardWidgetConfig>) => {
+    setDraft((prev) => ({ ...prev, config: { ...normalizeConfig(prev.config), ...patch } }))
+  }
+
+  const save = async () => {
+    setSaving(true)
+    await onSave({ ...draft, config: normalizeConfig(draft.config) })
+    setSaving(false)
+  }
+
+  const addFilter = () => {
+    if (!columns[0]) return
+    const next: DashboardFilter = { column_id: columns[0].id, op: 'eq', value: '' }
+    updateConfig({ filters: [...cfg.filters, next] })
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+        <input
+          value={draft.title}
+          onChange={(e) => setDraft((p) => ({ ...p, title: e.target.value }))}
+          className="h-9 px-3 rounded-lg border border-input bg-background text-sm"
+          placeholder="Название виджета"
+        />
+        <select
+          value={draft.widget_type}
+          onChange={(e) => setDraft((p) => ({ ...p, widget_type: e.target.value as DashboardWidget['widget_type'] }))}
+          className="h-9 px-3 rounded-lg border border-input bg-background text-sm"
+        >
+          {WIDGET_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+        <select
+          value={draft.table_id || ''}
+          onChange={(e) => setDraft((p) => ({ ...p, table_id: e.target.value || null }))}
+          className="h-9 px-3 rounded-lg border border-input bg-background text-sm"
+        >
+          <option value="">— Таблица —</option>
+          {tables.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+        </select>
+        <div className="flex gap-2">
+          <button onClick={save} disabled={saving} className="h-9 px-3 rounded-lg border border-border text-sm hover:bg-secondary flex items-center gap-1.5 disabled:opacity-50">
+            <Save className="h-4 w-4" /> Сохранить
+          </button>
+          <button onClick={onDelete} className="h-9 px-3 rounded-lg border border-destructive/40 text-destructive text-sm hover:bg-destructive/10 flex items-center gap-1.5">
+            <Trash2 className="h-4 w-4" /> Удалить
           </button>
         </div>
       </div>
 
-      {/* KPI Cards — always visible */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {[
-          { label: 'Таблиц', value: data?.tables_count ?? 0, icon: Table2, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-          { label: 'Записей', value: data?.records_count ?? 0, icon: FileText, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-          { label: 'Полей', value: data?.columns_count ?? 0, icon: Columns3, color: 'text-violet-500', bg: 'bg-violet-500/10' },
-        ].map(card => (
-          <div key={card.label} className="rounded-xl border border-border bg-card p-5 flex items-center gap-4">
-            <div className={`h-12 w-12 rounded-xl ${card.bg} flex items-center justify-center shrink-0`}>
-              <card.icon className={`h-6 w-6 ${card.color}`} />
-            </div>
-            <div>
-              <p className="text-3xl font-bold">{card.value.toLocaleString('ru')}</p>
-              <p className="text-sm text-muted-foreground">{card.label}</p>
-            </div>
+      {draft.widget_type !== 'table' && (
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+          <select
+            value={cfg.aggregation}
+            onChange={(e) => updateConfig({ aggregation: e.target.value as DashboardWidgetConfig['aggregation'] })}
+            className="h-9 px-3 rounded-lg border border-input bg-background text-sm"
+          >
+            {AGGREGATIONS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+          </select>
+
+          <select
+            value={cfg.value_column_id || ''}
+            onChange={(e) => updateConfig({ value_column_id: e.target.value || null })}
+            className="h-9 px-3 rounded-lg border border-input bg-background text-sm"
+          >
+            <option value="">Значение (поле)</option>
+            {columns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+
+          <select
+            value={cfg.group_by_column_id || ''}
+            onChange={(e) => updateConfig({ group_by_column_id: e.target.value || null })}
+            className="h-9 px-3 rounded-lg border border-input bg-background text-sm"
+            disabled={draft.widget_type === 'metric'}
+          >
+            <option value="">Группировка</option>
+            {columns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+
+          <input
+            type="number"
+            min={1}
+            max={200}
+            value={cfg.limit}
+            onChange={(e) => updateConfig({ limit: Number(e.target.value || 10) })}
+            className="h-9 px-3 rounded-lg border border-input bg-background text-sm"
+            placeholder="Лимит"
+          />
+        </div>
+      )}
+
+      {draft.widget_type === 'table' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <select
+            value={cfg.selected_column_ids[0] || ''}
+            onChange={(e) => updateConfig({ selected_column_ids: e.target.value ? [e.target.value] : [] })}
+            className="h-9 px-3 rounded-lg border border-input bg-background text-sm"
+          >
+            <option value="">Главная колонка</option>
+            {columns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <input
+            type="number"
+            min={1}
+            max={200}
+            value={cfg.limit}
+            onChange={(e) => updateConfig({ limit: Number(e.target.value || 10) })}
+            className="h-9 px-3 rounded-lg border border-input bg-background text-sm"
+            placeholder="Лимит строк"
+          />
+        </div>
+      )}
+
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Фильтры</span>
+          <button onClick={addFilter} className="text-xs text-primary hover:underline">+ добавить</button>
+        </div>
+        {cfg.filters.map((f, i) => (
+          <div key={i} className="grid grid-cols-1 md:grid-cols-4 gap-2">
+            <select
+              value={f.column_id}
+              onChange={(e) => {
+                const next = [...cfg.filters]
+                next[i] = { ...f, column_id: e.target.value }
+                updateConfig({ filters: next })
+              }}
+              className="h-8 px-2 rounded-md border border-input bg-background text-xs"
+            >
+              {columns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <select
+              value={f.op}
+              onChange={(e) => {
+                const next = [...cfg.filters]
+                next[i] = { ...f, op: e.target.value as DashboardFilter['op'] }
+                updateConfig({ filters: next })
+              }}
+              className="h-8 px-2 rounded-md border border-input bg-background text-xs"
+            >
+              <option value="eq">=</option>
+              <option value="neq">!=</option>
+              <option value="contains">contains</option>
+              <option value="gt">&gt;</option>
+              <option value="lt">&lt;</option>
+              <option value="gte">&gt;=</option>
+              <option value="lte">&lt;=</option>
+            </select>
+            <input
+              value={String(f.value ?? '')}
+              onChange={(e) => {
+                const next = [...cfg.filters]
+                next[i] = { ...f, value: e.target.value }
+                updateConfig({ filters: next })
+              }}
+              className="h-8 px-2 rounded-md border border-input bg-background text-xs"
+              placeholder="Значение"
+            />
+            <button
+              onClick={() => updateConfig({ filters: cfg.filters.filter((_, idx) => idx !== i) })}
+              className="h-8 px-2 rounded-md border border-destructive/40 text-destructive text-xs"
+            >Удалить</button>
           </div>
         ))}
       </div>
+    </div>
+  )
+}
 
-      {/* === OVERVIEW TAB === */}
-      {tab === 'overview' && (
-        <>
-          {tableBarData.length > 0 && (
-            <div className="rounded-xl border border-border bg-card p-5">
-              <div className="flex items-center gap-2 mb-4">
-                <BarChart3 className="h-5 w-5 text-primary" />
-                <h2 className="font-semibold">Записи и поля по таблицам</h2>
-              </div>
-              <ResponsiveContainer width="100%" height={260}>
-                <BarChart data={tableBarData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="name" tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }} />
-                  <YAxis tick={{ fontSize: 12, fill: 'hsl(var(--muted-foreground))' }} />
-                  <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 13 }} />
-                  <Legend wrapperStyle={{ fontSize: 13 }} />
-                  <Bar dataKey="Записи" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                  <Bar dataKey="Поля" fill="#10b981" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
+export default function ReportsPage() {
+  const [dashboards, setDashboards] = useState<DashboardInfo[]>([])
+  const [tables, setTables] = useState<TableInfo[]>([])
+  const [selectedDashboardId, setSelectedDashboardId] = useState<string>('')
+  const [dashboardData, setDashboardData] = useState<DashboardDataResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [newDashName, setNewDashName] = useState('Новый дашборд')
+  const [refreshing, setRefreshing] = useState(false)
 
-          {pieData.length > 0 && (
-            <div className="rounded-xl border border-border bg-card p-5">
-              <div className="flex items-center gap-2 mb-4">
-                <TrendingUp className="h-5 w-5 text-primary" />
-                <h2 className="font-semibold">Распределение записей</h2>
-              </div>
-              <div className="flex flex-col md:flex-row items-center gap-6">
-                <ResponsiveContainer width="100%" height={220}>
-                  <PieChart>
-                    <Pie data={pieData} cx="50%" cy="50%" outerRadius={90} dataKey="value" label={({ name, percent }: { name: string; percent: number }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false}>
-                      {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 13 }} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div className="flex flex-col gap-2 min-w-[160px]">
-                  {pieData.map((d, i) => (
-                    <div key={d.name} className="flex items-center gap-2 text-sm">
-                      <span className="h-3 w-3 rounded-full shrink-0" style={{ background: COLORS[i % COLORS.length] }} />
-                      <span className="truncate">{d.name}</span>
-                      <span className="ml-auto font-medium">{d.value}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          )}
+  const loadAll = async () => {
+    setLoading(true)
+    try {
+      const [dashResp, tablesResp] = await Promise.all([
+        reportsApi.listDashboards(),
+        tablesApi.list(),
+      ])
+      const list = (dashResp.data.ok && dashResp.data.data) ? dashResp.data.data : []
+      setDashboards(list)
+      if (tablesResp.data.ok && tablesResp.data.data) setTables(tablesResp.data.data)
 
-          {(data?.tables || []).length > 0 && (
-            <div className="rounded-xl border border-border bg-card overflow-hidden">
-              <div className="px-5 py-4 border-b border-border">
-                <h2 className="font-semibold">Детализация по таблицам</h2>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-secondary/30">
-                    <tr>
-                      {['Таблица', 'Записей', 'Полей', 'Записей/поле'].map(h => (
-                        <th key={h} className="px-4 py-3 text-left font-medium text-muted-foreground">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(data?.tables || []).map((t, i) => (
-                      <tr key={t.id} className={`border-t border-border/50 hover:bg-secondary/10 transition-colors cursor-pointer ${i % 2 === 0 ? '' : 'bg-secondary/5'}`}
-                        onClick={() => { setSelectedTable(t.id); setTab('detail') }}>
-                        <td className="px-4 py-3 font-medium text-primary">{t.name}</td>
-                        <td className="px-4 py-3">{t.records_count.toLocaleString('ru')}</td>
-                        <td className="px-4 py-3">{t.columns_count}</td>
-                        <td className="px-4 py-3 text-muted-foreground">{t.columns_count > 0 ? (t.records_count / t.columns_count).toFixed(1) : '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </>
-      )}
+      const nextId = selectedDashboardId || list[0]?.id || ''
+      setSelectedDashboardId(nextId)
+      if (nextId) {
+        const d = await reportsApi.getDashboardData(nextId)
+        if (d.data.ok && d.data.data) setDashboardData(d.data.data)
+      } else {
+        setDashboardData(null)
+      }
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
+    }
+  }
 
-      {/* === DETAIL TAB === */}
-      {tab === 'detail' && (
-        <div className="space-y-4">
-          <div className="rounded-xl border border-border bg-card p-4">
-            <div className="flex items-center gap-3 flex-wrap">
-              <label className="text-sm font-medium">Таблица:</label>
-              <select
-                value={selectedTable}
-                onChange={e => setSelectedTable(e.target.value)}
-                className="h-9 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary min-w-[200px]"
-              >
-                <option value="">— Выберите таблицу —</option>
-                {(data?.tables || []).map(t => (
-                  <option key={t.id} value={t.id}>{t.name} ({t.records_count} записей)</option>
-                ))}
-              </select>
-              {aggLoading && <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />}
-            </div>
-          </div>
+  useEffect(() => { loadAll() }, [])
 
-          {tableAgg && (
-            <>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="rounded-xl border border-border bg-card p-4 flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-xl bg-blue-500/10 flex items-center justify-center"><Table2 className="h-5 w-5 text-blue-500" /></div>
-                  <div><p className="text-xl font-bold">{tableAgg.table_name}</p><p className="text-xs text-muted-foreground">Таблица</p></div>
-                </div>
-                <div className="rounded-xl border border-border bg-card p-4 flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-xl bg-emerald-500/10 flex items-center justify-center"><FileText className="h-5 w-5 text-emerald-500" /></div>
-                  <div><p className="text-xl font-bold">{tableAgg.total_records.toLocaleString('ru')}</p><p className="text-xs text-muted-foreground">Записей</p></div>
-                </div>
-                <div className="rounded-xl border border-border bg-card p-4 flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-xl bg-violet-500/10 flex items-center justify-center"><Columns3 className="h-5 w-5 text-violet-500" /></div>
-                  <div><p className="text-xl font-bold">{tableAgg.columns.length}</p><p className="text-xs text-muted-foreground">Полей анализировано</p></div>
-                </div>
-              </div>
+  const refresh = async () => {
+    setRefreshing(true)
+    await loadAll()
+  }
 
-              {/* Per-column analytics */}
-              <div className="space-y-3">
-                {tableAgg.columns.map(col => {
-                  const isExpanded = expandedCol === col.column_id
-                  const fillPct = col.count > 0 ? Math.round((col.non_empty / col.count) * 100) : 0
-                  const topVals = col.top_values || []
-                  const barData = topVals.slice(0, 8).map(v => ({ name: String(v.value).length > 15 ? String(v.value).slice(0, 15) + '…' : v.value, Кол: v.count }))
+  const loadSelectedData = async (dashboardId: string) => {
+    if (!dashboardId) {
+      setDashboardData(null)
+      return
+    }
+    const d = await reportsApi.getDashboardData(dashboardId)
+    if (d.data.ok && d.data.data) setDashboardData(d.data.data)
+  }
 
-                  return (
-                    <div key={col.column_id} className="rounded-xl border border-border bg-card overflow-hidden">
-                      <button onClick={() => setExpandedCol(isExpanded ? null : col.column_id)}
-                        className="w-full flex items-center gap-3 px-4 py-3 hover:bg-secondary/30 transition-colors text-left">
-                        <Hash className="h-4 w-4 text-muted-foreground shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <span className="font-medium text-sm">{col.column_name}</span>
-                          <span className="text-xs text-muted-foreground ml-2">({col.field_type})</span>
-                        </div>
-                        <div className="flex items-center gap-4 text-xs text-muted-foreground shrink-0">
-                          <span>Заполнено: {fillPct}%</span>
-                          {col.sum !== null && <span>Σ {col.sum.toLocaleString('ru')}</span>}
-                          {col.avg !== null && <span>μ {col.avg.toLocaleString('ru')}</span>}
-                        </div>
-                        {isExpanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-                      </button>
+  const createDashboard = async () => {
+    const name = newDashName.trim()
+    if (!name) return
+    const r = await reportsApi.createDashboard({ name })
+    if (r.data.ok && r.data.data) {
+      setNewDashName('Новый дашборд')
+      await loadAll()
+      setSelectedDashboardId(r.data.data.id)
+      await loadSelectedData(r.data.data.id)
+    }
+  }
 
-                      {isExpanded && (
-                        <div className="px-4 pb-4 space-y-3 border-t border-border pt-3">
-                          {/* Stats grid */}
-                          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2">
-                            {[
-                              { label: 'Всего', value: col.count },
-                              { label: 'Заполнено', value: col.non_empty },
-                              { label: 'Пусто', value: col.count - col.non_empty },
-                              ...(col.sum !== null ? [{ label: 'Сумма', value: col.sum }] : []),
-                              ...(col.avg !== null ? [{ label: 'Среднее', value: col.avg }] : []),
-                              ...(col.min_val !== null ? [{ label: 'Мин', value: col.min_val }] : []),
-                              ...(col.max_val !== null ? [{ label: 'Макс', value: col.max_val }] : []),
-                            ].map((s, i) => (
-                              <div key={i} className="rounded-lg bg-secondary/30 px-3 py-2">
-                                <p className="text-xs text-muted-foreground">{s.label}</p>
-                                <p className="text-sm font-semibold truncate">{typeof s.value === 'number' ? s.value.toLocaleString('ru') : s.value}</p>
-                              </div>
-                            ))}
-                          </div>
+  const deleteDashboard = async () => {
+    if (!selectedDashboardId) return
+    if (!window.confirm('Удалить дашборд?')) return
+    await reportsApi.deleteDashboard(selectedDashboardId)
+    await loadAll()
+  }
 
-                          {/* Fill bar */}
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground w-20">Заполнение</span>
-                            <div className="flex-1 bg-secondary/50 rounded-full h-2.5 overflow-hidden">
-                              <div className="h-2.5 rounded-full bg-primary transition-all" style={{ width: `${fillPct}%` }} />
-                            </div>
-                            <span className="text-xs font-medium w-10 text-right">{fillPct}%</span>
-                          </div>
+  const addWidget = async () => {
+    if (!selectedDashboardId) return
+    await reportsApi.createWidget(selectedDashboardId, {
+      title: 'Новый виджет',
+      widget_type: 'metric',
+      table_id: tables[0]?.id ?? null,
+      config: DEFAULT_CONFIG,
+      position: dashboardData?.dashboard.widgets.length ?? 0,
+    })
+    await loadSelectedData(selectedDashboardId)
+  }
 
-                          {/* Value distribution chart */}
-                          {barData.length > 0 && (
-                            <div>
-                              <p className="text-xs text-muted-foreground mb-2">Топ значений</p>
-                              <ResponsiveContainer width="100%" height={140}>
-                                <BarChart data={barData} margin={{ top: 0, right: 0, left: 0, bottom: 0 }}>
-                                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} />
-                                  <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} width={30} />
-                                  <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 12 }} />
-                                  <Bar dataKey="Кол" fill="#3b82f6" radius={[3, 3, 0, 0]} />
-                                </BarChart>
-                              </ResponsiveContainer>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </>
-          )}
+  const saveWidget = async (next: DashboardWidget) => {
+    if (!selectedDashboardId) return
+    await reportsApi.updateWidget(selectedDashboardId, next.id, {
+      title: next.title,
+      widget_type: next.widget_type,
+      table_id: next.table_id,
+      config: normalizeConfig(next.config),
+      position: next.position,
+    })
+    await loadSelectedData(selectedDashboardId)
+  }
 
-          {!selectedTable && (
-            <div className="text-center py-16 text-muted-foreground">
-              <Search className="h-12 w-12 mx-auto mb-3 opacity-30" />
-              <p>Выберите таблицу для детальной аналитики</p>
-            </div>
-          )}
+  const removeWidget = async (widgetId: string) => {
+    if (!selectedDashboardId) return
+    await reportsApi.deleteWidget(selectedDashboardId, widgetId)
+    await loadSelectedData(selectedDashboardId)
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      </div>
+    )
+  }
+
+  const itemsByWidgetId = new Map((dashboardData?.items || []).map((i) => [i.widget.id, i]))
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h1 className="text-2xl font-bold">Конструктор дашбордов</h1>
+          <p className="text-sm text-muted-foreground">Собирай виджеты из своих таблиц, полей и фильтров</p>
         </div>
-      )}
+        <button onClick={refresh} disabled={refreshing} className="h-9 px-3 rounded-lg border border-border text-sm hover:bg-secondary flex items-center gap-1.5 disabled:opacity-50">
+          <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} /> Обновить
+        </button>
+      </div>
 
-      {/* === TIMELINE TAB === */}
-      {tab === 'timeline' && (
-        <div className="space-y-4">
-          <div className="rounded-xl border border-border bg-card p-4 flex items-center gap-3 flex-wrap">
-            <Calendar className="h-4 w-4 text-primary" />
-            <label className="text-sm font-medium">Период:</label>
-            {[7, 14, 30, 60, 90].map(d => (
-              <button key={d} onClick={() => setTimelineDays(d)}
-                className={`px-3 py-1.5 rounded-md text-sm transition-colors ${timelineDays === d ? 'bg-primary text-white' : 'border border-border hover:bg-secondary'}`}>
-                {d} дн.
+      <div className="rounded-xl border border-border bg-card p-4">
+        <p className="text-sm font-semibold mb-2">Как собрать дашборд</p>
+        <div className="text-sm text-muted-foreground space-y-1">
+          <p>1. Создай дашборд слева.</p>
+          <p>2. Добавь виджет и выбери таблицу.</p>
+          <p>3. Выбери агрегацию, поля и фильтры.</p>
+          <p>4. Нажми «Сохранить» — результат обновится сразу ниже.</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
+        <div className="rounded-xl border border-border bg-card p-3 space-y-3 h-fit">
+          <div className="text-xs uppercase tracking-wide text-muted-foreground px-1">Дашборды</div>
+          <div className="space-y-1.5">
+            {dashboards.map((d) => (
+              <button
+                key={d.id}
+                onClick={async () => {
+                  setSelectedDashboardId(d.id)
+                  await loadSelectedData(d.id)
+                }}
+                className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedDashboardId === d.id ? 'bg-primary text-white' : 'hover:bg-secondary'}`}
+              >
+                <div className="flex items-center gap-2">
+                  <LayoutDashboard className="h-4 w-4" />
+                  <span className="truncate">{d.name}</span>
+                </div>
               </button>
             ))}
-            {timelineLoading && <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />}
+            {dashboards.length === 0 && <p className="text-xs text-muted-foreground px-2">Пока пусто</p>}
           </div>
 
-          {timeline.length > 0 ? (
-            <div className="rounded-xl border border-border bg-card p-5">
-              <div className="flex items-center gap-2 mb-4">
-                <TrendingUp className="h-5 w-5 text-primary" />
-                <h2 className="font-semibold">Создание записей по дням</h2>
-              </div>
-              <ResponsiveContainer width="100%" height={300}>
-                <AreaChart data={timeline} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
-                  <YAxis tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }} />
-                  <Tooltip contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8, fontSize: 13 }} />
-                  <Area type="monotone" dataKey="count" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.15} strokeWidth={2} name="Записей" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          ) : !timelineLoading ? (
-            <div className="text-center py-16 text-muted-foreground">
-              <Calendar className="h-12 w-12 mx-auto mb-3 opacity-30" />
-              <p>Нет данных за выбранный период</p>
-            </div>
-          ) : null}
+          <div className="pt-2 border-t border-border space-y-2">
+            <input
+              value={newDashName}
+              onChange={(e) => setNewDashName(e.target.value)}
+              className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm"
+              placeholder="Название"
+            />
+            <button onClick={createDashboard} className="w-full h-9 rounded-lg border border-border text-sm hover:bg-secondary flex items-center justify-center gap-1.5">
+              <Plus className="h-4 w-4" /> Создать
+            </button>
+            <button onClick={deleteDashboard} disabled={!selectedDashboardId} className="w-full h-9 rounded-lg border border-destructive/40 text-destructive text-sm disabled:opacity-40 hover:bg-destructive/10 flex items-center justify-center gap-1.5">
+              <Trash2 className="h-4 w-4" /> Удалить выбранный
+            </button>
+          </div>
         </div>
-      )}
 
-      {(!data || data.tables_count === 0) && tab === 'overview' && (
-        <div className="text-center py-16 text-muted-foreground">
-          <BarChart3 className="h-12 w-12 mx-auto mb-3 opacity-30" />
-          <p>Нет данных для отчёта. Создайте таблицы и добавьте записи.</p>
+        <div className="space-y-4">
+          {dashboardData ? (
+            <>
+              <div className="rounded-xl border border-border bg-card p-4 flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Дашборд</p>
+                  <h2 className="text-xl font-semibold">{dashboardData.dashboard.name}</h2>
+                </div>
+                <button onClick={addWidget} className="h-9 px-3 rounded-lg border border-border text-sm hover:bg-secondary flex items-center gap-1.5">
+                  <Plus className="h-4 w-4" /> Добавить виджет
+                </button>
+              </div>
+
+              {(dashboardData.dashboard.widgets || []).map((widget) => {
+                const item = itemsByWidgetId.get(widget.id)
+                return (
+                  <div key={widget.id} className="space-y-3">
+                    <WidgetEditor
+                      widget={widget}
+                      tables={tables}
+                      onSave={saveWidget}
+                      onDelete={async () => removeWidget(widget.id)}
+                    />
+                    {item ? <ChartCard item={item} /> : (
+                      <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground flex items-center gap-2">
+                        <BarChart3 className="h-4 w-4" /> Данные виджета еще не загружены
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+
+              {dashboardData.dashboard.widgets.length === 0 && (
+                <div className="rounded-xl border border-dashed border-border p-8 text-center text-muted-foreground">
+                  Добавь первый виджет и выбери таблицу/поля
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="rounded-xl border border-dashed border-border p-10 text-center text-muted-foreground">
+              Создай дашборд слева
+            </div>
+          )}
         </div>
-      )}
+      </div>
+
+      <div className="rounded-xl border border-dashed border-border bg-secondary/10 p-4">
+        <p className="text-sm font-semibold mb-2">Пример настройки</p>
+        <div className="text-sm text-muted-foreground space-y-1">
+          <p>Виджет: <span className="text-foreground">Выручка по источникам</span></p>
+          <p>Тип: <span className="text-foreground">bar</span></p>
+          <p>Таблица: <span className="text-foreground">Сделки</span></p>
+          <p>Агрегация: <span className="text-foreground">sum</span>, Поле значения: <span className="text-foreground">Сумма</span></p>
+          <p>Группировка: <span className="text-foreground">Источник</span></p>
+          <p>Фильтр: <span className="text-foreground">Статус = Успешно</span></p>
+        </div>
+      </div>
     </div>
   )
 }

@@ -61,10 +61,11 @@ class Settings(BaseSettings):
     SUPERADMIN_EMAIL: str = ""
     SUPERADMIN_PASSWORD: str = ""
 
-    # AI (xAI Grok or OpenAI-compatible)
+    # AI (Timeweb Agent / OpenAI-compatible)
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "grok-3-mini"
-    AI_BASE_URL: str = "https://api.x.ai/v1"
+    OPENAI_BEARER_TOKEN: str = ""
+    OPENAI_MODEL: str = "gpt-4.1"
+    AI_BASE_URL: str = "https://agent.timeweb.cloud/api/v1/cloud-ai/agents/289156bc-4adc-4be8-94cf-6767a704a80c/v1"
     AI_SYSTEM_PROMPT: str = "Ты — AI-ассистент CRM платформы. Отвечай на русском языке. Помогай с данными, отчётами и аналитикой."
 
     model_config = {"env_file": ".env", "extra": "ignore"}

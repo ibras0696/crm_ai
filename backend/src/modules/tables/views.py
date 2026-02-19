@@ -1,11 +1,13 @@
-"""Table views (saved filters/sorts) and CSV export."""
+"""Table views (saved filters/sorts) and CSV/XLSX export."""
 import uuid
 import csv
 import io
 from datetime import datetime
+from io import BytesIO
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -203,6 +205,39 @@ async def export_csv(
             iter([output.getvalue()]),
             media_type="text/csv",
             headers={"Content-Disposition": f'attachment; filename="{table.name}.csv"'},
+        )
+
+
+@filter_router.get("/export/xlsx")
+async def export_xlsx(
+    table_id: uuid.UUID,
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+):
+    async with UnitOfWork() as uow:
+        t_repo = TableRepository(uow.session)
+        table = await t_repo.get_by_id(table_id, with_columns=True)
+        if not table or table.org_id != current_user.org_id:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "РўР°Р±Р»РёС†Р° РЅРµ РЅР°Р№РґРµРЅР°"})
+
+        r_repo = RecordRepository(uow.session)
+        records = await r_repo.list_by_table(table_id, limit=5000, offset=0)
+
+        columns = sorted(table.columns, key=lambda c: c.position)
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Table"
+        ws.append([c.name for c in columns])
+        for rec in records:
+            ws.append([str(rec.data.get(str(c.id), "")) for c in columns])
+
+        output = BytesIO()
+        wb.save(output)
+        output.seek(0)
+
+        return StreamingResponse(
+            output,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{table.name}.xlsx"'},
         )
 
 

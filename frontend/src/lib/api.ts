@@ -279,7 +279,10 @@ export const recordsApi = {
     api.post<ApiResponse<RecordInfo>>(`/tables/${tableId}/records/${recordId}/move`, { direction }),
   filter: (tableId: string, filters?: Record<string, unknown>, sorts?: Array<{col_id: string; dir: string}>, limit = 100, offset = 0) =>
     api.post<ApiResponse<{records: RecordInfo[]; total: number}>>(`/tables/${tableId}/filter?limit=${limit}&offset=${offset}`, { filters, sorts }),
-  exportCsvUrl: (tableId: string) => `/api/v1/tables/${tableId}/export/csv`,
+  exportCsv: (tableId: string) =>
+    api.get(`/tables/${tableId}/export/csv`, { responseType: 'blob' }),
+  exportXlsx: (tableId: string) =>
+    api.get(`/tables/${tableId}/export/xlsx`, { responseType: 'blob' }),
 }
 
 // --- Knowledge Base ---

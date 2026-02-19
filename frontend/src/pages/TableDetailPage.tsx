@@ -144,6 +144,7 @@ function TableDetailPageContent() {
   const [editingColumnName, setEditingColumnName] = useState('')
   const [editingColumnType, setEditingColumnType] = useState('text')
   const [movingRecordId, setMovingRecordId] = useState<string | null>(null)
+  const [exporting, setExporting] = useState<'csv' | 'xlsx' | null>(null)
   const moveLockRef = useRef(false)
 
   const load = useCallback(async () => {
@@ -301,6 +302,34 @@ function TableDetailPageContent() {
     }
   }
 
+  const triggerBlobDownload = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleExport = async (format: 'csv' | 'xlsx') => {
+    if (!tableId) return
+    setExporting(format)
+    try {
+      const resp = format === 'csv'
+        ? await recordsApi.exportCsv(tableId)
+        : await recordsApi.exportXlsx(tableId)
+      const ext = format === 'csv' ? 'csv' : 'xlsx'
+      const safeName = (table?.name || 'table').replace(/[\\/:*?"<>|]+/g, '_')
+      triggerBlobDownload(resp.data, `${safeName}.${ext}`)
+    } catch {
+      // ignore
+    } finally {
+      setExporting(null)
+    }
+  }
+
   const columns = (Array.isArray(table?.columns) ? table.columns : [])
     .filter(isColumnInfo)
     .sort((a: ColumnInfo, b: ColumnInfo) => a.position - b.position)
@@ -360,7 +389,14 @@ function TableDetailPageContent() {
         </div>
         {savingCells.size > 0 && <span className="text-xs text-muted-foreground flex items-center gap-1"><Loader2 className="h-3 w-3 animate-spin" /> Сохранение...</span>}
         <Badge variant="secondary">{total} записей</Badge>
-        <a href={`/api/v1/tables/${tableId}/export/csv`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 h-8 px-3 rounded-md border border-border text-sm hover:bg-secondary transition-colors"><Download className="h-3.5 w-3.5" /> CSV</a>
+        <Button variant="outline" size="sm" className="h-8" onClick={() => handleExport('csv')} disabled={exporting !== null}>
+          {exporting === 'csv' ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1" />}
+          CSV
+        </Button>
+        <Button variant="outline" size="sm" className="h-8" onClick={() => handleExport('xlsx')} disabled={exporting !== null}>
+          {exporting === 'xlsx' ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1" />}
+          Excel
+        </Button>
         <Button size="sm" onClick={() => setShowNewRow(v => !v)} className="gradient-primary border-0 text-white h-8">
           {showNewRow ? <><X className="h-4 w-4 mr-1" />Отмена</> : <><Plus className="h-4 w-4 mr-1" />Добавить запись</>}
         </Button>

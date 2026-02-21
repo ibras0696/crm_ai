@@ -7,8 +7,8 @@ from pydantic import BaseModel
 from src.common.schemas import ApiResponse
 from src.common.enums import UserRole
 from src.modules.auth.dependencies import CurrentUser, require_roles
-from src.modules.tables.models import Table, Column, FieldType
-from src.modules.tables.repository import TableRepository, ColumnRepository
+from src.modules.tables.models import Table, Column, TableFolder, FieldType
+from src.modules.tables.repository import TableRepository, ColumnRepository, TableFolderRepository
 from src.infrastructure.uow import UnitOfWork
 
 router = APIRouter(prefix="/tables", tags=["tables"])
@@ -32,6 +32,7 @@ class ColumnOut(BaseModel):
 class TableOut(BaseModel):
     id: uuid.UUID
     org_id: uuid.UUID
+    folder_id: uuid.UUID | None
     name: str
     description: str | None
     icon: str | None
@@ -43,11 +44,22 @@ class TableOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class FolderOut(BaseModel):
+    id: uuid.UUID
+    org_id: uuid.UUID
+    name: str
+    position: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class CreateTableRequest(BaseModel):
     name: str
     description: str | None = None
     icon: str | None = None
     color: str | None = None
+    folder_id: uuid.UUID | None = None
 
 
 class UpdateTableRequest(BaseModel):
@@ -56,6 +68,16 @@ class UpdateTableRequest(BaseModel):
     icon: str | None = None
     color: str | None = None
     is_archived: bool | None = None
+    folder_id: uuid.UUID | None = None
+
+
+class CreateFolderRequest(BaseModel):
+    name: str
+
+
+class UpdateFolderRequest(BaseModel):
+    name: str | None = None
+    position: int | None = None
 
 
 class CreateColumnRequest(BaseModel):
@@ -76,6 +98,79 @@ class UpdateColumnRequest(BaseModel):
     default_value: str | None = None
 
 
+# --- Folder CRUD ---
+
+@router.post("/folders/", response_model=ApiResponse[FolderOut])
+async def create_folder(
+    body: CreateFolderRequest,
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+):
+    async with UnitOfWork() as uow:
+        repo = TableFolderRepository(uow.session)
+        max_pos = await repo.get_max_position(current_user.org_id)
+        folder = TableFolder(
+            org_id=current_user.org_id,
+            created_by=current_user.user_id,
+            name=body.name,
+            position=max_pos + 1,
+        )
+        folder = await repo.create(folder)
+        await uow.commit()
+        item = FolderOut.model_validate(folder)
+    return ApiResponse(data=item)
+
+
+@router.get("/folders/", response_model=ApiResponse[list[FolderOut]])
+async def list_folders(
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+):
+    async with UnitOfWork() as uow:
+        repo = TableFolderRepository(uow.session)
+        folders = await repo.list_by_org(current_user.org_id)
+        items = [FolderOut.model_validate(f) for f in folders]
+    return ApiResponse(data=items)
+
+
+@router.patch("/folders/{folder_id}", response_model=ApiResponse[FolderOut])
+async def update_folder(
+    folder_id: uuid.UUID,
+    body: UpdateFolderRequest,
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+):
+    async with UnitOfWork() as uow:
+        repo = TableFolderRepository(uow.session)
+        folder = await repo.get_by_id(folder_id)
+        if not folder or folder.org_id != current_user.org_id:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Папка не найдена"})
+        for field, value in body.model_dump(exclude_unset=True).items():
+            setattr(folder, field, value)
+        await repo.update(folder)
+        await uow.commit()
+        item = FolderOut.model_validate(folder)
+    return ApiResponse(data=item)
+
+
+@router.delete("/folders/{folder_id}", response_model=ApiResponse[None])
+async def delete_folder(
+    folder_id: uuid.UUID,
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+):
+    async with UnitOfWork() as uow:
+        folder_repo = TableFolderRepository(uow.session)
+        folder = await folder_repo.get_by_id(folder_id)
+        if not folder or folder.org_id != current_user.org_id:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Папка не найдена"})
+        # Move tables in this folder to root (SET NULL via cascade handles it, but we do explicit reset)
+        table_repo = TableRepository(uow.session)
+        tables = await table_repo.list_by_org(current_user.org_id)
+        for t in tables:
+            if t.folder_id == folder_id:
+                t.folder_id = None
+        await folder_repo.delete(folder)
+        await uow.commit()
+    return ApiResponse(data=None)
+
+
 # --- Table CRUD ---
 
 @router.post("/", response_model=ApiResponse[TableOut])
@@ -84,10 +179,18 @@ async def create_table(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
 ):
     async with UnitOfWork() as uow:
+        # Validate folder ownership if provided
+        if body.folder_id:
+            folder_repo = TableFolderRepository(uow.session)
+            folder = await folder_repo.get_by_id(body.folder_id)
+            if not folder or folder.org_id != current_user.org_id:
+                return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Папка не найдена"})
+
         repo = TableRepository(uow.session)
         table = Table(
             org_id=current_user.org_id,
             created_by=current_user.user_id,
+            folder_id=body.folder_id,
             name=body.name,
             description=body.description,
             icon=body.icon,
@@ -147,7 +250,17 @@ async def update_table(
         table = await repo.get_by_id(table_id)
         if not table or table.org_id != current_user.org_id:
             return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Таблица не найдена"})
-        for field, value in body.model_dump(exclude_unset=True).items():
+
+        updates = body.model_dump(exclude_unset=True)
+
+        # Validate folder if moving to one
+        if "folder_id" in updates and updates["folder_id"] is not None:
+            folder_repo = TableFolderRepository(uow.session)
+            folder = await folder_repo.get_by_id(updates["folder_id"])
+            if not folder or folder.org_id != current_user.org_id:
+                return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Папка не найдена"})
+
+        for field, value in updates.items():
             setattr(table, field, value)
         await repo.update(table)
         await uow.commit()

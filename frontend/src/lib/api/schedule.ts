@@ -10,6 +10,7 @@ export interface EventInfo {
   all_day: boolean
   color: string | null
   is_done: boolean
+  recurrence: string | null
   assigned_to: string | null
   created_at: string
 }

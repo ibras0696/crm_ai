@@ -80,6 +80,24 @@ npm run dev
 
 ```bash
 docker-compose up --build
+
+### Secrets (опционально, рекомендовано для приватных деплоев)
+
+Чтобы секреты не лежали в `.env`, можно хранить их в локальном override-файле для compose:
+
+1. Скопируй `secrets.yml.example` -> `secrets.yml`
+2. Заполни секреты в `secrets.yml` (файл игнорируется git)
+3. Запускай compose с двумя файлами:
+
+```bash
+docker compose -f docker-compose.yml -f secrets.yml up -d
+```
+
+Для prod:
+
+```bash
+docker compose -f docker-compose.prod.yml -f secrets.yml up -d
+```
 ```
 
 ## Документация API
@@ -195,7 +213,7 @@ pytest -v --tb=short
 
 ```bash
 # 1. Скопировать и заполнить .env
-cp backend/.env.example backend/.env
+cp .env.example backend/.env
 # Заполнить реальные значения: DOMAIN, YOOKASSA_*, OPENAI_API_KEY, SMTP_*, SECRET_KEY
 
 # 2. Получить SSL-сертификат (первый раз)

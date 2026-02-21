@@ -182,13 +182,13 @@ def create_app() -> FastAPI:
                 existing = (await session.execute(select(Plan))).scalars().first()
                 if not existing:
                     session.add(Plan(
-                        name='free', display_name='\u0411\u0435\u0441\u043f\u043b\u0430\u0442\u043d\u044b\u0439',
+                        name='free', display_name='Бесплатный',
                         price_monthly=0, price_yearly=0,
                         max_members=10, max_tables=10, max_records=10000, max_storage_mb=500,
                         has_ai=False, features={}, is_active=True,
                     ))
                     session.add(Plan(
-                        name='team', display_name='\u041a\u043e\u043c\u0430\u043d\u0434\u0430',
+                        name='team', display_name='Команда',
                         price_monthly=149000, price_yearly=1190000,
                         max_members=999999, max_tables=999999,
                         max_records=999999999, max_storage_mb=999999,

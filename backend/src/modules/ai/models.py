@@ -34,7 +34,7 @@ class AIChatSession(BaseDBModel):
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    title: Mapped[str] = mapped_column(String(255), nullable=False, default="\u041d\u043e\u0432\u044b\u0439 \u0447\u0430\u0442")
+    title: Mapped[str] = mapped_column(String(255), nullable=False, default="Новый чат")
 
 
 class AIChatMessage(BaseDBModel):

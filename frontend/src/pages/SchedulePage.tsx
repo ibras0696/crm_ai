@@ -1,17 +1,18 @@
-﻿import { useState, useEffect, useCallback } from 'react'
+﻿import { useState, useEffect, useCallback, useMemo } from 'react'
 import { scheduleApi } from '@/lib/api'
 import { Plus, ChevronLeft, ChevronRight, Check, Trash2, X, Repeat, Clock, Edit3 } from 'lucide-react'
+import { expandRecurringEvents, type ExpandedEvent } from '@/lib/schedule-utils'
 
 interface Event {
   id: string
   title: string
   description?: string
   start_at: string
-  end_at?: string
+  end_at?: string | null
   all_day: boolean
   color: string
   is_done: boolean
-  recurrence?: string
+  recurrence?: string | null
 }
 
 const COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316']
@@ -37,7 +38,6 @@ export default function SchedulePage() {
   const [view, setView] = useState<View>('month')
   const [current, setCurrent] = useState(new Date())
   const [showForm, setShowForm] = useState(false)
-  const [selectedDay, setSelectedDay] = useState<Date | null>(null)
   const [form, setForm] = useState({ title: '', description: '', start_at: '', end_at: '', all_day: true, color: COLORS[0], recurrence: '' })
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
@@ -61,7 +61,6 @@ export default function SchedulePage() {
     const d = day || new Date()
     const iso = d.toISOString().slice(0, 10)
     setForm(f => ({ ...f, start_at: iso + 'T09:00', end_at: iso + 'T10:00' }))
-    setSelectedDay(d)
     setFormError('')
     setShowForm(true)
   }
@@ -145,7 +144,43 @@ export default function SchedulePage() {
     } catch { /* ignore */ }
   }
 
-  const eventsOnDay = (d: Date) => events.filter(e => {
+  // --- Expanded recurring events ---
+  const viewRange = useMemo(() => {
+    if (view === 'day') {
+      const start = new Date(current.getFullYear(), current.getMonth(), current.getDate())
+      const end = new Date(start)
+      end.setDate(end.getDate() + 1)
+      return { start, end }
+    }
+    if (view === 'month') {
+      const start = new Date(current.getFullYear(), current.getMonth(), 1)
+      // include padding days: go back to Monday of the first week
+      start.setDate(start.getDate() - ((start.getDay() + 6) % 7))
+      const end = new Date(current.getFullYear(), current.getMonth() + 1, 0)
+      // include padding days: go to Sunday of the last week
+      end.setDate(end.getDate() + (7 - ((end.getDay() + 6) % 7)) % 7)
+      return { start, end }
+    }
+    // year
+    const start = new Date(current.getFullYear(), 0, 1)
+    const end = new Date(current.getFullYear(), 11, 31)
+    return { start, end }
+  }, [current, view])
+
+  const expandedEvents: ExpandedEvent[] = useMemo(
+    () => expandRecurringEvents(events, viewRange.start, viewRange.end),
+    [events, viewRange],
+  )
+
+  // For upcoming events, expand 60 days ahead
+  const upcomingExpanded: ExpandedEvent[] = useMemo(() => {
+    const now = new Date()
+    const future = new Date()
+    future.setDate(future.getDate() + 60)
+    return expandRecurringEvents(events, now, future)
+  }, [events])
+
+  const eventsOnDay = (d: Date) => expandedEvents.filter(e => {
     try { return isSameDay(new Date(e.start_at), d) } catch { return false }
   })
 
@@ -177,17 +212,27 @@ export default function SchedulePage() {
     return cells
   }
 
-  // --- Year grid ---
+  // --- Year grid (using expanded events for correct recurring counts) ---
   const buildYearGrid = () => {
+    const yearStart = new Date(current.getFullYear(), 0, 1)
+    const yearEnd = new Date(current.getFullYear(), 11, 31)
+    const yearExpanded = expandRecurringEvents(events, yearStart, yearEnd)
     return Array.from({ length: 12 }, (_, m) => {
-      const d = new Date(current.getFullYear(), m, 1)
-      const cnt = events.filter(e => { try { const ed = new Date(e.start_at); return ed.getFullYear() === current.getFullYear() && ed.getMonth() === m } catch { return false } }).length
+      const cnt = yearExpanded.filter(e => { try { const ed = new Date(e.start_at); return ed.getFullYear() === current.getFullYear() && ed.getMonth() === m } catch { return false } }).length
       return { month: m, label: MONTHS_RU[m], count: cnt }
     })
   }
 
   // --- Day view ---
   const dayEvents = eventsOnDay(current)
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4">
@@ -220,7 +265,7 @@ export default function SchedulePage() {
       {view === 'month' && (
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="grid grid-cols-7 border-b border-border">
-            {DAYS_RU.map(d => <div key={d} className="py-2 text-center text-xs font-medium text-muted-foreground">{d}</div>)}
+            {DAYS_RU.map(dayLabel => <div key={dayLabel} className="py-2 text-center text-xs font-medium text-muted-foreground">{dayLabel}</div>)}
           </div>
           <div className="grid grid-cols-7">
             {buildMonthGrid().map((day, i) => {
@@ -307,23 +352,35 @@ export default function SchedulePage() {
           <div className="px-4 py-3 border-b border-border">
             <h2 className="font-semibold">Предстоящие события</h2>
           </div>
-          {events.filter(e => !e.is_done && new Date(e.start_at) >= new Date()).sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime()).slice(0, 10).length === 0 ? (
-            <p className="px-4 py-6 text-sm text-muted-foreground">Нет предстоящих событий</p>
-          ) : (
-            <div className="divide-y divide-border">
-              {events.filter(e => !e.is_done && new Date(e.start_at) >= new Date()).sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime()).slice(0, 10).map(ev => (
-                <div key={ev.id} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/10 transition-colors group cursor-pointer" onClick={() => openEdit(ev)}>
-                  <div className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: ev.color }} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{ev.title}</p>
-                    <p className="text-xs text-muted-foreground">{new Date(ev.start_at).toLocaleDateString('ru', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
-                  </div>
-                  {ev.recurrence && <Repeat className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
-                  <button onClick={(e) => { e.stopPropagation(); handleDelete(ev.id) }} className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"><Trash2 className="h-3.5 w-3.5" /></button>
-                </div>
-              ))}
-            </div>
-          )}
+          {(() => {
+            const upcoming = upcomingExpanded
+              .filter(e => !e.is_done && new Date(e.start_at) >= new Date())
+              .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime())
+              .slice(0, 10)
+            if (upcoming.length === 0) {
+              return <p className="px-4 py-6 text-sm text-muted-foreground">Нет предстоящих событий</p>
+            }
+            return (
+              <div className="divide-y divide-border">
+                {upcoming.map((ev, idx) => {
+                  const original = events.find(e => e.id === ev._originalId) || ev
+                  return (
+                    <div key={`${ev._originalId}-${idx}`} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/10 transition-colors group cursor-pointer" onClick={() => openEdit(original as Event)}>
+                      <div className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: ev.color }} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{ev.title}</p>
+                        <p className="text-xs text-muted-foreground">{new Date(ev.start_at).toLocaleDateString('ru', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                      </div>
+                      {ev.recurrence && <Repeat className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                      {!ev._isVirtual && (
+                        <button onClick={(e) => { e.stopPropagation(); handleDelete(ev.id) }} className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"><Trash2 className="h-3.5 w-3.5" /></button>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()}
         </div>
       )}
 

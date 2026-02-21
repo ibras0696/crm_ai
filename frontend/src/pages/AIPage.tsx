@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   aiApi,
   type AIChatMessage,
@@ -8,6 +8,7 @@ import {
   type AIContextSourcePage,
   type AIContextSourceTable,
 } from '@/lib/api'
+import ContextControl from '@/components/ai/ContextControl'
 import {
   Send,
   Bot,
@@ -16,11 +17,10 @@ import {
   BarChart3,
   RefreshCw,
   Trash2,
-  Database,
   Plus,
   History,
-  ChevronDown,
-  ChevronUp,
+  PanelLeftClose,
+  PanelLeftOpen,
   Sparkles,
   MessageSquareDashed,
 } from 'lucide-react'
@@ -54,6 +54,13 @@ const EXAMPLES = [
   'Найди узкие места в воронке и предложи действия',
   'Сделай сводку по задачам команды за неделю',
 ]
+
+function getStoredBool(key: string, fallback: boolean): boolean {
+  if (typeof window === 'undefined') return fallback
+  const raw = window.localStorage.getItem(key)
+  if (raw === null) return fallback
+  return raw === '1'
+}
 
 function DashboardPreview({ result }: { result: Record<string, unknown> }) {
   const dashboard = (result.dashboard || {}) as Record<string, unknown>
@@ -161,8 +168,8 @@ export default function AIPage() {
   const [chats, setChats] = useState<AIChatSession[]>([])
   const [currentChatId, setCurrentChatId] = useState<string>('')
   const [loadingChats, setLoadingChats] = useState(false)
-  const [historyCollapsed, setHistoryCollapsed] = useState(false)
-  const [contextCollapsed, setContextCollapsed] = useState(false)
+  const [historyCollapsed, setHistoryCollapsed] = useState(() => getStoredBool('ai:historyCollapsed', false))
+  const [historyMobileOpen, setHistoryMobileOpen] = useState(false)
 
   const [contextSources, setContextSources] = useState<{ kb_pages: AIContextSourcePage[]; tables: AIContextSourceTable[] }>({ kb_pages: [], tables: [] })
   const [includeContext, setIncludeContext] = useState(true)
@@ -239,12 +246,17 @@ export default function AIPage() {
 
   const loadContextEstimate = useCallback(async () => {
     try {
-      const r = await aiApi.estimateContext(includeContext, contextOptions)
+      const r = await aiApi.estimatePrompt({
+        include_context: includeContext,
+        context_options: contextOptions,
+        history: messages.slice(-10).map((m) => ({ role: m.role, content: m.content })),
+        user_message: input || '',
+      })
       if (r.data.ok && r.data.data) setContextEstimate(r.data.data)
     } catch {
       // ignore
     }
-  }, [includeContext, contextOptions])
+  }, [includeContext, contextOptions, messages, input])
 
   useEffect(() => {
     loadStatus()
@@ -260,31 +272,9 @@ export default function AIPage() {
     return () => clearTimeout(t)
   }, [loadContextEstimate])
 
-  const kbSelected = contextOptions.selected_kb_page_ids || []
-  const tableSelected = contextOptions.selected_table_ids || []
-
-  const totalContextObjects = useMemo(
-    () => kbSelected.length + tableSelected.length,
-    [kbSelected.length, tableSelected.length]
-  )
-
-  const toggleKbPage = (id: string) => {
-    setContextOptions((prev) => {
-      const set = new Set(prev.selected_kb_page_ids || [])
-      if (set.has(id)) set.delete(id)
-      else set.add(id)
-      return { ...prev, selected_kb_page_ids: Array.from(set) }
-    })
-  }
-
-  const toggleTable = (id: string) => {
-    setContextOptions((prev) => {
-      const set = new Set(prev.selected_table_ids || [])
-      if (set.has(id)) set.delete(id)
-      else set.add(id)
-      return { ...prev, selected_table_ids: Array.from(set) }
-    })
-  }
+  useEffect(() => {
+    window.localStorage.setItem('ai:historyCollapsed', historyCollapsed ? '1' : '0')
+  }, [historyCollapsed])
 
   const handleSend = async (preset?: string) => {
     const messageText = (preset ?? input).trim()
@@ -413,87 +403,60 @@ export default function AIPage() {
 
       {tab === 'chat' && (
         <>
-          <div className="rounded-xl border border-border bg-card mb-3 overflow-hidden">
-            <button
-              className="w-full px-4 py-3 flex items-center justify-between hover:bg-secondary/20 transition-colors"
-              onClick={() => setContextCollapsed((v) => !v)}
-            >
-              <span className="flex items-center gap-2 text-sm font-medium"><Database className="h-4 w-4" /> Контроль контекста</span>
-              {contextCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
-            </button>
-            {!contextCollapsed && (
-              <div className="px-4 pb-4 space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-                  <label className="flex items-center gap-2 text-sm cursor-pointer px-3 py-2 rounded-lg bg-secondary/40">
-                    <input type="checkbox" checked={includeContext} onChange={(e) => setIncludeContext(e.target.checked)} className="rounded" />
-                    Контекст включен
-                  </label>
-                  <label className="flex items-center gap-2 text-sm cursor-pointer px-3 py-2 rounded-lg bg-secondary/20">
-                    <input type="checkbox" checked={!!contextOptions.include_kb} onChange={(e) => setContextOptions((p) => ({ ...p, include_kb: e.target.checked }))} className="rounded" disabled={!includeContext} />
-                    База знаний
-                  </label>
-                  <label className="flex items-center gap-2 text-sm cursor-pointer px-3 py-2 rounded-lg bg-secondary/20">
-                    <input type="checkbox" checked={!!contextOptions.include_table_schema} onChange={(e) => setContextOptions((p) => ({ ...p, include_table_schema: e.target.checked }))} className="rounded" disabled={!includeContext} />
-                    Схемы таблиц
-                  </label>
-                  <label className="flex items-center gap-2 text-sm cursor-pointer px-3 py-2 rounded-lg bg-secondary/20">
-                    <input type="checkbox" checked={!!contextOptions.include_table_records} onChange={(e) => setContextOptions((p) => ({ ...p, include_table_records: e.target.checked }))} className="rounded" disabled={!includeContext} />
-                    Примеры записей
-                  </label>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                  <div className="rounded-lg border border-border bg-background/50 p-3">
-                    <p className="text-xs font-semibold mb-2">Страницы базы знаний ({kbSelected.length})</p>
-                    <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
-                      {contextSources.kb_pages.map((p) => (
-                        <label key={p.id} className="flex items-center gap-2 text-xs cursor-pointer">
-                          <input type="checkbox" checked={kbSelected.includes(p.id)} onChange={() => toggleKbPage(p.id)} disabled={!includeContext || !contextOptions.include_kb} />
-                          <span className="truncate">{p.title}</span>
-                        </label>
-                      ))}
-                      {contextSources.kb_pages.length === 0 && <p className="text-xs text-muted-foreground">Пока нет опубликованных страниц</p>}
-                    </div>
-                  </div>
-                  <div className="rounded-lg border border-border bg-background/50 p-3">
-                    <p className="text-xs font-semibold mb-2">Таблицы ({tableSelected.length})</p>
-                    <div className="max-h-28 overflow-y-auto space-y-1 pr-1">
-                      {contextSources.tables.map((t) => (
-                        <label key={t.id} className="flex items-center gap-2 text-xs cursor-pointer">
-                          <input type="checkbox" checked={tableSelected.includes(t.id)} onChange={() => toggleTable(t.id)} disabled={!includeContext || (!contextOptions.include_table_schema && !contextOptions.include_table_records)} />
-                          <span className="truncate">{t.name}</span>
-                        </label>
-                      ))}
-                      {contextSources.tables.length === 0 && <p className="text-xs text-muted-foreground">Нет таблиц</p>}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-                  <span className="text-muted-foreground">Прогноз токенов:</span>
-                  <span className="font-semibold text-foreground">{contextEstimate?.estimated_total_tokens ?? 0}</span>
-                  <span className="text-muted-foreground">KB: {contextEstimate?.sources?.kb?.estimated_tokens ?? 0}</span>
-                  <span className="text-muted-foreground">Схемы: {contextEstimate?.sources?.table_schema?.estimated_tokens ?? 0}</span>
-                  <span className="text-muted-foreground">Записи: {contextEstimate?.sources?.table_records?.estimated_tokens ?? 0}</span>
-                  <span className="text-amber-400">+ overhead: {contextEstimate?.model_overhead_tokens ?? 0}</span>
-                  <span className="text-muted-foreground">Объектов выбрано: {totalContextObjects}</span>
-                </div>
-              </div>
-            )}
+          <div className="mb-3">
+            <ContextControl
+              includeContext={includeContext}
+              setIncludeContext={setIncludeContext}
+              contextOptions={contextOptions}
+              setContextOptions={(updater) => setContextOptions(updater)}
+              contextEstimate={contextEstimate}
+              contextSources={contextSources}
+            />
           </div>
 
-          <div className="flex-1 grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-3 min-h-0">
-            <div className="rounded-xl border border-border bg-card p-3 flex flex-col min-h-0">
-              <div className="flex items-center justify-between mb-2">
-                <button className="flex items-center gap-1.5 text-sm font-semibold" onClick={() => setHistoryCollapsed((v) => !v)}>
-                  <History className="h-4 w-4" /> История
-                  {historyCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+          {/* Desktop layout: left history panel (collapsible) + chat */}
+          <div className={`hidden lg:grid flex-1 min-h-0 gap-3 ${historyCollapsed ? 'lg:grid-cols-[56px_1fr]' : 'lg:grid-cols-[300px_1fr]'}`}>
+            {historyCollapsed ? (
+              <div className="rounded-xl border border-border bg-card p-2 flex flex-col items-center gap-2">
+                <button
+                  onClick={() => setHistoryCollapsed(false)}
+                  className="h-9 w-9 rounded-lg border border-border flex items-center justify-center hover:bg-secondary transition-colors"
+                  title="Развернуть историю"
+                >
+                  <PanelLeftOpen className="h-4 w-4" />
                 </button>
-                <button onClick={handleNewChat} className="h-7 w-7 rounded-md border border-border flex items-center justify-center hover:bg-secondary" title="Новый чат">
+                <button
+                  onClick={handleNewChat}
+                  className="h-9 w-9 rounded-lg border border-border flex items-center justify-center hover:bg-secondary transition-colors"
+                  title="Новый чат"
+                >
                   <Plus className="h-4 w-4" />
                 </button>
               </div>
-              {!historyCollapsed && (
+            ) : (
+              <div className="rounded-xl border border-border bg-card p-3 flex flex-col min-h-0">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5 text-sm font-semibold">
+                    <History className="h-4 w-4" />
+                    <span>История</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={handleNewChat}
+                      className="h-7 w-7 rounded-md border border-border flex items-center justify-center hover:bg-secondary"
+                      title="Новый чат"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => setHistoryCollapsed(true)}
+                      className="h-7 w-7 rounded-md border border-border flex items-center justify-center hover:bg-secondary"
+                      title="Свернуть историю"
+                    >
+                      <PanelLeftClose className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
                 <div className="flex-1 overflow-y-auto space-y-1">
                   {loadingChats && <p className="text-xs text-muted-foreground px-2 py-1">Загрузка...</p>}
                   {chats.map((c) => (
@@ -517,8 +480,8 @@ export default function AIPage() {
                   ))}
                   {chats.length === 0 && !loadingChats && <p className="text-xs text-muted-foreground px-2 py-1">Пока нет чатов</p>}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
             <div className="flex flex-col min-h-0">
               <div className="flex-1 overflow-y-auto rounded-xl border border-border bg-card flex flex-col min-h-0">
@@ -575,11 +538,6 @@ export default function AIPage() {
               </div>
 
               <div className="pt-3 flex gap-2 items-end">
-                {messages.length > 0 && (
-                  <button onClick={() => setMessages([])} className="h-10 w-10 rounded-xl border border-border flex items-center justify-center text-muted-foreground hover:text-destructive hover:border-destructive/30 transition-colors shrink-0" title="Очистить чат на экране">
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                )}
                 <div className="flex-1 flex items-end gap-2 rounded-xl border border-border bg-card px-3 py-2 focus-within:border-primary/50 transition-colors">
                   <textarea
                     ref={textareaRef}
@@ -604,6 +562,154 @@ export default function AIPage() {
               </div>
             </div>
           </div>
+
+          {/* Mobile layout: chat + history drawer */}
+          <div className="lg:hidden flex flex-col flex-1 min-h-0">
+            <div className="flex-1 overflow-y-auto rounded-xl border border-border bg-card flex flex-col min-h-0">
+              <div className="px-3 py-2 border-b border-border/60 flex items-center justify-between">
+                <button
+                  onClick={() => setHistoryMobileOpen(true)}
+                  className="h-8 w-8 rounded-md border border-border flex items-center justify-center hover:bg-secondary transition-colors"
+                  title="Открыть историю"
+                >
+                  <History className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={handleNewChat}
+                  className="h-8 w-8 rounded-md border border-border flex items-center justify-center hover:bg-secondary transition-colors"
+                  title="Новый чат"
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
+              {messages.length === 0 ? (
+                <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-4 p-8 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.12),_transparent_55%)]">
+                  <Bot className="h-16 w-16 opacity-20" />
+                  <p className="text-lg font-medium">Начните диалог с AI</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-2xl">
+                    {EXAMPLES.map((ex) => (
+                      <button
+                        key={ex}
+                        onClick={() => void handleSend(ex)}
+                        className="text-left rounded-lg border border-border bg-secondary/20 px-3 py-2 text-sm hover:bg-secondary/40 transition-colors"
+                      >
+                        <span className="inline-flex items-center gap-1.5 mb-1 text-xs text-primary"><Sparkles className="h-3 w-3" /> Пример</span>
+                        <p>{ex}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                  {messages.map((msg, i) => (
+                    <div key={`${msg.id || 'm'}-${i}`} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                      <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-primary text-white' : 'bg-secondary'}`}>
+                        {msg.role === 'user' ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
+                      </div>
+                      <div className={`max-w-[88%] rounded-2xl px-4 py-3 text-sm ${msg.role === 'user' ? 'bg-primary text-white rounded-tr-sm' : 'bg-secondary rounded-tl-sm'}`}>
+                        {msg.role === 'user' ? (
+                          <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                        ) : (
+                          <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-2 prose-pre:my-2 prose-code:before:content-none prose-code:after:content-none">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                          </div>
+                        )}
+                        {msg.tokens && <p className={`text-xs mt-2 ${msg.role === 'user' ? 'text-white/60' : 'text-muted-foreground'}`}>{msg.tokens} токенов</p>}
+                        {msg.actionResult && <DashboardPreview result={msg.actionResult} />}
+                      </div>
+                    </div>
+                  ))}
+                  {sending && (
+                    <div className="flex gap-3">
+                      <div className="h-8 w-8 rounded-full bg-secondary flex items-center justify-center shrink-0"><MessageSquareDashed className="h-4 w-4" /></div>
+                      <div className="bg-secondary rounded-2xl rounded-tl-sm px-4 py-3">
+                        <div className="flex gap-1 items-center h-5">
+                          {[0, 1, 2].map((i) => <span key={i} className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />)}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  <div ref={bottomRef} />
+                </div>
+              )}
+            </div>
+
+            <div className="pt-3 flex gap-2 items-end">
+              <div className="flex-1 flex items-end gap-2 rounded-xl border border-border bg-card px-3 py-2 focus-within:border-primary/50 transition-colors">
+                <textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKey}
+                  placeholder={status?.configured ? 'Напишите сообщение... (Enter — отправить, Shift+Enter — новая строка)' : 'AI не настроен'}
+                  disabled={!status?.configured || sending}
+                  rows={1}
+                  className="flex-1 bg-transparent outline-none resize-none text-sm leading-relaxed max-h-32 disabled:opacity-50"
+                  style={{ minHeight: '24px' }}
+                  onInput={(e) => {
+                    const t = e.target as HTMLTextAreaElement
+                    t.style.height = 'auto'
+                    t.style.height = `${Math.min(t.scrollHeight, 128)}px`
+                  }}
+                />
+                <button onClick={() => void handleSend()} disabled={!input.trim() || sending || !status?.configured} className="h-8 w-8 rounded-lg bg-primary text-white flex items-center justify-center hover:bg-primary/90 disabled:opacity-40 transition-colors shrink-0">
+                  <Send className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {historyMobileOpen && (
+            <div className="fixed inset-0 z-50 lg:hidden">
+              <button className="absolute inset-0 bg-black/50" onClick={() => setHistoryMobileOpen(false)} aria-label="Закрыть историю" />
+              <div className="absolute left-0 top-0 bottom-0 w-80 max-w-[85vw] bg-card border-r border-border p-3 flex flex-col">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5 text-sm font-semibold">
+                    <History className="h-4 w-4" />
+                    <span>История</span>
+                  </div>
+                  <button
+                    onClick={() => setHistoryMobileOpen(false)}
+                    className="h-7 w-7 rounded-md border border-border flex items-center justify-center hover:bg-secondary"
+                    title="Закрыть"
+                  >
+                    <PanelLeftClose className="h-4 w-4" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto space-y-1">
+                  {loadingChats && <p className="text-xs text-muted-foreground px-2 py-1">Загрузка...</p>}
+                  {chats.map((c) => (
+                    <div key={c.id} className={`group rounded-lg ${currentChatId === c.id ? 'bg-primary text-white' : 'hover:bg-secondary'} transition-colors`}>
+                      <button
+                        onClick={() => { setCurrentChatId(c.id); setHistoryMobileOpen(false) }}
+                        className="w-full text-left px-2 py-2 text-sm"
+                      >
+                        <p className="truncate font-medium">{c.title}</p>
+                        <p className={`truncate text-xs ${currentChatId === c.id ? 'text-white/80' : 'text-muted-foreground'}`}>{c.last_message_preview || 'Пустой чат'}</p>
+                      </button>
+                      <div className={`px-2 pb-2 ${currentChatId === c.id ? '' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
+                        <button
+                          onClick={() => handleDeleteChat(c.id)}
+                          className={`text-xs inline-flex items-center gap-1 ${currentChatId === c.id ? 'text-white/90 hover:text-white' : 'text-destructive hover:text-destructive/80'}`}
+                        >
+                          <Trash2 className="h-3 w-3" /> Удалить
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {chats.length === 0 && !loadingChats && <p className="text-xs text-muted-foreground px-2 py-1">Пока нет чатов</p>}
+                </div>
+                <div className="pt-2 border-t border-border mt-2">
+                  <button
+                    onClick={async () => { await handleNewChat(); setHistoryMobileOpen(false) }}
+                    className="w-full h-9 rounded-lg border border-border text-sm hover:bg-secondary flex items-center justify-center gap-1.5"
+                  >
+                    <Plus className="h-4 w-4" /> Новый чат
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>

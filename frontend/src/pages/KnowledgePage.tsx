@@ -1,6 +1,7 @@
 ﻿import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { knowledgeApi } from '@/lib/api'
-import { Plus, Trash2, ChevronRight, ChevronDown, FileText, FolderOpen, X, Save, Edit3, Search, Bold, Italic, Code, Heading1, Heading2, Heading3, List, ListOrdered, Link, Quote, Minus, Eye, EyeOff } from 'lucide-react'
+import { knowledgeApi, type KBPageInfo } from '@/lib/api'
+import { cn } from '@/lib/utils'
+import { Plus, Trash2, ChevronRight, ChevronDown, FileText, FolderOpen, X, Save, Edit3, Search, Bold, Italic, Code, Heading1, Heading2, Heading3, List, ListOrdered, Link, Quote, Minus, Eye, EyeOff, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 
 interface KBPage {
   id: string
@@ -9,7 +10,19 @@ interface KBPage {
   parent_id: string | null
   slug: string
   created_at: string
-  updated_at: string
+  updated_at?: string
+}
+
+function normalizePage(p: KBPageInfo): KBPage {
+  return {
+    id: p.id,
+    title: p.title,
+    content: p.content ?? '',
+    parent_id: p.parent_id,
+    slug: p.slug,
+    created_at: p.created_at,
+    updated_at: p.updated_at || p.created_at,
+  }
 }
 
 function buildTree(pages: KBPage[], parentId: string | null = null): KBPage[] {
@@ -53,11 +66,12 @@ export default function KnowledgePage() {
   const [showNew, setShowNew] = useState(false)
   const [newForm, setNewForm] = useState({ title: '', content: '', parent_id: '' })
   const [search, setSearch] = useState('')
+  const [sidebarOpen, setSidebarOpen] = useState(true)
 
   const load = useCallback(async () => {
     try {
       const r = await knowledgeApi.list()
-      if (r.data.ok && r.data.data) setPages(r.data.data as KBPage[])
+      if (r.data.ok && r.data.data) setPages(r.data.data.map(normalizePage))
     } catch { /* ignore */ }
     setLoading(false)
   }, [])
@@ -74,7 +88,7 @@ export default function KnowledgePage() {
     try {
       const r = await knowledgeApi.update(selected.id, draft)
       if (r.data.ok && r.data.data) {
-        const updated = r.data.data as KBPage
+        const updated = normalizePage(r.data.data)
         setPages(prev => prev.map(p => p.id === updated.id ? updated : p))
         setSelected(updated)
         setEditing(false)
@@ -87,9 +101,9 @@ export default function KnowledgePage() {
     if (!newForm.title.trim()) return
     setSaving(true)
     try {
-      const r = await knowledgeApi.create({ ...newForm, parent_id: newForm.parent_id || null })
+      const r = await knowledgeApi.create({ ...newForm, parent_id: newForm.parent_id || undefined })
       if (r.data.ok && r.data.data) {
-        const created = r.data.data as KBPage
+        const created = normalizePage(r.data.data)
         setPages(prev => [...prev, created])
         setSelected(created)
         setDraft({ title: created.title, content: created.content })
@@ -108,16 +122,22 @@ export default function KnowledgePage() {
     } catch { /* ignore */ }
   }
 
-  const filtered = search ? pages.filter(p => p.title.toLowerCase().includes(search.toLowerCase()) || p.content.toLowerCase().includes(search.toLowerCase())) : pages
+  const filtered = search ? pages.filter(p => p.title.toLowerCase().includes(search.toLowerCase()) || (p.content || '').toLowerCase().includes(search.toLowerCase())) : pages
   const roots = buildTree(filtered)
 
   return (
     <div className="flex h-[calc(100vh-8rem)] gap-0 rounded-xl border border-border overflow-hidden bg-card">
       {/* Sidebar */}
-      <div className="w-64 shrink-0 border-r border-border flex flex-col">
-        <div className="p-3 border-b border-border space-y-2">
+      <div className={cn(
+        'shrink-0 border-r border-border flex flex-col transition-all duration-300 overflow-hidden',
+        sidebarOpen ? 'w-64' : 'w-0 border-r-0'
+      )}>
+        <div className="p-3 border-b border-border space-y-2 min-w-[256px]">
           <div className="flex items-center gap-2">
             <h2 className="font-semibold text-sm flex-1">База знаний</h2>
+            <button onClick={() => setSidebarOpen(false)} className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors" title="Скрыть панель">
+              <PanelLeftClose className="h-4 w-4" />
+            </button>
             <button onClick={() => setShowNew(true)} className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors" title="Новая страница">
               <Plus className="h-4 w-4" />
             </button>
@@ -127,7 +147,7 @@ export default function KnowledgePage() {
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск..." className="w-full h-7 pl-7 pr-2 text-xs rounded-md border border-input bg-background outline-none focus:border-primary" />
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-2">
+        <div className="flex-1 overflow-y-auto p-2 min-w-[256px]">
           {loading ? (
             <div className="flex items-center justify-center py-8"><div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>
           ) : roots.length === 0 ? (
@@ -143,7 +163,17 @@ export default function KnowledgePage() {
       </div>
 
       {/* Editor */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 relative">
+        {/* Sidebar toggle when collapsed */}
+        {!sidebarOpen && (
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="absolute left-2 top-3 z-10 h-8 w-8 rounded-md border border-border bg-card flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors shadow-sm"
+            title="Показать панель"
+          >
+            <PanelLeftOpen className="h-4 w-4" />
+          </button>
+        )}
         {selected ? (
           <KBEditor
             selected={selected}
@@ -334,7 +364,7 @@ function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSa
         )}
       </div>
       <div className="px-5 py-2 border-t border-border text-xs text-muted-foreground flex items-center justify-between">
-        <span>Изменено: {new Date(selected.updated_at).toLocaleString('ru')}</span>
+        <span>Изменено: {new Date(selected.updated_at || selected.created_at).toLocaleString('ru')}</span>
         {editing && <span className="text-primary/60">Markdown поддерживается</span>}
       </div>
     </>

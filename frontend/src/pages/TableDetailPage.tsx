@@ -235,6 +235,19 @@ function TableDetailPageContent() {
     setAddingRecord(false)
   }
 
+  const handleQuickAddRecord = async () => {
+    if (!tableId || addingRecord) return
+    setAddingRecord(true)
+    try {
+      const resp = await recordsApi.create(tableId, {})
+      if (resp.data.ok && resp.data.data) {
+        setRecords(prev => [...prev, resp.data.data!])
+        setTotal(prev => prev + 1)
+      }
+    } catch { /* ignore */ }
+    setAddingRecord(false)
+  }
+
   const handleCellSave = async (recordId: string, colId: string, value: string) => {
     if (!tableId) return
     const key = `${recordId}-${colId}`
@@ -595,11 +608,13 @@ function TableDetailPageContent() {
             {/* Inline add row at bottom — only on last page */}
             {!showNewRow && columns.length > 0 && (page === totalPages - 1 || totalPages === 0) && (
               <tr
-                onClick={() => setShowNewRow(true)}
+                onClick={handleQuickAddRecord}
                 className="border-t border-dashed border-border/50 hover:bg-secondary/20 cursor-pointer transition-colors group/addrow"
               >
                 <td className="px-3 py-1.5">
-                  <Plus className="h-3.5 w-3.5 text-muted-foreground/40 group-hover/addrow:text-primary transition-colors" />
+                  {addingRecord
+                    ? <Loader2 className="h-3.5 w-3.5 text-primary animate-spin" />
+                    : <Plus className="h-3.5 w-3.5 text-muted-foreground/40 group-hover/addrow:text-primary transition-colors" />}
                 </td>
                 <td colSpan={columns.length + 2} className="px-2 py-1.5 text-xs text-muted-foreground/40 group-hover/addrow:text-muted-foreground transition-colors">
                   Добавить запись
@@ -665,17 +680,42 @@ function TableDetailPageContent() {
 const CALC_OPS = ['none','count','filled','empty','sum','avg','median','min','max','unique'] as const
 type CalcOp = typeof CALC_OPS[number]
 
-const CALC_META: Record<CalcOp, { label: string; desc: string; numOnly?: boolean }> = {
-  none:   { label: '—',          desc: 'Не считать' },
-  count:  { label: 'Кол-во',     desc: 'Всего записей в таблице' },
-  filled: { label: 'Заполнено',  desc: 'Записей с непустым значением' },
-  empty:  { label: 'Пусто',      desc: 'Записей с пустым значением' },
-  unique: { label: 'Уникальных', desc: 'Количество уникальных значений' },
-  sum:    { label: 'Сумма',      desc: 'Сумма числовых значений', numOnly: true },
-  avg:    { label: 'Среднее',    desc: 'Среднее арифметическое', numOnly: true },
-  median: { label: 'Медиана',    desc: 'Серединное значение (50-й перцентиль)', numOnly: true },
-  min:    { label: 'Мин',        desc: 'Минимальное значение', numOnly: true },
-  max:    { label: 'Макс',       desc: 'Максимальное значение', numOnly: true },
+const CALC_META: Record<CalcOp, { label: string; desc: string; numOnly?: boolean; color: string }> = {
+  none:   { label: 'Выбрать',    desc: 'Нажмите чтобы выбрать агрегацию',              color: 'text-muted-foreground' },
+  count:  { label: 'Кол-во',     desc: 'Всего строк в таблице (включая пустые)',        color: 'text-blue-400' },
+  filled: { label: 'Заполнено',  desc: 'Строк с непустым значением в этом столбце',     color: 'text-emerald-400' },
+  empty:  { label: 'Пусто',      desc: 'Строк с пустым значением в этом столбце',       color: 'text-amber-400' },
+  unique: { label: 'Уникальных', desc: 'Количество различных (уникальных) значений',    color: 'text-purple-400' },
+  sum:    { label: 'Сумма',      desc: 'Сумма всех числовых значений столбца',          color: 'text-cyan-400',    numOnly: true },
+  avg:    { label: 'Среднее',    desc: 'Среднее арифметическое числовых значений',      color: 'text-indigo-400',  numOnly: true },
+  median: { label: 'Медиана',    desc: 'Серединное значение (50-й перцентиль)',          color: 'text-pink-400',    numOnly: true },
+  min:    { label: 'Минимум',    desc: 'Наименьшее значение в столбце',                 color: 'text-red-400',     numOnly: true },
+  max:    { label: 'Максимум',   desc: 'Наибольшее значение в столбце',                 color: 'text-orange-400',  numOnly: true },
+}
+
+function CalcTooltip({ text, children, align = 'left', direction = 'up' }: {
+  text: string
+  children: ReactNode
+  align?: 'left' | 'right'
+  direction?: 'up' | 'down'
+}) {
+  const posY = direction === 'down' ? 'top-full mt-2' : 'bottom-full mb-2'
+  const posX = align === 'right' ? 'right-0' : 'left-0'
+  const arrowX = align === 'right' ? 'right-3' : 'left-3'
+  const arrowDir = direction === 'down'
+    ? 'border-b-4 border-l-transparent border-r-transparent border-t-0 border-b-border bottom-full mb-[-1px]'
+    : 'border-t-4 border-l-transparent border-r-transparent border-b-0 border-t-border top-full'
+  return (
+    <div className="relative group/tip inline-block">
+      {children}
+      <div className={`pointer-events-none absolute ${posY} ${posX} z-50 opacity-0 group-hover/tip:opacity-100 transition-opacity duration-150`}>
+        <div className="bg-popover border border-border rounded-lg px-2.5 py-1.5 text-xs text-foreground shadow-lg max-w-[220px] break-words">
+          {text}
+        </div>
+        <div className={`absolute w-0 h-0 border-l-4 border-r-4 ${arrowX} ${arrowDir}`} />
+      </div>
+    </div>
+  )
 }
 
 function ColumnCalculators({ columns, records }: { columns: ColumnInfo[]; records: RecordInfo[] }) {
@@ -708,64 +748,77 @@ function ColumnCalculators({ columns, records }: { columns: ColumnInfo[]; record
 
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-border flex items-center gap-2 flex-wrap">
-        <Hash className="h-4 w-4 text-primary" />
-        <span className="text-sm font-medium">Калькулятор столбцов</span>
-        <span className="text-xs text-muted-foreground">
-          Выберите агрегацию для каждого столбца — результат появится ниже
-        </span>
-        <span className="ml-auto text-xs text-muted-foreground/60">{records.length} строк</span>
+      {/* Header */}
+      <div className="px-4 py-3 border-b border-border flex items-center gap-2">
+        <Hash className="h-4 w-4 text-primary shrink-0" />
+        <span className="text-sm font-semibold">Калькулятор столбцов</span>
+        <CalcTooltip text="Выберите агрегацию для каждого столбца — нажмите на название операции" align="right" direction="down">
+          <span className="text-xs text-muted-foreground cursor-help border-b border-dashed border-muted-foreground/40">
+            Как использовать?
+          </span>
+        </CalcTooltip>
+        <span className="ml-auto text-xs text-muted-foreground/50 tabular-nums">{records.length} строк</span>
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border bg-secondary/20">
-              {columns.map(col => {
-                const op = ops[col.id] || 'none'
-                const isNum = ['number'].includes(col.field_type)
-                return (
-                  <th key={col.id} className="px-3 py-2 text-left min-w-[140px]">
-                    <div className="flex flex-col gap-1">
-                      <span className="text-xs text-muted-foreground font-medium truncate">{col.name}</span>
-                      <select
-                        value={op}
-                        onChange={e => setOps(prev => ({ ...prev, [col.id]: e.target.value as CalcOp }))}
-                        className="h-7 px-1.5 rounded border border-input bg-background text-xs font-normal outline-none focus:border-primary"
-                        title={CALC_META[op].desc}
+
+      {/* Cards */}
+      <div className="p-3 flex flex-wrap gap-3">
+        {columns.map(col => {
+          const op = ops[col.id] || 'none'
+          const meta = CALC_META[op]
+          const isNum = col.field_type === 'number'
+          const result = op !== 'none' ? calc(col.id, op) : null
+          const availableOps = CALC_OPS.filter(o => !CALC_META[o].numOnly || isNum)
+
+          const colInfo = ftMap[col.field_type]
+          const ColIcon = colInfo?.icon || Type
+
+          return (
+            <div
+              key={col.id}
+              className="flex flex-col gap-2.5 rounded-xl border border-border bg-background p-3 min-w-[160px] flex-1"
+            >
+              {/* Column name */}
+              <div className="flex items-center gap-1.5 min-w-0">
+                <ColIcon className="h-3.5 w-3.5 text-muted-foreground/60 shrink-0" />
+                <span className="text-xs font-medium text-muted-foreground truncate">{col.name}</span>
+              </div>
+
+              {/* Operation pills */}
+              <div className="flex flex-wrap gap-1">
+                {availableOps.filter(o => o !== 'none').map(o => {
+                  const m = CALC_META[o]
+                  const isActive = op === o
+                  return (
+                    <CalcTooltip key={o} text={m.desc}>
+                      <button
+                        onClick={() => setOps(prev => ({ ...prev, [col.id]: isActive ? 'none' : o }))}
+                        className={`text-[11px] px-2 py-0.5 rounded-full border transition-all ${
+                          isActive
+                            ? `border-primary/40 bg-primary/10 ${m.color} font-medium`
+                            : 'border-border text-muted-foreground/50 hover:border-border hover:text-muted-foreground hover:bg-secondary/50'
+                        }`}
                       >
-                        {CALC_OPS.filter(o => !CALC_META[o].numOnly || isNum || o === 'none').map(o => (
-                          <option key={o} value={o}>{CALC_META[o].label}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </th>
-                )
-              })}
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              {columns.map(col => {
-                const op = ops[col.id] || 'none'
-                const meta = CALC_META[op]
-                const result = op !== 'none' ? calc(col.id, op) : null
-                return (
-                  <td key={col.id} className="px-3 py-2.5">
-                    {result !== null ? (
-                      <div className="flex flex-col">
-                        <span className="text-[10px] text-muted-foreground uppercase tracking-wide">{meta.label}</span>
-                        <span className="text-base font-bold tabular-nums">{result}</span>
-                        <span className="text-[10px] text-muted-foreground/50 mt-0.5">{meta.desc}</span>
-                      </div>
-                    ) : (
-                      <span className="text-muted-foreground/20 text-xs">—</span>
-                    )}
-                  </td>
-                )
-              })}
-            </tr>
-          </tbody>
-        </table>
+                        {m.label}
+                      </button>
+                    </CalcTooltip>
+                  )
+                })}
+              </div>
+
+              {/* Result */}
+              <div className="mt-auto pt-1 border-t border-border/50">
+                {result !== null ? (
+                  <div className="flex items-baseline gap-1.5">
+                    <span className={`text-xl font-bold tabular-nums ${meta.color}`}>{result}</span>
+                    <span className="text-[10px] text-muted-foreground/50 uppercase tracking-wide">{meta.label}</span>
+                  </div>
+                ) : (
+                  <span className="text-xs text-muted-foreground/30 italic">не выбрано</span>
+                )}
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

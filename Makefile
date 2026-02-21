@@ -57,7 +57,7 @@ help:
 init:
 	@echo "$(CYAN)▶ Инициализация проекта...$(RESET)"
 	@if [ ! -f backend/.env ]; then \
-		cp backend/.env.example backend/.env; \
+		cp .env.example backend/.env; \
 		echo "$(GREEN)✔ Создан backend/.env из .env.example$(RESET)"; \
 	else \
 		echo "$(YELLOW)⚠ backend/.env уже существует, пропускаем$(RESET)"; \

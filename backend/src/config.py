@@ -65,6 +65,7 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     OPENAI_BEARER_TOKEN: str = ""
     OPENAI_MODEL: str = "gpt-4.1"
+    AI_MAX_TOKENS: int = 6000
     AI_BASE_URL: str = "https://agent.timeweb.cloud/api/v1/cloud-ai/agents/289156bc-4adc-4be8-94cf-6767a704a80c/v1"
     AI_SYSTEM_PROMPT: str = "Ты — AI-ассистент CRM платформы. Отвечай на русском языке. Помогай с данными, отчётами и аналитикой."
 

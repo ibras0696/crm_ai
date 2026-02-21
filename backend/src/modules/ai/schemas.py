@@ -52,3 +52,7 @@ class CreateChatRequest(BaseModel):
 class ContextEstimateRequest(BaseModel):
     include_context: bool = True
     context_options: dict | None = None
+    system_prompt: str | None = None
+    history: list[ChatMessage] = Field(default_factory=list)
+    user_message: str | None = None
+    include_action_instructions: bool = True

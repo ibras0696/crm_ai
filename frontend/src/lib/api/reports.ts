@@ -57,6 +57,8 @@ export interface DashboardWidgetConfig {
   aggregation: 'count' | 'sum' | 'avg' | 'min' | 'max'
   value_column_id: string | null
   group_by_column_id: string | null
+  time_column_id: string | null
+  time_granularity: 'day' | 'week' | 'month'
   filters: DashboardFilter[]
   limit: number
   selected_column_ids: string[]
@@ -65,7 +67,7 @@ export interface DashboardWidgetConfig {
 export interface DashboardWidget {
   id: string
   title: string
-  widget_type: 'metric' | 'bar' | 'line' | 'pie' | 'table'
+  widget_type: 'metric' | 'bar' | 'line' | 'area' | 'pie' | 'donut' | 'table'
   table_id: string | null
   config: DashboardWidgetConfig
   position: number

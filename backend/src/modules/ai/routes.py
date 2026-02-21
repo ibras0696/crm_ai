@@ -20,19 +20,66 @@ from src.modules.ai.schemas import (
     CreateChatRequest,
 )
 from src.modules.ai.service import (
+    estimate_tokens,
     build_messages,
-    build_org_context,
+    build_org_context_for_user,
     call_openai_compatible_api,
     extract_action_payload,
+    handle_create_columns_action,
+    handle_create_records_action,
     get_or_create_session,
     handle_create_dashboard_action,
+    handle_create_table_action,
 )
 from src.modules.auth.dependencies import CurrentUser, require_roles
 from src.modules.knowledge.models import KBPage
+from src.modules.schedule.models import Event
 from src.modules.tables.models import Table
 from sqlalchemy.orm import selectinload
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+
+
+async def _execute_action(
+    uow: UnitOfWork,
+    current_user: CurrentUser,
+    action_payload: dict,
+    user_message: str,
+) -> dict | None:
+    action_name = str(action_payload.get("action") or "").strip()
+    if action_name == "create_dashboard":
+        return await handle_create_dashboard_action(
+            uow,
+            current_user.org_id,
+            current_user.user_id,
+            action_payload,
+            user_message=user_message,
+        )
+    if action_name == "create_table":
+        return await handle_create_table_action(
+            uow,
+            current_user.org_id,
+            current_user.user_id,
+            action_payload,
+            user_message=user_message,
+        )
+    if action_name == "create_columns":
+        return await handle_create_columns_action(
+            uow,
+            current_user.org_id,
+            current_user.user_id,
+            action_payload,
+            user_message=user_message,
+        )
+    if action_name == "create_records":
+        return await handle_create_records_action(
+            uow,
+            current_user.org_id,
+            current_user.user_id,
+            action_payload,
+            user_message=user_message,
+        )
+    return None
 
 
 @router.post("/chat", response_model=ApiResponse[ChatResponse])
@@ -69,13 +116,59 @@ async def ai_chat(
     org_context = ""
     context_meta: dict | None = None
     if body.include_context:
-        org_context, context_meta = await build_org_context(current_user.org_id, context_options)
+        org_context, context_meta = await build_org_context_for_user(current_user.org_id, current_user.user_id, context_options)
 
     history_rows = [{"role": m.role, "content": m.content} for m in body.history]
     messages = build_messages(system_prompt, org_context, db_messages, history_rows, body.message)
 
+    direct_action_payload, cleaned_direct_reply = extract_action_payload(body.message)
+    if direct_action_payload:
+        async with UnitOfWork() as uow:
+            session = await get_or_create_session(uow, current_user.org_id, current_user.user_id, body.chat_id, body.message)
+            action_result = await _execute_action(uow, current_user, direct_action_payload, body.message)
+
+            user_msg = AIChatMessage(
+                session_id=session.id,
+                org_id=current_user.org_id,
+                user_id=current_user.user_id,
+                role="user",
+                content=body.message,
+                token_count=None,
+                meta={"include_context": body.include_context, "context_options": context_options, "direct_action": True},
+            )
+            assistant_reply = cleaned_direct_reply or "Команда выполнена."
+            assistant_msg = AIChatMessage(
+                session_id=session.id,
+                org_id=current_user.org_id,
+                user_id=current_user.user_id,
+                role="assistant",
+                content=assistant_reply,
+                token_count=0,
+                meta={"action_requested": True, "action_result": action_result, "direct_action": True},
+            )
+            uow.session.add(user_msg)
+            uow.session.add(assistant_msg)
+            await uow.commit()
+
+        return ApiResponse(
+            data=ChatResponse(
+                reply=assistant_reply,
+                model=settings.OPENAI_MODEL,
+                usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                chat_id=str(session.id),
+                context_estimate=context_meta,
+                action_result=action_result,
+            )
+        )
+
     try:
-        data = await call_openai_compatible_api(settings.AI_BASE_URL, bearer_token, settings.OPENAI_MODEL, messages)
+        data = await call_openai_compatible_api(
+            settings.AI_BASE_URL,
+            bearer_token,
+            settings.OPENAI_MODEL,
+            messages,
+            max_tokens=settings.AI_MAX_TOKENS,
+        )
         reply_raw = data["choices"][0]["message"]["content"]
         action_payload, reply = extract_action_payload(reply_raw)
         usage = data.get("usage", {})
@@ -115,9 +208,10 @@ async def ai_chat(
             )
 
             action_result = None
-            if action_payload and action_payload.get("action") == "create_dashboard":
-                action_result = await handle_create_dashboard_action(uow, current_user.org_id, current_user.user_id, action_payload)
-                assistant_msg.meta = {"action_requested": True, "action_result": action_result}
+            if action_payload:
+                action_result = await _execute_action(uow, current_user, action_payload, body.message)
+                if action_result is not None:
+                    assistant_msg.meta = {"action_requested": True, "action_result": action_result}
 
             await uow.commit()
 
@@ -227,7 +321,7 @@ async def ai_create_chat(
     body: CreateChatRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
 ):
-    title = (body.title or "\u041d\u043e\u0432\u044b\u0439 \u0447\u0430\u0442").strip()[:255] or "\u041d\u043e\u0432\u044b\u0439 \u0447\u0430\u0442"
+    title = (body.title or "Новый чат").strip()[:255] or "Новый чат"
     async with UnitOfWork() as uow:
         session = AIChatSession(org_id=current_user.org_id, user_id=current_user.user_id, title=title)
         uow.session.add(session)
@@ -325,13 +419,35 @@ async def ai_context_estimate(
                     "kb": {"enabled": False, "chars": 0, "estimated_tokens": 0},
                     "table_schema": {"enabled": False, "chars": 0, "estimated_tokens": 0},
                     "table_records": {"enabled": False, "chars": 0, "estimated_tokens": 0},
+                    "schedule": {"enabled": False, "chars": 0, "estimated_tokens": 0},
                 },
-                "selected": {"kb_pages": [], "tables": []},
+                "selected": {"kb_pages": [], "tables": [], "schedule_events": []},
                 "model_overhead_tokens": 0,
+                "max_context_tokens": 0,
+                "used_context_tokens": 0,
+                "context_truncated": False,
+                "estimated_prompt_tokens": 0,
+                "prompt_message_overhead_tokens": 0,
                 "estimated_total_tokens": 0,
             }
         )
-    _, meta = await build_org_context(current_user.org_id, body.context_options)
+    org_context, meta = await build_org_context_for_user(current_user.org_id, current_user.user_id, body.context_options)
+
+    # Estimate prompt tokens for the next request (context + system + history + user message).
+    system_prompt = body.system_prompt or settings.AI_SYSTEM_PROMPT
+    user_message = body.user_message or ""
+    history = [{"role": h.role, "content": h.content} for h in (body.history or [])][-10:]
+
+    prompt_messages = build_messages(system_prompt, org_context, db_messages=[], history=history, user_message=user_message)
+    # Approximate message framing overhead.
+    message_overhead = 4 * len(prompt_messages) + 2
+    content_joined = "\n".join((m.get("content") or "") for m in prompt_messages)
+    estimated_prompt_tokens = estimate_tokens(content_joined) + message_overhead
+
+    meta["prompt_message_overhead_tokens"] = int(message_overhead)
+    meta["estimated_prompt_tokens"] = int(estimated_prompt_tokens)
+    # Backwards-compat: keep estimated_total_tokens as "prompt estimate".
+    meta["estimated_total_tokens"] = int(estimated_prompt_tokens)
     return ApiResponse(data=meta)
 
 
@@ -357,6 +473,14 @@ async def ai_context_sources(
                 .limit(200)
             )
         ).scalars().all()
+        schedule_events = (
+            await uow.session.execute(
+                select(Event)
+                .where(Event.org_id == current_user.org_id)
+                .order_by(Event.start_at.desc())
+                .limit(300)
+            )
+        ).scalars().all()
     return ApiResponse(
         data={
             "kb_pages": [{"id": str(p.id), "title": p.title} for p in kb_rows],
@@ -367,6 +491,15 @@ async def ai_context_sources(
                     "columns": [{"id": str(c.id), "name": c.name} for c in sorted(t.columns, key=lambda x: x.position)],
                 }
                 for t in tables
+            ],
+            "schedule_events": [
+                {
+                    "id": str(ev.id),
+                    "title": ev.title,
+                    "start_at": ev.start_at.isoformat() if ev.start_at else None,
+                    "recurrence": ev.recurrence,
+                }
+                for ev in schedule_events
             ],
         }
     )

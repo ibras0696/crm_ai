@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { Outlet, Navigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
+import { cn } from '@/lib/utils'
 import Sidebar from './Sidebar'
 import Header from './Header'
 
 export default function AppLayout() {
   const { isAuthenticated, isLoading } = useAuth()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
   if (isLoading) {
     return (
@@ -25,8 +27,19 @@ export default function AppLayout() {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar mobileOpen={mobileMenuOpen} onMobileClose={() => setMobileMenuOpen(false)} />
-      <div className="flex flex-1 flex-col overflow-hidden md:ml-[260px] transition-all duration-300" id="main-content">
+      <Sidebar
+        mobileOpen={mobileMenuOpen}
+        onMobileClose={() => setMobileMenuOpen(false)}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
+      />
+      <div
+        className={cn(
+          'flex flex-1 flex-col overflow-hidden transition-all duration-300',
+          sidebarCollapsed ? 'md:ml-[68px]' : 'md:ml-[260px]'
+        )}
+        id="main-content"
+      >
         <Header onMenuToggle={() => setMobileMenuOpen(true)} />
         <main className="flex-1 overflow-y-auto p-4 md:p-6 scrollbar-thin">
           <Outlet />

@@ -14,42 +14,33 @@
 
 ```mermaid
 flowchart TB
-
-  %% ==== USER LAYER ====
-  subgraph CLIENT
-    U[User]
-    B[Browser]
+  subgraph CLIENT["Client"]
+    U["User"] --> B["Browser"]
   end
 
-  %% ==== FRONTEND ====
-  subgraph FRONTEND
-    FE[React + Vite App]
+  subgraph FE_LAYER["Frontend"]
+    FE["React + Vite App"]
   end
 
-  %% ==== BACKEND ====
-  subgraph BACKEND
-    API[FastAPI API]
-    WORKER[Celery Worker / Beat]
+  subgraph BE_LAYER["Backend"]
+    API["FastAPI API"]
+    WORKER["Celery Worker / Beat"]
   end
 
-  %% ==== DATA LAYER ====
-  subgraph DATA
-    DB[(PostgreSQL + pgvector)]
-    REDIS[(Redis)]
-    MQ[(RabbitMQ)]
-    S3[(MinIO / S3 Storage)]
+  subgraph DATA_LAYER["Data"]
+    DB[("PostgreSQL + pgvector")]
+    REDIS[("Redis")]
+    MQ[("RabbitMQ")]
+    S3[("MinIO / S3 Storage")]
   end
 
-  %% ==== MONITORING ====
-  subgraph OBSERVABILITY
-    PROM[Prometheus]
-    GRAF[Grafana]
-    NODE[node-exporter]
+  subgraph OBS_LAYER["Observability"]
+    PROM["Prometheus"]
+    GRAF["Grafana"]
+    NODE["node-exporter"]
   end
 
-  %% ==== FLOW ====
-  U --> B --> FE --> API
-
+  B --> FE --> API
   API --> DB
   API --> REDIS
   API --> MQ

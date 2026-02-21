@@ -68,6 +68,12 @@ services:
       timeout: 10s
       retries: 5
 
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: always
+    expose:
+      - "9100"
+
   minio:
     image: minio/minio:latest
     restart: always

@@ -1,188 +1,156 @@
 # ============================================================
 #  CRM Makefile — удобные команды для разработки и продакшена
+#
+# Требования:
+# - GNU Make
+# - Docker + Docker Compose v2
+#
+# Примечание:
+# - Makefile использует простые POSIX-команды (`cp`, `sh`).
+#   Если вы на Windows, запускайте из Git Bash / WSL.
 # ============================================================
 
-.PHONY: help up down build restart logs ps \
-        up-prod down-prod logs-prod \
-        migrate shell-api shell-db \
-        test lint clean init
+.PHONY: help init up down build restart ps logs logs-api logs-front \
+        migrate migration shell-api shell-db \
+        up-prod down-prod restart-prod logs-prod \
+        test lint lint-fix clean clean-all
 
-# Цвета для вывода
+COMPOSE := docker compose
+SECRETS_FILE ?= secrets.yml
+
+COMPOSE_DEV_FILES := -f docker-compose.yml
+ifneq ($(wildcard $(SECRETS_FILE)),)
+COMPOSE_DEV_FILES += -f $(SECRETS_FILE)
+endif
+COMPOSE_DEV := $(COMPOSE) $(COMPOSE_DEV_FILES)
+
+COMPOSE_PROD_FILES := -f docker-compose.prod.yml
+ifneq ($(wildcard $(SECRETS_FILE)),)
+COMPOSE_PROD_FILES += -f $(SECRETS_FILE)
+endif
+COMPOSE_PROD := $(COMPOSE) $(COMPOSE_PROD_FILES)
+
+# Цвета (опционально)
 GREEN  := \033[0;32m
 YELLOW := \033[0;33m
 CYAN   := \033[0;36m
 RESET  := \033[0m
 
-## ─── Помощь ───────────────────────────────────────────────
 help:
 	@echo ""
-	@echo "$(CYAN)╔══════════════════════════════════════════════╗$(RESET)"
-	@echo "$(CYAN)║         CRM — доступные команды              ║$(RESET)"
-	@echo "$(CYAN)╚══════════════════════════════════════════════╝$(RESET)"
+	@echo "$(CYAN)CRM — доступные команды$(RESET)"
 	@echo ""
-	@echo "$(GREEN)── DEV ──────────────────────────────────────$(RESET)"
-	@echo "  make init          — первый запуск (копирует .env, поднимает всё)"
-	@echo "  make up            — запустить все сервисы (dev)"
-	@echo "  make down          — остановить все сервисы (dev)"
-	@echo "  make build         — пересобрать образы (dev)"
-	@echo "  make restart       — пересобрать и перезапустить (dev)"
-	@echo "  make logs          — логи всех сервисов"
-	@echo "  make logs-api      — логи только API"
-	@echo "  make logs-front    — логи только фронтенда"
-	@echo "  make ps            — статус контейнеров"
+	@echo "$(GREEN)DEV$(RESET)"
+	@echo "  make init          — подготовка (создаёт secrets.yml из example, если нужно)"
+	@echo "  make up            — поднять dev (docker-compose.yml + secrets.yml если есть)"
+	@echo "  make down          — остановить dev"
+	@echo "  make restart       — пересобрать и перезапустить dev"
+	@echo "  make logs          — логи dev (все сервисы)"
+	@echo "  make logs-api      — логи dev (api)"
+	@echo "  make logs-front    — логи dev (frontend)"
+	@echo "  make ps            — статус контейнеров dev"
 	@echo ""
-	@echo "$(GREEN)── PROD ─────────────────────────────────────$(RESET)"
-	@echo "  make up-prod       — запустить продакшен"
-	@echo "  make down-prod     — остановить продакшен"
-	@echo "  make logs-prod     — логи продакшена"
-	@echo "  make restart-prod  — перезапустить продакшен"
+	@echo "$(GREEN)PROD$(RESET)"
+	@echo "  make up-prod       — поднять prod (docker-compose.prod.yml + secrets.yml если есть)"
+	@echo "  make down-prod     — остановить prod"
+	@echo "  make restart-prod  — пересобрать и перезапустить prod"
+	@echo "  make logs-prod     — логи prod"
 	@echo ""
-	@echo "$(GREEN)── БД / МИГРАЦИИ ────────────────────────────$(RESET)"
-	@echo "  make migrate       — применить миграции Alembic"
-	@echo "  make migration m=  — создать новую миграцию (m='название')"
-	@echo "  make shell-db      — psql в контейнере БД"
-	@echo "  make shell-api     — bash в контейнере API"
+	@echo "$(GREEN)БД / миграции$(RESET)"
+	@echo "  make migrate       — применить миграции Alembic (dev)"
+	@echo "  make migration m=  — создать миграцию (m='название') (dev)"
+	@echo "  make shell-db      — psql в контейнере db (dev)"
+	@echo "  make shell-api     — sh в контейнере api (dev)"
 	@echo ""
-	@echo "$(GREEN)── ТЕСТЫ / ЛИНТЕР ───────────────────────────$(RESET)"
-	@echo "  make test          — запустить тесты бэкенда"
-	@echo "  make lint          — проверить код (ruff)"
-	@echo "  make lint-fix      — исправить код (ruff --fix)"
-	@echo ""
-	@echo "$(GREEN)── ОЧИСТКА ──────────────────────────────────$(RESET)"
-	@echo "  make clean         — удалить остановленные контейнеры и образы"
-	@echo "  make clean-all     — полная очистка (включая volumes!)"
+	@echo "$(GREEN)Качество$(RESET)"
+	@echo "  make test          — pytest (dev)"
+	@echo "  make lint          — ruff check (dev)"
+	@echo "  make lint-fix      — ruff --fix (dev)"
 	@echo ""
 
-## ─── Первый запуск ────────────────────────────────────────
 init:
-	@echo "$(CYAN)▶ Инициализация проекта...$(RESET)"
-	@if [ ! -f backend/.env ]; then \
-		cp .env.example backend/.env; \
-		echo "$(GREEN)✔ Создан backend/.env из .env.example$(RESET)"; \
+	@if [ ! -f "$(SECRETS_FILE)" ]; then \
+		if [ -f "secrets.yml.example" ]; then \
+			cp secrets.yml.example "$(SECRETS_FILE)"; \
+			echo "$(GREEN)✔ Создан $(SECRETS_FILE) из secrets.yml.example$(RESET)"; \
+		else \
+			echo "$(YELLOW)⚠ secrets.yml.example не найден. Создай $(SECRETS_FILE) вручную.$(RESET)"; \
+		fi; \
 	else \
-		echo "$(YELLOW)⚠ backend/.env уже существует, пропускаем$(RESET)"; \
+		echo "$(GREEN)✔ $(SECRETS_FILE) уже существует$(RESET)"; \
 	fi
-	@echo "$(CYAN)▶ Запускаем сервисы...$(RESET)"
-	docker compose up -d --build
-	@echo "$(GREEN)✔ Проект запущен!$(RESET)"
-	@echo ""
-	@echo "  API:       http://localhost:8000"
-	@echo "  Docs:      http://localhost:8000/api/docs"
-	@echo "  Frontend:  http://localhost:5173"
-	@echo "  MinIO:     http://localhost:9001"
-	@echo "  RabbitMQ:  http://localhost:15672"
-	@echo "  Grafana:   http://localhost:3000"
-	@echo "  Prometheus:http://localhost:9090"
+	@echo "$(CYAN)Примечание: backend/.env используется только для dev (env_file).$(RESET)"
 
-## ─── DEV команды ──────────────────────────────────────────
 up:
-	@echo "$(CYAN)▶ Запускаем dev-окружение...$(RESET)"
-	docker compose up -d
-	@echo "$(GREEN)✔ Готово$(RESET)"
-	@echo "  API:       http://localhost:8000/api/docs"
-	@echo "  Frontend:  http://localhost:5173"
-	@echo "  Grafana:   http://localhost:3000  (admin/admin)"
-	@echo "  RabbitMQ:  http://localhost:15672 (crm_rabbit/crm_rabbit_pass)"
+	$(COMPOSE_DEV) up -d --build
 
 down:
-	@echo "$(CYAN)▶ Останавливаем dev-окружение...$(RESET)"
-	docker compose down
-	@echo "$(GREEN)✔ Остановлено$(RESET)"
+	$(COMPOSE_DEV) down
 
 build:
-	@echo "$(CYAN)▶ Пересобираем образы...$(RESET)"
-	docker compose build --no-cache
-	@echo "$(GREEN)✔ Сборка завершена$(RESET)"
+	$(COMPOSE_DEV) build
 
 restart:
-	@echo "$(CYAN)▶ Пересобираем и перезапускаем...$(RESET)"
-	docker compose down
-	docker compose up -d --build
-	@echo "$(GREEN)✔ Перезапущено$(RESET)"
-
-logs:
-	docker compose logs -f --tail=100
-
-logs-api:
-	docker compose logs -f --tail=100 api
-
-logs-front:
-	docker compose logs -f --tail=100 frontend
+	$(COMPOSE_DEV) down
+	$(COMPOSE_DEV) up -d --build
 
 ps:
-	@echo "$(CYAN)▶ Статус контейнеров:$(RESET)"
-	docker compose ps
+	$(COMPOSE_DEV) ps
 
-## ─── PROD команды ─────────────────────────────────────────
+logs:
+	$(COMPOSE_DEV) logs -f --tail=200
+
+logs-api:
+	$(COMPOSE_DEV) logs -f --tail=200 api
+
+logs-front:
+	$(COMPOSE_DEV) logs -f --tail=200 frontend
+
+## Prod
 up-prod:
-	@echo "$(CYAN)▶ Запускаем ПРОДАКШЕН...$(RESET)"
-	@if [ ! -f .env ]; then \
-		cp .env.example .env; \
-		echo "$(YELLOW)⚠ Создан .env из .env.example — заполните переменные!$(RESET)"; \
-	fi
-	docker compose -f docker-compose.prod.yml up -d --build
-	@echo "$(GREEN)✔ Продакшен запущен$(RESET)"
+	$(COMPOSE_PROD) up -d --build
 
 down-prod:
-	@echo "$(CYAN)▶ Останавливаем продакшен...$(RESET)"
-	docker compose -f docker-compose.prod.yml down
-	@echo "$(GREEN)✔ Остановлено$(RESET)"
+	$(COMPOSE_PROD) down
 
 logs-prod:
-	docker compose -f docker-compose.prod.yml logs -f --tail=100
+	$(COMPOSE_PROD) logs -f --tail=200
 
 restart-prod:
-	@echo "$(CYAN)▶ Перезапускаем продакшен...$(RESET)"
-	docker compose -f docker-compose.prod.yml down
-	docker compose -f docker-compose.prod.yml up -d --build
-	@echo "$(GREEN)✔ Перезапущено$(RESET)"
+	$(COMPOSE_PROD) down
+	$(COMPOSE_PROD) up -d --build
 
-## ─── Миграции ─────────────────────────────────────────────
+## Migrations / Shell (dev)
 migrate:
-	@echo "$(CYAN)▶ Применяем миграции Alembic...$(RESET)"
-	docker compose exec api alembic upgrade head
-	@echo "$(GREEN)✔ Миграции применены$(RESET)"
+	$(COMPOSE_DEV) exec api alembic upgrade head
 
 migration:
-	@echo "$(CYAN)▶ Создаём миграцию: $(m)$(RESET)"
-	docker compose exec api alembic revision --autogenerate -m "$(m)"
-	@echo "$(GREEN)✔ Миграция создана$(RESET)"
+	@if [ -z "$(m)" ]; then echo "$(YELLOW)⚠ Укажи m='название миграции'$(RESET)"; exit 1; fi
+	$(COMPOSE_DEV) exec api alembic revision --autogenerate -m "$(m)"
 
-## ─── Оболочки ─────────────────────────────────────────────
 shell-api:
-	@echo "$(CYAN)▶ Открываем bash в контейнере API...$(RESET)"
-	docker compose exec api bash
+	$(COMPOSE_DEV) exec api sh
 
 shell-db:
-	@echo "$(CYAN)▶ Открываем psql в контейнере БД...$(RESET)"
-	docker compose exec db psql -U crm_user -d crm_db
+	$(COMPOSE_DEV) exec db sh -lc 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
 
-## ─── Тесты ────────────────────────────────────────────────
+## Quality (dev)
 test:
-	@echo "$(CYAN)▶ Запускаем тесты бэкенда...$(RESET)"
-	docker compose exec api pytest tests/ -v --tb=short
-	@echo "$(GREEN)✔ Тесты завершены$(RESET)"
+	$(COMPOSE_DEV) exec api pytest tests/ -v --tb=short
 
 lint:
-	@echo "$(CYAN)▶ Проверяем код (ruff)...$(RESET)"
-	docker compose exec api ruff check src/ --select E,W,F --ignore E501
-	@echo "$(GREEN)✔ Проверка завершена$(RESET)"
+	$(COMPOSE_DEV) exec api ruff check src/ --select E,W,F --ignore E501
 
 lint-fix:
-	@echo "$(CYAN)▶ Исправляем код (ruff --fix)...$(RESET)"
-	docker compose exec api ruff check src/ --fix --select E,W,F --ignore E501
-	@echo "$(GREEN)✔ Исправлено$(RESET)"
+	$(COMPOSE_DEV) exec api ruff check src/ --fix --select E,W,F --ignore E501
 
-## ─── Очистка ──────────────────────────────────────────────
+## Cleanup
 clean:
-	@echo "$(CYAN)▶ Очищаем остановленные контейнеры и неиспользуемые образы...$(RESET)"
-	docker compose down --remove-orphans
+	$(COMPOSE_DEV) down --remove-orphans
 	docker image prune -f
-	@echo "$(GREEN)✔ Очищено$(RESET)"
 
 clean-all:
-	@echo "$(YELLOW)⚠ ВНИМАНИЕ: удаляем ВСЕ данные включая volumes!$(RESET)"
-	@read -p "Вы уверены? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
-	docker compose down -v --remove-orphans
-	docker image prune -af
-	@echo "$(GREEN)✔ Полная очистка завершена$(RESET)"
+	@echo "$(YELLOW)⚠ ВНИМАНИЕ: удаляем volumes (данные БД/MinIO и т.д.)$(RESET)"
+	@echo "$(YELLOW)   Запусти вручную, если уверен: docker compose ... down -v$(RESET)"
+	@exit 1
+

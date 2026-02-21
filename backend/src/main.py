@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.common.exceptions import AppError
 from src.config import settings
 from src.infrastructure.logging import setup_logging
+from src.infrastructure.metrics import setup_metrics
 from src.middleware.correlation import CorrelationIdMiddleware
 from src.middleware.error_handler import app_error_handler, generic_error_handler
 
@@ -22,6 +23,8 @@ def create_app() -> FastAPI:
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",
     )
+
+    setup_metrics(application, version=settings.APP_VERSION)
 
     # CORS
     origins = json.loads(settings.CORS_ORIGINS)
@@ -116,21 +119,6 @@ def create_app() -> FastAPI:
             return JSONResponse({"ready": True})
         except Exception:
             return JSONResponse({"ready": False}, status_code=503)
-
-    @application.get("/metrics")
-    async def prometheus_metrics():
-        """Basic Prometheus-compatible metrics endpoint."""
-        from fastapi.responses import PlainTextResponse
-        import time
-        lines = [
-            f'# HELP app_info Application info',
-            f'# TYPE app_info gauge',
-            f'app_info{{version="{settings.APP_VERSION}"}} 1',
-            f'# HELP app_uptime_seconds Uptime in seconds',
-            f'# TYPE app_uptime_seconds gauge',
-            f'app_uptime_seconds {time.time() - _start_time:.0f}',
-        ]
-        return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
     @application.on_event("startup")
     async def _run_migrations_and_seed():

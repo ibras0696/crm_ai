@@ -63,6 +63,14 @@ services:
       timeout: 5s
       retries: 10
 
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: unless-stopped
+    # By default this exports metrics about the container's view of the system.
+    # If you need real host metrics on Linux servers, we can switch to host mounts.
+    expose:
+      - "9100"
+
   minio:
     image: minio/minio:latest
     restart: unless-stopped

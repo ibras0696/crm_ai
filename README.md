@@ -13,25 +13,55 @@
 ## 🧩 Сервисы и связи
 
 ```mermaid
-flowchart LR
-  U[🧑‍💻 Пользователь] --> B[🌐 Браузер]
-  B --> FE[🖥️ Frontend (Vite/React)]
-  FE --> API[⚙️ API (FastAPI)]
+flowchart TB
 
-  API --> DB[(🗄️ PostgreSQL + pgvector)]
-  API --> R[(🧠 Redis)]
-  API --> MQ[(📨 RabbitMQ)]
-  API --> S3[(🗂️ MinIO / S3)]
+  %% ==== USER LAYER ====
+  subgraph CLIENT
+    U[User]
+    B[Browser]
+  end
 
-  W[👷 Celery worker/beat] --> MQ
-  W --> DB
-  W --> R
+  %% ==== FRONTEND ====
+  subgraph FRONTEND
+    FE[React + Vite App]
+  end
 
-  P[📈 Prometheus] -->|scrape /metrics| API
-  P -->|scrape| NE[🖥️ node-exporter]
-  P -->|scrape| P
+  %% ==== BACKEND ====
+  subgraph BACKEND
+    API[FastAPI API]
+    WORKER[Celery Worker / Beat]
+  end
 
-  G[📊 Grafana] -->|datasource| P
+  %% ==== DATA LAYER ====
+  subgraph DATA
+    DB[(PostgreSQL + pgvector)]
+    REDIS[(Redis)]
+    MQ[(RabbitMQ)]
+    S3[(MinIO / S3 Storage)]
+  end
+
+  %% ==== MONITORING ====
+  subgraph OBSERVABILITY
+    PROM[Prometheus]
+    GRAF[Grafana]
+    NODE[node-exporter]
+  end
+
+  %% ==== FLOW ====
+  U --> B --> FE --> API
+
+  API --> DB
+  API --> REDIS
+  API --> MQ
+  API --> S3
+
+  WORKER --> MQ
+  WORKER --> DB
+  WORKER --> REDIS
+
+  PROM --> API
+  PROM --> NODE
+  GRAF --> PROM
 ```
 
 ## ⚡ Быстрый старт (dev)

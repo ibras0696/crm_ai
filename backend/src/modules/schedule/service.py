@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from src.infrastructure.uow import UnitOfWork
 from src.modules.schedule.models import Event
@@ -41,11 +41,23 @@ async def list_events(
     start: datetime | None = None,
     end: datetime | None = None,
 ) -> list[Event]:
-    stmt = select(Event).where(Event.org_id == org_id).order_by(Event.start_at)
-    if start:
-        stmt = stmt.where(Event.start_at >= start)
-    if end:
+    stmt = select(Event).where(Event.org_id == org_id)
+
+    # If range is provided, we must include recurring events that started earlier,
+    # otherwise UI won't be able to expand them into occurrences for the range.
+    if start and end:
+        stmt = stmt.where(
+            or_(
+                Event.start_at.between(start, end),
+                (Event.recurrence.is_not(None) & (Event.start_at <= end)),
+            )
+        )
+    elif start:
+        stmt = stmt.where(or_(Event.start_at >= start, Event.recurrence.is_not(None)))
+    elif end:
         stmt = stmt.where(Event.start_at <= end)
+
+    stmt = stmt.order_by(Event.start_at)
     result = await uow.session.execute(stmt)
     return list(result.scalars().all())
 

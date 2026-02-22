@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from src.common.schemas import ApiResponse
 from src.common.enums import UserRole
 from src.modules.auth.dependencies import CurrentUser, require_roles
+from src.modules.access.dependencies import require_access
 from src.modules.knowledge.models import KBPage
 from src.infrastructure.uow import UnitOfWork
 from sqlalchemy import select
@@ -47,6 +48,7 @@ class UpdatePageRequest(BaseModel):
 async def create_page(
     body: CreatePageRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    _: None = Depends(require_access(resource_type="knowledge", permission="can_write")),
 ):
     async with UnitOfWork() as uow:
         slug = body.title.lower().replace(" ", "-")[:200]
@@ -69,6 +71,7 @@ async def create_page(
 @router.get("/pages", response_model=ApiResponse[list[PageOut]])
 async def list_pages(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+    _: None = Depends(require_access(resource_type="knowledge", permission="can_read")),
 ):
     async with UnitOfWork() as uow:
         stmt = select(KBPage).where(KBPage.org_id == current_user.org_id).order_by(KBPage.position, KBPage.created_at)
@@ -82,6 +85,7 @@ async def list_pages(
 async def get_page(
     page_id: uuid.UUID,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+    _: None = Depends(require_access(resource_type="knowledge", permission="can_read", resource_id_param="page_id")),
 ):
     async with UnitOfWork() as uow:
         page = await uow.session.get(KBPage, page_id)
@@ -96,6 +100,7 @@ async def update_page(
     page_id: uuid.UUID,
     body: UpdatePageRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    _: None = Depends(require_access(resource_type="knowledge", permission="can_write", resource_id_param="page_id")),
 ):
     async with UnitOfWork() as uow:
         page = await uow.session.get(KBPage, page_id)
@@ -115,6 +120,7 @@ async def update_page(
 async def delete_page(
     page_id: uuid.UUID,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
+    _: None = Depends(require_access(resource_type="knowledge", permission="can_delete", resource_id_param="page_id")),
 ):
     async with UnitOfWork() as uow:
         page = await uow.session.get(KBPage, page_id)

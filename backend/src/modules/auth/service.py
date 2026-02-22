@@ -18,7 +18,7 @@ from src.modules.auth.security import (
     verify_password,
 )
 from src.modules.org.models import Membership, Organization, Subscription
-from src.modules.org.repository import MembershipRepository, OrganizationRepository, SubscriptionRepository
+from src.modules.org.repository import InviteRepository, MembershipRepository, OrganizationRepository, SubscriptionRepository
 
 
 def _slugify(name: str) -> str:
@@ -41,6 +41,66 @@ class AuthService:
             existing = await user_repo.get_by_email(data.email)
             if existing:
                 raise ConflictError("User with this email already exists", field="email")
+
+            # Invite-based registration: join existing org and inherit invite role.
+            if getattr(data, "invite_token", None):
+                invite_repo = InviteRepository(uow.session)
+                invite = await invite_repo.get_by_token(data.invite_token)  # type: ignore[arg-type]
+                if not invite:
+                    raise NotFoundError("Invite")
+                if invite.status != InviteStatus.PENDING:
+                    raise ValidationError("Invite is not active")
+                if invite.expires_at and invite.expires_at < datetime.now(UTC):
+                    raise ValidationError("Invite expired")
+                if invite.email.lower() != str(data.email).lower():
+                    raise ValidationError("Invite email does not match registration email", field="email")
+
+                org = await org_repo.get_by_id(invite.org_id)
+                if not org:
+                    raise NotFoundError("Organization")
+
+                user = User(
+                    email=data.email,
+                    hashed_password=hash_password(data.password),
+                    first_name=data.first_name,
+                    last_name=data.last_name,
+                )
+                user = await user_repo.create(user)
+
+                membership = Membership(user_id=user.id, org_id=org.id, role=invite.role)
+                await member_repo.create(membership)
+                await invite_repo.update_status(invite.id, InviteStatus.ACCEPTED)
+
+                raw_refresh, refresh_hash = create_refresh_token()
+                rt = RefreshToken(
+                    user_id=user.id,
+                    token_hash=refresh_hash,
+                    expires_at=refresh_token_expires_at(),
+                    ip_address=ip_address,
+                )
+                await token_repo.create(rt)
+
+                access = create_access_token(user.id, org.id, invite.role.value)
+
+                await audit_repo.log(
+                    org_id=org.id,
+                    actor_id=user.id,
+                    action=AuditAction.INVITE_ACCEPTED,
+                    entity_type="invite",
+                    entity_id=str(invite.id),
+                    ip_address=ip_address,
+                )
+
+                await uow.commit()
+
+                from src.config import settings
+
+                token_resp = TokenResponse(
+                    access_token=access,
+                    refresh_token=raw_refresh,
+                    expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+                )
+                return user, org, token_resp
 
             user = User(
                 email=data.email,

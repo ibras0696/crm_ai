@@ -40,7 +40,7 @@ x-backend-env: &backend_env
 
 services:
   db:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-crm_user}
@@ -138,6 +138,46 @@ services:
       timeout: 5s
       retries: 10
     command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4
+
+  celery_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    command: celery -A src.infrastructure.celery_app worker --loglevel=info
+    environment:
+      <<: *backend_env
+    depends_on:
+      db:
+        condition: service_healthy
+      bootstrap:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  celery_beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    command: celery -A src.infrastructure.celery_app beat --loglevel=info
+    environment:
+      <<: *backend_env
+    depends_on:
+      db:
+        condition: service_healthy
+      bootstrap:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
 
   frontend:
     build:

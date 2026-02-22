@@ -146,8 +146,11 @@ async def _build_org_context_internal(
                 sample_lines: list[str] = []
                 for table_obj in tables:
                     if flags["include_table_schema"]:
-                        cols = ", ".join(c.name for c in sorted(table_obj.columns, key=lambda x: x.position))
-                        schema_lines.append(f"Table: {table_obj.name} | Columns: {cols}")
+                        col_parts = ", ".join(
+                            f"{c.name}(id={c.id},type={c.field_type})"
+                            for c in sorted(table_obj.columns, key=lambda x: x.position)
+                        )
+                        schema_lines.append(f"Table: {table_obj.name}(table_id={table_obj.id}) | Columns: {col_parts}")
                     if flags["include_table_records"]:
                         recs = (
                             await uow.session.execute(
@@ -496,9 +499,14 @@ async def _create_records_for_table(
     user_id: uuid.UUID | None,
     table_obj: Table,
     rows_payload: list[dict[str, Any]],
-) -> tuple[list[Record], list[dict[str, Any]]]:
+) -> tuple[list[Record], list[dict[str, Any]], int]:
     if not rows_payload:
-        return [], []
+        return [], [], 0
+
+    # Hard limit to keep requests predictable and avoid huge payloads / UI breakage.
+    max_rows = 20
+    ignored = max(0, len(rows_payload) - max_rows)
+    rows_payload = rows_payload[:max_rows]
 
     col_ids = {str(c.id) for c in table_obj.columns}
     primary_col = next((c for c in table_obj.columns if c.is_primary), None)
@@ -533,7 +541,7 @@ async def _create_records_for_table(
             preview.append({col_name_by_id.get(k, k): v for k, v in record_data.items()})
 
     await uow.session.flush()
-    return created, preview
+    return created, preview, ignored
 
 
 async def get_or_create_session(
@@ -648,6 +656,11 @@ async def handle_create_dashboard_action(
             inferred_table = sorted(tables, key=lambda t: table_record_counts.get(str(t.id), 0), reverse=True)[0]
         if inferred_table is not None:
             widgets_payload = _infer_widgets_for_table(inferred_table, normalized_message)
+
+    # Fallback: ensure we always create at least one valid widget if user asked for a dashboard
+    # but provider returned an empty/invalid widgets list.
+    if not widgets_payload:
+        widgets_payload = [{"title": "Количество записей", "widget_type": "metric", "aggregation": "count"}]
 
     created_widgets: list[ReportWidget] = []
     skipped: list[dict[str, Any]] = []
@@ -777,7 +790,7 @@ async def handle_create_table_action(
 
     description = str(action_payload.get("description") or "").strip() or None
     icon = str(action_payload.get("icon") or "").strip() or None
-    color = str(action_payload.get("color") or "").strip() or None
+    color = str(action_payload.get("color") or "").strip()[:20] or None
 
     table_obj = Table(
         org_id=org_id,
@@ -850,7 +863,7 @@ async def handle_create_table_action(
     rows_payload = _extract_rows_payload(action_payload)
     if not rows_payload:
         rows_payload = _infer_rows_from_message(user_message, list(table_obj.columns))
-    created_records, records_preview = await _create_records_for_table(uow, org_id, user_id, table_obj, rows_payload)
+    created_records, records_preview, ignored = await _create_records_for_table(uow, org_id, user_id, table_obj, rows_payload)
     return {
         "action": "create_table",
         "ok": True,
@@ -870,6 +883,7 @@ async def handle_create_table_action(
             for col in created_columns
         ],
         "records_created": len(created_records),
+        "records_ignored": int(ignored),
         "records_preview": records_preview,
     }
 
@@ -948,7 +962,7 @@ async def handle_create_columns_action(
     rows_payload = _extract_rows_payload(action_payload)
     if not rows_payload:
         rows_payload = _infer_rows_from_message(user_message, list(table_obj.columns))
-    created_records, records_preview = await _create_records_for_table(uow, org_id, user_id, table_obj, rows_payload)
+    created_records, records_preview, ignored = await _create_records_for_table(uow, org_id, user_id, table_obj, rows_payload)
     return {
         "action": "create_columns",
         "ok": True,
@@ -965,6 +979,7 @@ async def handle_create_columns_action(
         ],
         "skipped": skipped,
         "records_created": len(created_records),
+        "records_ignored": int(ignored),
         "records_preview": records_preview,
     }
 
@@ -994,12 +1009,13 @@ async def handle_create_records_action(
     if not rows_payload:
         return {"action": "create_records", "ok": False, "error": "records_required"}
 
-    created_records, records_preview = await _create_records_for_table(uow, org_id, user_id, table_obj, rows_payload)
+    created_records, records_preview, ignored = await _create_records_for_table(uow, org_id, user_id, table_obj, rows_payload)
     return {
         "action": "create_records",
         "ok": True,
         "table": {"id": str(table_obj.id), "name": table_obj.name},
         "records_created": len(created_records),
+        "records_ignored": int(ignored),
         "records_preview": records_preview,
     }
 
@@ -1039,7 +1055,7 @@ async def handle_create_schedule_event_action(
 
     end_at = _parse_dt(action_payload.get("end_at"))
     description = str(action_payload.get("description") or "").strip() or None
-    color = str(action_payload.get("color") or "").strip() or None
+    color = str(action_payload.get("color") or "").strip()[:20] or None
     recurrence = str(action_payload.get("recurrence") or "").strip() or None
     all_day = bool(action_payload.get("all_day") or False)
 

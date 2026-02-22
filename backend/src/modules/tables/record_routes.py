@@ -1,49 +1,25 @@
 """Record CRUD endpoints."""
 import uuid
-from datetime import datetime
-from typing import Literal
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
 
 from src.common.schemas import ApiResponse
 from src.common.enums import UserRole
 from src.modules.auth.dependencies import CurrentUser, require_roles
+from src.modules.access.dependencies import require_access
 from src.modules.tables.models import Table
 from src.modules.tables.repository import TableRepository
 from src.modules.tables.records import Record, RecordRepository
+from src.modules.tables.schemas import (
+    CreateRecordRequest,
+    MoveRecordRequest,
+    RecordListOut,
+    RecordOut,
+    UpdateRecordRequest,
+)
 from src.infrastructure.uow import UnitOfWork
 
 router = APIRouter(prefix="/tables/{table_id}/records", tags=["records"])
-
-
-class RecordOut(BaseModel):
-    id: uuid.UUID
-    table_id: uuid.UUID
-    data: dict
-    created_by: uuid.UUID | None
-    created_at: datetime
-    updated_at: datetime
-    position: int
-
-    model_config = {"from_attributes": True}
-
-
-class RecordListOut(BaseModel):
-    records: list[RecordOut]
-    total: int
-
-
-class CreateRecordRequest(BaseModel):
-    data: dict
-
-
-class UpdateRecordRequest(BaseModel):
-    data: dict
-
-
-class MoveRecordRequest(BaseModel):
-    direction: Literal["up", "down"]
 
 
 async def _get_table_or_fail(table_id: uuid.UUID, org_id: uuid.UUID, uow) -> Table | None:
@@ -59,6 +35,7 @@ async def create_record(
     table_id: uuid.UUID,
     body: CreateRecordRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    _: None = Depends(require_access(resource_type="table", permission="can_write", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:
         table = await _get_table_or_fail(table_id, current_user.org_id, uow)
@@ -86,6 +63,7 @@ async def list_records(
     limit: int = Query(default=100, le=500),
     offset: int = Query(default=0, ge=0),
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+    _: None = Depends(require_access(resource_type="table", permission="can_read", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:
         table = await _get_table_or_fail(table_id, current_user.org_id, uow)
@@ -104,6 +82,7 @@ async def get_record(
     table_id: uuid.UUID,
     record_id: uuid.UUID,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+    _: None = Depends(require_access(resource_type="table", permission="can_read", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:
         table = await _get_table_or_fail(table_id, current_user.org_id, uow)
@@ -124,6 +103,7 @@ async def update_record(
     record_id: uuid.UUID,
     body: UpdateRecordRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    _: None = Depends(require_access(resource_type="table", permission="can_write", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:
         table = await _get_table_or_fail(table_id, current_user.org_id, uow)
@@ -150,6 +130,7 @@ async def delete_record(
     table_id: uuid.UUID,
     record_id: uuid.UUID,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="table", permission="can_delete", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:
         table = await _get_table_or_fail(table_id, current_user.org_id, uow)
@@ -172,6 +153,7 @@ async def move_record(
     record_id: uuid.UUID,
     body: MoveRecordRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    _: None = Depends(require_access(resource_type="table", permission="can_write", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:
         table = await _get_table_or_fail(table_id, current_user.org_id, uow)

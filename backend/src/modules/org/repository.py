@@ -95,6 +95,15 @@ class InviteRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_pending_by_id(self, invite_id: uuid.UUID, org_id: uuid.UUID) -> Invite | None:
+        stmt = select(Invite).where(
+            Invite.id == invite_id,
+            Invite.org_id == org_id,
+            Invite.status == InviteStatus.PENDING,
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def create(self, invite: Invite) -> Invite:
         self.session.add(invite)
         await self.session.flush()
@@ -102,6 +111,10 @@ class InviteRepository:
 
     async def update_status(self, invite_id: uuid.UUID, status: InviteStatus) -> None:
         stmt = update(Invite).where(Invite.id == invite_id).values(status=status)
+        await self.session.execute(stmt)
+
+    async def bump_expiry(self, invite_id: uuid.UUID, *, expires_at: datetime) -> None:
+        stmt = update(Invite).where(Invite.id == invite_id).values(expires_at=expires_at)
         await self.session.execute(stmt)
 
 

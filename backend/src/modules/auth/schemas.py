@@ -10,6 +10,9 @@ class RegisterRequest(BaseModel):
     first_name: str = Field(min_length=1, max_length=100)
     last_name: str = Field(min_length=1, max_length=100)
     org_name: str = Field(min_length=1, max_length=255)
+    # If present, registration will attach the user to an existing organization
+    # with the role from the invite. org_name is ignored in that case.
+    invite_token: str | None = None
 
 
 class LoginRequest(BaseModel):

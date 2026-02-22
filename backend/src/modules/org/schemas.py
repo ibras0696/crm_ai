@@ -40,6 +40,9 @@ class InviteResponse(BaseModel):
     email: str
     role: UserRole
     status: InviteStatus
+    # Token is returned only to OWNER/ADMIN endpoints (invite creation/resend),
+    # so they can copy/share an invite link if needed.
+    token: str | None = None
     expires_at: datetime
     created_at: datetime
 

@@ -20,5 +20,9 @@ class Plan(BaseDBModel):
     max_records: Mapped[int] = mapped_column(Integer, nullable=False, default=1000)
     max_storage_mb: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
     has_ai: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
+    # AI limits (source of truth for org limits; can be edited in admin panel).
+    ai_max_tokens_per_request: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ai_tokens_per_day: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ai_rpm_per_user: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     features: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))

@@ -1,12 +1,19 @@
-from sqlalchemy.ext.asyncio import AsyncSession
+from __future__ import annotations
 
-from src.infrastructure.database import async_session_factory
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class UnitOfWork:
-    """Unit of Work pattern — single commit/rollback point per business operation."""
+    """Unit of Work pattern - single commit/rollback point per business operation."""
 
-    def __init__(self, session_factory=async_session_factory):
+    def __init__(self, session_factory=None):
+        # Important for tests: do not capture async_session_factory at import time.
+        # Tests can patch src.infrastructure.database.async_session_factory and
+        # UnitOfWork will pick it up here.
+        if session_factory is None:
+            from src.infrastructure.database import async_session_factory as _factory
+
+            session_factory = _factory
         self._session_factory = session_factory
         self.session: AsyncSession | None = None
 
@@ -24,3 +31,4 @@ class UnitOfWork:
 
     async def rollback(self):
         await self.session.rollback()
+

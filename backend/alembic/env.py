@@ -15,9 +15,8 @@ from src.modules.org.models import Organization, Membership, Invite, Subscriptio
 from src.modules.audit.models import AuditLog  # noqa: F401
 from src.modules.notifications.models import Notification  # noqa: F401
 from src.modules.files.models import File  # noqa: F401
-from src.modules.tables.models import Table, Column  # noqa: F401
+from src.modules.tables.models import Table, Column, TableView  # noqa: F401
 from src.modules.tables.records import Record  # noqa: F401
-from src.modules.tables.views import TableView  # noqa: F401
 from src.modules.knowledge.models import KBPage  # noqa: F401
 from src.modules.billing.models import Plan  # noqa: F401
 from src.modules.schedule.models import Event  # noqa: F401

@@ -2,100 +2,27 @@ import uuid
 from datetime import datetime
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
 
 from src.common.schemas import ApiResponse
 from src.common.enums import UserRole
 from src.modules.auth.dependencies import CurrentUser, require_roles
+from src.modules.access.dependencies import require_access
 from src.modules.tables.models import Table, Column, TableFolder, FieldType
 from src.modules.tables.repository import TableRepository, ColumnRepository, TableFolderRepository
+from src.modules.tables.schemas import (
+    ColumnOut,
+    CreateColumnRequest,
+    CreateFolderRequest,
+    CreateTableRequest,
+    FolderOut,
+    TableOut,
+    UpdateColumnRequest,
+    UpdateFolderRequest,
+    UpdateTableRequest,
+)
 from src.infrastructure.uow import UnitOfWork
 
 router = APIRouter(prefix="/tables", tags=["tables"])
-
-
-# --- Schemas ---
-
-class ColumnOut(BaseModel):
-    id: uuid.UUID
-    name: str
-    field_type: str
-    position: int
-    is_required: bool
-    is_primary: bool
-    config: dict | None
-    default_value: str | None
-
-    model_config = {"from_attributes": True}
-
-
-class TableOut(BaseModel):
-    id: uuid.UUID
-    org_id: uuid.UUID
-    folder_id: uuid.UUID | None
-    name: str
-    description: str | None
-    icon: str | None
-    color: str | None
-    is_archived: bool
-    columns: list[ColumnOut]
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
-class FolderOut(BaseModel):
-    id: uuid.UUID
-    org_id: uuid.UUID
-    name: str
-    position: int
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
-class CreateTableRequest(BaseModel):
-    name: str
-    description: str | None = None
-    icon: str | None = None
-    color: str | None = None
-    folder_id: uuid.UUID | None = None
-
-
-class UpdateTableRequest(BaseModel):
-    name: str | None = None
-    description: str | None = None
-    icon: str | None = None
-    color: str | None = None
-    is_archived: bool | None = None
-    folder_id: uuid.UUID | None = None
-
-
-class CreateFolderRequest(BaseModel):
-    name: str
-
-
-class UpdateFolderRequest(BaseModel):
-    name: str | None = None
-    position: int | None = None
-
-
-class CreateColumnRequest(BaseModel):
-    name: str
-    field_type: str
-    is_required: bool = False
-    is_primary: bool = False
-    config: dict | None = None
-    default_value: str | None = None
-
-
-class UpdateColumnRequest(BaseModel):
-    name: str | None = None
-    field_type: str | None = None
-    position: int | None = None
-    is_required: bool | None = None
-    config: dict | None = None
-    default_value: str | None = None
 
 
 # --- Folder CRUD ---
@@ -104,6 +31,7 @@ class UpdateColumnRequest(BaseModel):
 async def create_folder(
     body: CreateFolderRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="table", permission="can_write")),
 ):
     async with UnitOfWork() as uow:
         repo = TableFolderRepository(uow.session)
@@ -123,6 +51,7 @@ async def create_folder(
 @router.get("/folders/", response_model=ApiResponse[list[FolderOut]])
 async def list_folders(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+    _: None = Depends(require_access(resource_type="table", permission="can_read")),
 ):
     async with UnitOfWork() as uow:
         repo = TableFolderRepository(uow.session)
@@ -136,6 +65,7 @@ async def update_folder(
     folder_id: uuid.UUID,
     body: UpdateFolderRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="table", permission="can_write")),
 ):
     async with UnitOfWork() as uow:
         repo = TableFolderRepository(uow.session)
@@ -154,6 +84,7 @@ async def update_folder(
 async def delete_folder(
     folder_id: uuid.UUID,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="table", permission="can_delete")),
 ):
     async with UnitOfWork() as uow:
         folder_repo = TableFolderRepository(uow.session)
@@ -177,6 +108,7 @@ async def delete_folder(
 async def create_table(
     body: CreateTableRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="table", permission="can_write")),
 ):
     async with UnitOfWork() as uow:
         # Validate folder ownership if provided
@@ -217,6 +149,7 @@ async def create_table(
 @router.get("/", response_model=ApiResponse[list[TableOut]])
 async def list_tables(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+    _: None = Depends(require_access(resource_type="table", permission="can_read")),
 ):
     async with UnitOfWork() as uow:
         repo = TableRepository(uow.session)
@@ -229,6 +162,7 @@ async def list_tables(
 async def get_table(
     table_id: uuid.UUID,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+    _: None = Depends(require_access(resource_type="table", permission="can_read", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:
         repo = TableRepository(uow.session)
@@ -244,6 +178,7 @@ async def update_table(
     table_id: uuid.UUID,
     body: UpdateTableRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="table", permission="can_write", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:
         repo = TableRepository(uow.session)
@@ -273,6 +208,7 @@ async def update_table(
 async def delete_table(
     table_id: uuid.UUID,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
+    _: None = Depends(require_access(resource_type="table", permission="can_delete", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:
         repo = TableRepository(uow.session)
@@ -291,6 +227,7 @@ async def create_column(
     table_id: uuid.UUID,
     body: CreateColumnRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="table", permission="can_write", resource_id_param="table_id")),
 ):
     if body.field_type not in FieldType.ALL:
         return ApiResponse(ok=False, data=None, error={"code": "INVALID_FIELD_TYPE", "message": f"Неверный тип поля: {body.field_type}"})
@@ -325,6 +262,7 @@ async def update_column(
     column_id: uuid.UUID,
     body: UpdateColumnRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="table", permission="can_write", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:
         col_repo = ColumnRepository(uow.session)
@@ -352,6 +290,7 @@ async def delete_column(
     table_id: uuid.UUID,
     column_id: uuid.UUID,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="table", permission="can_delete", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:
         col_repo = ColumnRepository(uow.session)

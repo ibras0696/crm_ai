@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     ENABLE_METRICS: bool = True
     ENABLE_RATE_LIMIT: bool = True
 
+    # Security / hardening
+    MAX_REQUEST_BODY_MB: int = 50
+
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://crm_user:crm_pass@localhost:5432/crm_db"
     DATABASE_URL_SYNC: str = "postgresql+psycopg2://crm_user:crm_pass@localhost:5432/crm_db"
@@ -77,6 +80,28 @@ class Settings(BaseSettings):
             return [p for p in parts if p]
         return [str(v).strip()]
 
+    @field_validator("TRUSTED_HOSTS", mode="before")
+    @classmethod
+    def _parse_trusted_hosts(cls, v: Any) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if str(x).strip()]
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return []
+            if s.startswith("["):
+                try:
+                    parsed = json.loads(s)
+                    if isinstance(parsed, list):
+                        return [str(x).strip() for x in parsed if str(x).strip()]
+                except Exception:
+                    pass
+            parts = [p.strip() for p in s.split(",")]
+            return [p for p in parts if p]
+        return [str(v).strip()]
+
     # SMTP / Email
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
@@ -85,10 +110,17 @@ class Settings(BaseSettings):
     SMTP_FROM: str = ""
     SMTP_FROM_NAME: str = "CRM Platform"
     SMTP_TLS: bool = True
+    SMTP_TIMEOUT_S: float = 10.0
+    # Enable sending emails from API/worker. If false, tasks will no-op successfully.
+    ENABLE_EMAIL: bool = True
+
+    # Invites anti-spam
+    INVITES_RPM_PER_ACTOR: int = 10
 
     # Domain
     DOMAIN: str = "localhost"
     FRONTEND_URL: str = "http://localhost:5173"
+    TRUSTED_HOSTS: list[str] = []
 
     # RabbitMQ
     RABBITMQ_URL: str = "amqp://guest:guest@localhost:5672/"

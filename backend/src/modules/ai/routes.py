@@ -11,8 +11,10 @@ from src.common.enums import UserRole
 from src.common.schemas import ApiResponse
 from src.config import settings
 from src.infrastructure.uow import UnitOfWork
-from src.modules.ai.limits import check_ai_limits
+from src.infrastructure.metrics_custom import AI_REQUESTS_TOTAL, AI_TOKENS_TOTAL
+from src.modules.ai.limits import check_ai_limits, resolve_org_plan
 from src.modules.ai.models import AIChatMessage, AIChatSession, AIUsageLog
+from src.modules.billing.models import Plan
 from src.modules.ai.schemas import (
     ChatMessageOut,
     ChatRequest,
@@ -281,6 +283,12 @@ async def ai_chat(
 
             await uow.commit()
 
+        try:
+            AI_REQUESTS_TOTAL.labels(model=settings.OPENAI_MODEL, status="ok").inc()
+            AI_TOKENS_TOTAL.labels(model=settings.OPENAI_MODEL).inc(float(int(usage.get("total_tokens", 0) or 0)))
+        except Exception:
+            pass
+
         return ApiResponse(
             data=ChatResponse(
                 reply=reply,
@@ -298,6 +306,10 @@ async def ai_chat(
         except Exception:
             pass
         if e.response.status_code in (401, 403):
+            try:
+                AI_REQUESTS_TOTAL.labels(model=settings.OPENAI_MODEL, status="unauthorized").inc()
+            except Exception:
+                pass
             return ApiResponse(
                 ok=False,
                 data=None,
@@ -310,6 +322,10 @@ async def ai_chat(
                     ),
                 },
             )
+        try:
+            AI_REQUESTS_TOTAL.labels(model=settings.OPENAI_MODEL, status="error").inc()
+        except Exception:
+            pass
         return ApiResponse(ok=False, data=None, error={"code": "AI_ERROR", "message": f"AI API error {e.response.status_code}: {body_text}"})
     except Exception as e:
         return ApiResponse(ok=False, data=None, error={"code": "AI_ERROR", "message": f"AI error: {str(e)}"})
@@ -323,8 +339,11 @@ async def ai_status(
     now = datetime.now(timezone.utc)
     day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
     async with UnitOfWork() as uow:
-        plan_row = (await uow.session.execute(select(Organization.plan).where(Organization.id == current_user.org_id))).scalar_one_or_none()
-        plan = str(plan_row.value if hasattr(plan_row, "value") else plan_row or PlanTier.FREE.value)
+        plan_tier = await resolve_org_plan(uow.session, org_id=current_user.org_id)
+        plan = plan_tier.value
+        plan_db = (
+            await uow.session.execute(select(Plan).where(Plan.name == plan, Plan.is_active.is_(True)))
+        ).scalars().first()
 
         row = (
             await uow.session.execute(
@@ -359,6 +378,16 @@ async def ai_status(
     }
     daily_limit = daily_limit_by_plan.get(plan) or int(settings.AI_MAX_TOKENS_PER_DAY_PER_ORG or 0)
     rpm_limit = rpm_limit_by_plan.get(plan) or int(settings.AI_RPM_PER_USER or 0)
+
+    # Prefer DB plan settings (admin-editable).
+    if plan_db:
+        if int(getattr(plan_db, "ai_tokens_per_day", 0) or 0) > 0:
+            daily_limit = int(plan_db.ai_tokens_per_day)
+        if int(getattr(plan_db, "ai_rpm_per_user", 0) or 0) > 0:
+            rpm_limit = int(plan_db.ai_rpm_per_user)
+        max_tokens_per_req = int(getattr(plan_db, "ai_max_tokens_per_request", 0) or 0) or int(settings.AI_MAX_TOKENS_PER_REQUEST)
+    else:
+        max_tokens_per_req = int(settings.AI_MAX_TOKENS_PER_REQUEST)
     return ApiResponse(
         data={
             "enabled": bool(settings.ENABLE_AI),
@@ -379,7 +408,7 @@ async def ai_status(
             "limits": {
                 "daily_tokens": int(daily_limit),
                 "rpm_per_user": int(rpm_limit),
-                "max_tokens_per_request": int(settings.AI_MAX_TOKENS_PER_REQUEST),
+                "max_tokens_per_request": int(max_tokens_per_req),
             },
         }
     )

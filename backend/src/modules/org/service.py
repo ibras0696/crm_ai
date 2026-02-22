@@ -4,14 +4,18 @@ from datetime import UTC, datetime, timedelta
 
 from src.common.enums import AuditAction, InviteStatus, PlanTier, SubscriptionStatus, UserRole
 from src.common.exceptions import ConflictError, ForbiddenError, NotFoundError, ValidationError
+from src.config import settings
 from src.infrastructure.uow import UnitOfWork
 from src.modules.audit.repository import AuditRepository
+from src.modules.notifications.tasks import send_invite_email
 from src.modules.auth.models import User
 from src.modules.auth.repository import RefreshTokenRepository, UserRepository
 from src.modules.auth.security import create_access_token, create_refresh_token, hash_password, refresh_token_expires_at
 from src.modules.auth.models import RefreshToken
 from src.modules.org.models import Invite, Membership, Organization
 from src.modules.org.repository import InviteRepository, MembershipRepository, OrganizationRepository
+from sqlalchemy import func, select
+from src.modules.audit.models import AuditLog
 
 
 class OrgService:
@@ -41,6 +45,21 @@ class OrgService:
             member_repo = MembershipRepository(uow.session)
             user_repo = UserRepository(uow.session)
             audit_repo = AuditRepository(uow.session)
+
+            # Anti-spam: limit invites per actor per minute.
+            window_start = datetime.now(UTC) - timedelta(seconds=60)
+            invites_last_min = (
+                await uow.session.execute(
+                    select(func.count(AuditLog.id)).where(
+                        AuditLog.org_id == org_id,
+                        AuditLog.actor_id == invited_by,
+                        AuditLog.action == AuditAction.INVITE_SENT,
+                        AuditLog.created_at >= window_start,
+                    )
+                )
+            ).scalar_one()
+            if int(invites_last_min or 0) >= int(settings.INVITES_RPM_PER_ACTOR or 0):
+                raise ValidationError("Too many invites. Please wait a minute and try again.")
 
             existing_user = await user_repo.get_by_email(email)
             if existing_user:
@@ -74,6 +93,57 @@ class OrgService:
             )
 
             await uow.commit()
+
+            # Send invite email via Celery. Do not fail invite creation if broker/email is down.
+            try:
+                org = await uow.session.get(Organization, org_id)
+                org_name = org.name if org else "CRM"
+                send_invite_email.delay(email, org_name, token, None)
+            except Exception:
+                pass
+            return invite
+
+    async def resend_invite(
+        self,
+        *,
+        org_id: uuid.UUID,
+        invite_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        ip_address: str | None = None,
+    ) -> Invite:
+        async with UnitOfWork() as uow:
+            invite_repo = InviteRepository(uow.session)
+            audit_repo = AuditRepository(uow.session)
+
+            invite = await invite_repo.get_pending_by_id(invite_id, org_id)
+            if not invite:
+                raise NotFoundError("Invite")
+
+            # Extend expiry.
+            new_expiry = datetime.now(UTC) + timedelta(days=7)
+            await invite_repo.bump_expiry(invite.id, expires_at=new_expiry)
+
+            await audit_repo.log(
+                org_id=org_id,
+                actor_id=actor_id,
+                action=AuditAction.INVITE_SENT,
+                entity_type="invite_resend",
+                entity_id=str(invite.id),
+                meta={"email": invite.email, "role": invite.role.value},
+                ip_address=ip_address,
+            )
+            await uow.commit()
+
+            # Best-effort email send via Celery.
+            try:
+                org = await uow.session.get(Organization, org_id)
+                org_name = org.name if org else "CRM"
+                send_invite_email.delay(invite.email, org_name, invite.token, None)
+            except Exception:
+                pass
+
+            # Refresh invite object with updated expiry.
+            invite.expires_at = new_expiry
             return invite
 
     async def accept_invite(

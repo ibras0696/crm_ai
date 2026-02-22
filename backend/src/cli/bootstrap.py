@@ -5,6 +5,8 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
+from sqlalchemy import text
+from sqlalchemy import create_engine
 
 from src.config import settings
 from src.infrastructure.bootstrap_lock import advisory_lock
@@ -21,7 +23,8 @@ def _alembic_config() -> Config:
     backend_root = Path(__file__).resolve().parents[2]  # backend/src/cli/bootstrap.py -> backend/
     ini_path = backend_root / "alembic.ini"
     cfg = Config(str(ini_path))
-    # Alembic env.py reads DATABASE_URL_SYNC from env, so just ensure it's set.
+    # Ensure Alembic points to the right DB even if alembic.ini has dev defaults.
+    cfg.set_main_option("sqlalchemy.url", _database_url_sync())
     return cfg
 
 
@@ -40,6 +43,32 @@ async def _run_seed() -> None:
 
 def _run_migrations() -> None:
     cfg = _alembic_config()
+    # Self-heal dev DBs that accidentally have alembic_version stamped but no tables.
+    # This situation can happen if volumes were reused between different env configs.
+    url = cfg.get_main_option("sqlalchemy.url")
+    if url:
+        try:
+            eng = create_engine(url, pool_pre_ping=True)
+            with eng.connect() as conn:
+                # Count any user tables except alembic_version.
+                n = conn.execute(
+                    text(
+                        """
+                        select count(*)::int
+                        from information_schema.tables
+                        where table_schema = 'public'
+                          and table_type = 'BASE TABLE'
+                          and table_name <> 'alembic_version'
+                        """
+                    )
+                ).scalar_one()
+                if int(n or 0) == 0:
+                    # Reset stamp to base, then upgrade to head.
+                    command.stamp(cfg, "base")
+        except Exception:
+            # Don't block migrations on probe issues.
+            pass
+
     command.upgrade(cfg, "head")
 
 
@@ -54,4 +83,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-

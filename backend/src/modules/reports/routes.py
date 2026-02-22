@@ -12,6 +12,7 @@ from src.common.enums import UserRole
 from src.common.schemas import ApiResponse
 from src.infrastructure.uow import UnitOfWork
 from src.modules.auth.dependencies import CurrentUser, require_roles
+from src.modules.access.dependencies import require_access
 from src.modules.reports.models import ReportDashboard, ReportWidget
 from src.modules.reports.schemas import (
     ColumnAggRequest,
@@ -45,6 +46,7 @@ router = APIRouter(prefix="/reports", tags=["reports"])
 @router.get("/summary", response_model=ApiResponse[OrgReport])
 async def org_summary(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="reports", permission="can_read")),
 ):
     async with UnitOfWork() as uow:
         stmt = (
@@ -77,6 +79,7 @@ async def org_summary(
 async def table_analytics(
     body: ColumnAggRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="reports", permission="can_read")),
 ):
     async with UnitOfWork() as uow:
         table = (
@@ -161,6 +164,7 @@ async def records_timeline(
 @router.get("/dashboards", response_model=ApiResponse[list[DashboardOut]])
 async def list_dashboards(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    _: None = Depends(require_access(resource_type="reports", permission="can_read")),
 ):
     async with UnitOfWork() as uow:
         rows = list((await uow.session.execute(select(ReportDashboard).where(ReportDashboard.org_id == current_user.org_id).order_by(ReportDashboard.created_at.desc()))).scalars().all())
@@ -172,6 +176,7 @@ async def list_dashboards(
 async def create_dashboard(
     body: DashboardCreateRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="reports", permission="can_write")),
 ):
     async with UnitOfWork() as uow:
         dash = ReportDashboard(org_id=current_user.org_id, created_by=current_user.user_id, name=body.name.strip(), description=body.description)
@@ -186,6 +191,7 @@ async def update_dashboard(
     dashboard_id: uuid.UUID,
     body: DashboardUpdateRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="reports", permission="can_write", resource_id_param="dashboard_id")),
 ):
     async with UnitOfWork() as uow:
         dash = await uow.session.get(ReportDashboard, dashboard_id)
@@ -203,6 +209,7 @@ async def update_dashboard(
 async def delete_dashboard(
     dashboard_id: uuid.UUID,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="reports", permission="can_delete", resource_id_param="dashboard_id")),
 ):
     async with UnitOfWork() as uow:
         dash = await uow.session.get(ReportDashboard, dashboard_id)
@@ -217,6 +224,7 @@ async def delete_dashboard(
 async def get_dashboard(
     dashboard_id: uuid.UUID,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    _: None = Depends(require_access(resource_type="reports", permission="can_read", resource_id_param="dashboard_id")),
 ):
     async with UnitOfWork() as uow:
         dash = (
@@ -237,6 +245,7 @@ async def create_widget(
     dashboard_id: uuid.UUID,
     body: WidgetCreateRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="reports", permission="can_write", resource_id_param="dashboard_id")),
 ):
     async with UnitOfWork() as uow:
         dash = await uow.session.get(ReportDashboard, dashboard_id)
@@ -264,6 +273,7 @@ async def update_widget(
     widget_id: uuid.UUID,
     body: WidgetUpdateRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="reports", permission="can_write", resource_id_param="dashboard_id")),
 ):
     async with UnitOfWork() as uow:
         widget = await uow.session.get(ReportWidget, widget_id)
@@ -288,6 +298,7 @@ async def delete_widget(
     dashboard_id: uuid.UUID,
     widget_id: uuid.UUID,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="reports", permission="can_delete", resource_id_param="dashboard_id")),
 ):
     async with UnitOfWork() as uow:
         widget = await uow.session.get(ReportWidget, widget_id)
@@ -302,6 +313,7 @@ async def delete_widget(
 async def dashboard_data(
     dashboard_id: uuid.UUID,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    _: None = Depends(require_access(resource_type="reports", permission="can_read", resource_id_param="dashboard_id")),
 ):
     async with UnitOfWork() as uow:
         dash = (

@@ -65,3 +65,27 @@ class Column(BaseDBModel):
     default_value: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     table: Mapped["Table"] = relationship("Table", back_populates="columns")
+
+
+class TableView(BaseDBModel):
+    """Saved table view: filters/sorts/config for a specific table."""
+
+    __tablename__ = "table_views"
+
+    table_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tables.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    view_type: Mapped[str] = mapped_column(String(50), nullable=False, default="grid")  # grid, kanban, calendar
+    filters: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    sorts: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

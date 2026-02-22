@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from src.common.exceptions import AppError
 from src.config import settings
@@ -12,6 +13,7 @@ from src.infrastructure.metrics import setup_metrics
 from src.infrastructure.redis_client import RedisClient, ping_with_timeout
 from src.middleware.correlation import CorrelationIdMiddleware
 from src.middleware.error_handler import app_error_handler, generic_error_handler
+from src.middleware.request_size_limit import RequestSizeLimitMiddleware
 
 setup_logging(debug=settings.DEBUG)
 logger = logging.getLogger(__name__)
@@ -38,6 +40,22 @@ def create_app() -> FastAPI:
     if settings.ENABLE_METRICS:
         setup_metrics(application, version=settings.APP_VERSION)
 
+    # Correlation ID (should be first so all following logs/errors include it).
+    application.add_middleware(CorrelationIdMiddleware)
+
+    # Request size limit (basic DoS protection).
+    max_bytes = int(max(0, int(settings.MAX_REQUEST_BODY_MB or 0))) * 1024 * 1024
+    if max_bytes > 0:
+        application.add_middleware(RequestSizeLimitMiddleware, max_bytes=max_bytes)
+
+    # Trusted hosts in production.
+    if str(settings.ENVIRONMENT).lower() == "production":
+        hosts = settings.TRUSTED_HOSTS or []
+        if not hosts and settings.DOMAIN:
+            hosts = [settings.DOMAIN]
+        if hosts:
+            application.add_middleware(TrustedHostMiddleware, allowed_hosts=hosts)
+
     # CORS
     application.add_middleware(
         CORSMiddleware,
@@ -58,9 +76,6 @@ def create_app() -> FastAPI:
 
         application.add_middleware(RateLimitMiddleware, requests_per_minute=120)
 
-    # Correlation ID
-    application.add_middleware(CorrelationIdMiddleware)
-
     # Error handlers
     application.add_exception_handler(AppError, app_error_handler)
     application.add_exception_handler(Exception, generic_error_handler)
@@ -73,7 +88,8 @@ def create_app() -> FastAPI:
     from src.modules.notifications.routes import router as notif_router
     from src.modules.tables.routes import router as tables_router
     from src.modules.tables.record_routes import router as records_router
-    from src.modules.tables.views import router as views_router, filter_router
+    from src.modules.tables.view_routes import router as views_router
+    from src.modules.tables.query_routes import router as query_router
     from src.modules.knowledge.routes import router as kb_router
     from src.modules.reports.routes import router as reports_router
     from src.modules.billing.routes import router as billing_router
@@ -90,7 +106,7 @@ def create_app() -> FastAPI:
     application.include_router(tables_router, prefix="/api/v1")
     application.include_router(records_router, prefix="/api/v1")
     application.include_router(views_router, prefix="/api/v1")
-    application.include_router(filter_router, prefix="/api/v1")
+    application.include_router(query_router, prefix="/api/v1")
     application.include_router(kb_router, prefix="/api/v1")
     application.include_router(reports_router, prefix="/api/v1")
     application.include_router(billing_router, prefix="/api/v1")

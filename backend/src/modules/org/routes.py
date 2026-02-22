@@ -92,6 +92,21 @@ async def accept_invite(body: AcceptInviteRequest, request: Request):
     )
     return ApiResponse(data=tokens)
 
+@router.post("/invites/{invite_id}/resend", response_model=ApiResponse[InviteResponse])
+async def resend_invite(
+    invite_id: uuid.UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
+):
+    ip = request.client.host if request.client else None
+    invite = await _org_service.resend_invite(
+        org_id=current_user.org_id,
+        invite_id=invite_id,
+        actor_id=current_user.user_id,
+        ip_address=ip,
+    )
+    return ApiResponse(data=InviteResponse.model_validate(invite))
+
 
 @router.put("/members/{membership_id}/role", response_model=ApiResponse)
 async def update_member_role(

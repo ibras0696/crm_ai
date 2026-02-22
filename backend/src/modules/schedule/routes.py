@@ -9,6 +9,7 @@ from src.common.enums import UserRole
 from src.common.schemas import ApiResponse
 from src.infrastructure.uow import UnitOfWork
 from src.modules.auth.dependencies import CurrentUser, require_roles
+from src.modules.access.dependencies import require_access
 from src.modules.schedule.schemas import CreateEventRequest, EventOut, UpdateEventRequest
 from src.modules.schedule.service import (
     create_event as create_event_service,
@@ -25,6 +26,7 @@ router = APIRouter(prefix="/schedule", tags=["schedule"])
 async def create_event(
     body: CreateEventRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    _: None = Depends(require_access(resource_type="schedule", permission="can_write")),
 ):
     async with UnitOfWork() as uow:
         event = await create_event_service(
@@ -43,6 +45,7 @@ async def list_events(
     start: datetime | None = Query(default=None),
     end: datetime | None = Query(default=None),
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+    _: None = Depends(require_access(resource_type="schedule", permission="can_read")),
 ):
     async with UnitOfWork() as uow:
         events = await list_events_service(uow, org_id=current_user.org_id, start=start, end=end)
@@ -54,6 +57,7 @@ async def list_events(
 async def get_event(
     event_id: uuid.UUID,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+    _: None = Depends(require_access(resource_type="schedule", permission="can_read", resource_id_param="event_id")),
 ):
     async with UnitOfWork() as uow:
         event = await get_event_by_id(uow, event_id=event_id, org_id=current_user.org_id)
@@ -68,6 +72,7 @@ async def update_event(
     event_id: uuid.UUID,
     body: UpdateEventRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    _: None = Depends(require_access(resource_type="schedule", permission="can_write", resource_id_param="event_id")),
 ):
     async with UnitOfWork() as uow:
         event = await get_event_by_id(uow, event_id=event_id, org_id=current_user.org_id)
@@ -83,6 +88,7 @@ async def update_event(
 async def delete_event(
     event_id: uuid.UUID,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="schedule", permission="can_delete", resource_id_param="event_id")),
 ):
     async with UnitOfWork() as uow:
         event = await get_event_by_id(uow, event_id=event_id, org_id=current_user.org_id)

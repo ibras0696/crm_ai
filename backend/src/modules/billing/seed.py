@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.config import settings
 from src.modules.billing.models import Plan
 
 
@@ -18,6 +19,9 @@ DEFAULT_PLANS: list[dict] = [
         "max_storage_mb": 500,
         # AI доступен, но с лимитами (лимиты настраиваются в config).
         "has_ai": True,
+        "ai_max_tokens_per_request": int(getattr(settings, "AI_MAX_TOKENS_PER_REQUEST", 0) or 0),
+        "ai_tokens_per_day": int(getattr(settings, "AI_MAX_TOKENS_PER_DAY_FREE", 0) or 0),
+        "ai_rpm_per_user": int(getattr(settings, "AI_RPM_PER_USER_FREE", 0) or 0),
         "features": {"search": True, "filter": True, "export_csv": True, "ai": True},
         "is_active": True,
     },
@@ -31,6 +35,9 @@ DEFAULT_PLANS: list[dict] = [
         "max_records": 200000,
         "max_storage_mb": 10240,
         "has_ai": True,
+        "ai_max_tokens_per_request": int(getattr(settings, "AI_MAX_TOKENS_PER_REQUEST", 0) or 0),
+        "ai_tokens_per_day": int(getattr(settings, "AI_MAX_TOKENS_PER_DAY_TEAM", 0) or 0),
+        "ai_rpm_per_user": int(getattr(settings, "AI_RPM_PER_USER_TEAM", 0) or 0),
         "features": {"search": True, "filter": True, "export_csv": True, "ai": True},
         "is_active": True,
     },
@@ -44,6 +51,9 @@ DEFAULT_PLANS: list[dict] = [
         "max_records": 2000000,
         "max_storage_mb": 102400,
         "has_ai": True,
+        "ai_max_tokens_per_request": int(getattr(settings, "AI_MAX_TOKENS_PER_REQUEST", 0) or 0),
+        "ai_tokens_per_day": int(getattr(settings, "AI_MAX_TOKENS_PER_DAY_BUSINESS", 0) or 0),
+        "ai_rpm_per_user": int(getattr(settings, "AI_RPM_PER_USER_BUSINESS", 0) or 0),
         "features": {"search": True, "filter": True, "export_csv": True, "ai": True, "priority_support": True},
         "is_active": True,
     },

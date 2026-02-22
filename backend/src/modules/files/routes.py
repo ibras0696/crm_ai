@@ -9,6 +9,7 @@ from src.common.http_headers import content_disposition_attachment
 from src.common.schemas import ApiResponse
 from src.common.enums import UserRole
 from src.modules.auth.dependencies import CurrentUser, require_roles
+from src.modules.access.dependencies import require_access
 from src.modules.files.models import File
 from src.modules.files.repository import FileRepository
 from src.modules.files import storage
@@ -34,6 +35,7 @@ class FileItem(BaseModel):
 async def upload_file(
     file: UploadFile = FastAPIFile(...),
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    _: None = Depends(require_access(resource_type="files", permission="can_write")),
 ):
     data = await file.read()
     content_type = file.content_type or "application/octet-stream"
@@ -65,6 +67,7 @@ async def list_files(
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+    _: None = Depends(require_access(resource_type="files", permission="can_read")),
 ):
     async with UnitOfWork() as uow:
         repo = FileRepository(uow.session)
@@ -77,6 +80,7 @@ async def list_files(
 async def download_file(
     file_id: uuid.UUID,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+    _: None = Depends(require_access(resource_type="files", permission="can_read", resource_id_param="file_id")),
 ):
     async with UnitOfWork() as uow:
         repo = FileRepository(uow.session)
@@ -96,6 +100,7 @@ async def download_file(
 async def delete_file(
     file_id: uuid.UUID,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
+    _: None = Depends(require_access(resource_type="files", permission="can_delete", resource_id_param="file_id")),
 ):
     async with UnitOfWork() as uow:
         repo = FileRepository(uow.session)

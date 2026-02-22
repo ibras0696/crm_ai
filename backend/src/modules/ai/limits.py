@@ -12,17 +12,31 @@ from src.modules.org.models import Organization, Subscription
 
 
 def _utc_day_start(dt: datetime) -> datetime:
+    """Вернуть начало дня (00:00) в UTC для указанной даты-времени.
+
+    Args:
+        dt: Дата-время (любая TZ).
+
+    Returns:
+        Дата-время начала дня в UTC.
+    """
     dt = dt.astimezone(timezone.utc)
     return datetime(dt.year, dt.month, dt.day, tzinfo=timezone.utc)
 
 
 async def resolve_org_plan(session, *, org_id) -> PlanTier:
-    """
-    Resolve effective org plan.
+    """Определить эффективный тариф организации.
 
-    Source of truth:
-    - Active subscription (if present)
-    - Fallback to Organization.plan
+    Источник правды:
+    1. Активная подписка (если есть).
+    2. `Organization.plan` (legacy/fallback).
+
+    Args:
+        session: Async SQLAlchemy session.
+        org_id: ID организации.
+
+    Returns:
+        План (PlanTier) который должен применяться к лимитам.
     """
     # 1) Active subscription.
     try:
@@ -57,10 +71,23 @@ async def resolve_org_plan(session, *, org_id) -> PlanTier:
 
 
 async def check_ai_limits(session, *, org_id, user_id, estimated_request_tokens: int) -> tuple[bool, dict | None]:
-    """
-    Enforce basic AI cost controls:
-    - RPM per user (AI_RPM_PER_USER)
-    - tokens/day per org (AI_MAX_TOKENS_PER_DAY_PER_ORG)
+    """Проверить лимиты использования AI (cost control).
+
+    Ограничения:
+    - RPM на пользователя (запросов/мин).
+    - Токены/день на организацию.
+
+    Args:
+        session: Async SQLAlchemy session.
+        org_id: ID организации.
+        user_id: ID пользователя.
+        estimated_request_tokens: Оценка количества токенов, которое может потребоваться
+            на этот запрос (prompt + completion), чтобы предсказать лимит заранее.
+
+    Returns:
+        (ok, error):
+        - ok=True если запрос разрешен.
+        - ok=False если лимит превышен; error содержит структуру ApiResponse.error.
     """
     plan: PlanTier = await resolve_org_plan(session, org_id=org_id)
 

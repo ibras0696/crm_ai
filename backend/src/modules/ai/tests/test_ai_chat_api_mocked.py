@@ -29,7 +29,7 @@ async def test_ai_chat_executes_action_with_mocked_provider(client: AsyncClient,
     token = await _register_owner(client)
 
     from src.config import settings
-    from src.modules.ai import routes as ai_routes
+    from src.modules.ai import chat_controller as ai_chat_controller
 
     old_token = settings.OPENAI_BEARER_TOKEN
     settings.OPENAI_BEARER_TOKEN = "test-token"
@@ -51,7 +51,7 @@ async def test_ai_chat_executes_action_with_mocked_provider(client: AsyncClient,
             "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
         }
 
-    monkeypatch.setattr(ai_routes, "call_openai_compatible_api", _fake_call)
+    monkeypatch.setattr(ai_chat_controller, "call_openai_compatible_api", _fake_call)
 
     resp = await client.post(
         "/api/v1/ai/chat",

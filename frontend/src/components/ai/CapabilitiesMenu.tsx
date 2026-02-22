@@ -9,7 +9,9 @@ export type UiIntentType = 'create_table' | 'create_dashboard' | 'create_schedul
 function pickFirstSelectedTableName(tables: AIContextSourceTable[], selectedIds: string[]): string | undefined {
   if (!selectedIds?.length) return undefined
   const m = new Map(tables.map((t) => [t.id, t.name] as const))
-  const name = m.get(selectedIds[0])
+  const firstId = selectedIds[0]
+  if (!firstId) return undefined
+  const name = m.get(firstId)
   return name || undefined
 }
 

@@ -1,4 +1,4 @@
-"""Database models for AI module."""
+"""Модели БД для модуля AI."""
 
 import uuid
 
@@ -10,6 +10,14 @@ from src.common.base_model import BaseDBModel
 
 
 class AIUsageLog(BaseDBModel):
+    """Лог использования AI.
+
+    Хранит агрегированные метрики по одному обращению к AI-провайдеру:
+    - сколько токенов было потрачено
+    - какая модель использовалась
+    - краткое превью сообщения (для отладки/аналитики)
+    """
+
     __tablename__ = "ai_usage_logs"
 
     org_id: Mapped[uuid.UUID] = mapped_column(
@@ -26,6 +34,8 @@ class AIUsageLog(BaseDBModel):
 
 
 class AIChatSession(BaseDBModel):
+    """Сессия чата AI для конкретного пользователя в рамках организации."""
+
     __tablename__ = "ai_chat_sessions"
 
     org_id: Mapped[uuid.UUID] = mapped_column(
@@ -38,6 +48,8 @@ class AIChatSession(BaseDBModel):
 
 
 class AIChatMessage(BaseDBModel):
+    """Сообщение внутри AI-сессии (user/assistant/system)."""
+
     __tablename__ = "ai_chat_messages"
 
     session_id: Mapped[uuid.UUID] = mapped_column(

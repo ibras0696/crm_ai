@@ -12,6 +12,8 @@ const PLAN_COLORS: Record<string, { bg: string; border: string; text: string; ba
   team: { bg: 'bg-blue-500/5', border: 'border-blue-500/30', text: 'text-blue-500', badge: 'bg-blue-500/10 text-blue-600' },
 }
 
+const DEFAULT_PLAN_COLORS = PLAN_COLORS.free ?? { bg: 'bg-secondary/30', border: 'border-border', text: 'text-muted-foreground', badge: 'bg-secondary text-muted-foreground' }
+
 export default function BillingPage() {
   const [plans, setPlans] = useState<PlanInfo[]>([])
   const [usage, setUsage] = useState<UsageInfo | null>(null)
@@ -139,7 +141,8 @@ export default function BillingPage() {
       {/* Plans */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {plans.map(plan => {
-          const colors = PLAN_COLORS[plan.name] || PLAN_COLORS.free
+          const planKey = plan.name ?? 'free'
+          const colors = PLAN_COLORS[planKey] ?? PLAN_COLORS.free ?? DEFAULT_PLAN_COLORS
           const price = period === 'yearly' ? plan.price_yearly : plan.price_monthly
           const isCurrent = sub?.plan === plan.name
           return (

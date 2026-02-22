@@ -4,9 +4,19 @@ from typing import Any
 
 
 def apply_ui_intent_overrides(action_payload: dict[str, Any] | None, ui_intent: str | None, ui_params: dict | None) -> dict[str, Any] | None:
-    """
-    UI intent is a hint, but for some actions we can safely enforce it to avoid
-    confusing results (e.g. user explicitly picked a widget type in UI).
+    """Применить подсказки интерфейса (UI intent) к payload действия.
+
+    UI intent не является приказом модели, это подсказка от интерфейса. Но для некоторых
+    действий мы можем безопасно "подправить" payload, чтобы результат не выглядел
+    противоречиво. Пример: пользователь выбрал в UI тип виджета для дашборда.
+
+    Args:
+        action_payload: Распознанный payload действия (или None).
+        ui_intent: Техническая подсказка интерфейса (например, "create_dashboard").
+        ui_params: Дополнительные параметры intent (например, widget_type).
+
+    Returns:
+        Обновленный payload действия или исходный payload, если правки не применимы.
     """
     if not action_payload or not isinstance(action_payload, dict):
         return action_payload
@@ -43,4 +53,3 @@ def apply_ui_intent_overrides(action_payload: dict[str, Any] | None, ui_intent: 
                         first["widget_type"] = forced
 
     return action_payload
-

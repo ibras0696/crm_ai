@@ -286,7 +286,10 @@ function TableDetailPageContent() {
 
     // Optimistic UI: reorder instantly, so user sees movement without refresh.
     const optimistic = [...before]
-    ;[optimistic[currentIdx], optimistic[targetIdx]] = [optimistic[targetIdx], optimistic[currentIdx]]
+    const a = optimistic[currentIdx]
+    const b = optimistic[targetIdx]
+    if (!a || !b) return
+    ;[optimistic[currentIdx], optimistic[targetIdx]] = [b, a]
     setRecords(optimistic)
 
     setMovingRecordId(recordId)

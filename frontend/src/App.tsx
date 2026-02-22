@@ -1,23 +1,24 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
-import LoginPage from './pages/LoginPage'
-import RegisterPage from './pages/RegisterPage'
-import DashboardPage from './pages/DashboardPage'
-import MembersPage from './pages/MembersPage'
-import SettingsPage from './pages/SettingsPage'
-import AuditLogPage from './pages/AuditLogPage'
-import LandingPage from './pages/LandingPage'
-import TablesPage from './pages/TablesPage'
-import TableDetailPage from './pages/TableDetailPage'
-import KnowledgePage from './pages/KnowledgePage'
-import SchedulePage from './pages/SchedulePage'
-import ReportsPage from './pages/ReportsPage'
-import AIPage from './pages/AIPage'
-import AdminPage from './pages/AdminPage'
-import BillingPage from './pages/BillingPage'
-import PlansPage from './pages/PlansPage'
-import SuperAdminPage from './pages/SuperAdminPage'
+import LoginPage from './pages/auth/LoginPage'
+import RegisterPage from './pages/auth/RegisterPage'
+import LandingPage from './pages/auth/LandingPage'
+import DashboardPage from './pages/org/DashboardPage'
+import MembersPage from './pages/org/MembersPage'
+import SettingsPage from './pages/org/SettingsPage'
+import AuditLogPage from './pages/admin/AuditLogPage'
+import AdminPage from './pages/admin/AdminPage'
+import SuperAdminPage from './pages/superadmin/SuperAdminPage'
+import BillingPage from './pages/billing/BillingPage'
+import PlansPage from './pages/billing/PlansPage'
+import TablesPage from './pages/tables/TablesPage'
+import TableDetailPage from './pages/tables/TableDetailPage'
+import KnowledgePage from './pages/knowledge/KnowledgePage'
+import SchedulePage from './pages/schedule/SchedulePage'
+import ReportsPage from './pages/reports/ReportsPage'
+import AIPage from './pages/ai/AIPage'
 import AppLayout from './components/layout/AppLayout'
 import { useAuth } from './contexts/AuthContext'
+import { ErrorBoundary } from './components/common/ErrorBoundary'
 
 function RootRedirect() {
   const { isAuthenticated } = useAuth()
@@ -45,7 +46,14 @@ export default function App() {
         <Route path="/billing" element={<BillingPage />} />
         <Route path="/plans" element={<PlansPage />} />
       </Route>
-      <Route path="/superadmin" element={<SuperAdminPage />} />
+      <Route
+        path="/superadmin"
+        element={
+          <ErrorBoundary title="Суперадмин">
+            <SuperAdminPage />
+          </ErrorBoundary>
+        }
+      />
       <Route path="*" element={<RootRedirect />} />
     </Routes>
   )

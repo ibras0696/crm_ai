@@ -31,7 +31,7 @@ interface TableCardProps {
 
 function TableCard({ table, onDelete, onMoveToFolder, folders }: TableCardProps) {
   const navigate = useNavigate()
-  const cls = colorMap[table.color || 'blue'] || colorMap.blue
+  const cls = colorMap[table.color || 'blue'] ?? colorMap.blue ?? 'bg-blue-500/10 text-blue-400'
   const [showMove, setShowMove] = useState(false)
 
   return (

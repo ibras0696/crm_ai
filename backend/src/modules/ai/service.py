@@ -1,4 +1,11 @@
-"""AI service logic: context, chat session, and action execution."""
+"""Сервисная логика AI: контекст, чаты и выполнение действий.
+
+В этом модуле содержатся:
+- сбор контекста организации (KB/таблицы/расписание) с ограничением по токенам
+- построение сообщений для OpenAI-compatible провайдера
+- парсинг блока `crm_action` из ответа модели
+- выполнение действий (создание дашбордов/таблиц/колонок/записей/событий/страниц KB)
+"""
 
 import json
 import re
@@ -25,6 +32,17 @@ from src.modules.tables.records import Record
 
 
 def estimate_tokens(text: str) -> int:
+    """Оценить количество токенов в тексте (эвристика).
+
+    Важно: токенизация зависит от провайдера/модели, поэтому здесь используем
+    консервативную оценку.
+
+    Args:
+        text: Входной текст.
+
+    Returns:
+        Приблизительное количество токенов (>= 0).
+    """
     # Tokenization differs per provider/model; we intentionally overestimate a bit.
     # Heuristic: take the max of char-based and UTF-8 byte-based approximations.
     if not text:
@@ -35,6 +53,14 @@ def estimate_tokens(text: str) -> int:
 
 
 def context_flags(options: dict | None) -> dict[str, Any]:
+    """Нормализовать опции контекста и проставить безопасные ограничения.
+
+    Args:
+        options: Сырые опции контекста (из UI).
+
+    Returns:
+        Словарь флагов и лимитов для последующей сборки контекста.
+    """
     src = options or {}
     kb_ids = [str(x) for x in (src.get("selected_kb_page_ids") or []) if str(x).strip()]
     table_ids = [str(x) for x in (src.get("selected_table_ids") or []) if str(x).strip()]
@@ -56,6 +82,15 @@ def context_flags(options: dict | None) -> dict[str, Any]:
 
 
 def _truncate_text_to_token_budget(text: str, budget_tokens: int) -> tuple[str, bool, int]:
+    """Обрезать текст так, чтобы он приблизительно уложился в бюджет токенов.
+
+    Args:
+        text: Исходный текст.
+        budget_tokens: Бюджет токенов.
+
+    Returns:
+        (truncated_text, was_truncated, estimated_tokens)
+    """
     if not text or budget_tokens <= 0:
         return "", False, 0
     est = estimate_tokens(text)
@@ -68,6 +103,15 @@ def _truncate_text_to_token_budget(text: str, budget_tokens: int) -> tuple[str, 
 
 
 async def build_org_context(org_id: uuid.UUID, options: dict | None = None) -> tuple[str, dict[str, Any]]:
+    """Собрать текстовый контекст организации (без user-specific фильтров).
+
+    Args:
+        org_id: ID организации.
+        options: Опции/лимиты контекста.
+
+    Returns:
+        (context_text, meta) где meta содержит разбиение по источникам и оценку токенов.
+    """
     return await _build_org_context_internal(org_id=org_id, user_id=None, options=options)
 
 
@@ -76,6 +120,21 @@ async def _build_org_context_internal(
     user_id: uuid.UUID | None = None,
     options: dict | None = None,
 ) -> tuple[str, dict[str, Any]]:
+    """Внутренняя реализация сборки контекста (org/user).
+
+    Поэтапно:
+    1) собираем данные из включенных источников
+    2) считаем примерные токены
+    3) применяем бюджет max_context_tokens и отмечаем, был ли контекст обрезан
+
+    Args:
+        org_id: ID организации.
+        user_id: ID пользователя (если нужно учитывать user-specific данные).
+        options: Опции/лимиты контекста.
+
+    Returns:
+        (context_text, meta)
+    """
     flags = context_flags(options)
     parts: list[str] = []
     meta: dict[str, Any] = {
@@ -237,14 +296,41 @@ async def build_org_context_for_user(
     user_id: uuid.UUID,
     options: dict | None = None,
 ) -> tuple[str, dict[str, Any]]:
+    """Собрать контекст организации для конкретного пользователя.
+
+    Args:
+        org_id: ID организации.
+        user_id: ID пользователя.
+        options: Опции/лимиты контекста.
+
+    Returns:
+        (context_text, meta)
+    """
     return await _build_org_context_internal(org_id=org_id, user_id=user_id, options=options)
 
 
 def _normalize_name(value: str) -> str:
+    """Нормализовать строку для приблизительного сравнения (поиск таблиц/колонок).
+
+    Args:
+        value: Исходная строка.
+
+    Returns:
+        Нормализованная строка (lowercase, без лишних пробелов).
+    """
     return re.sub(r"\s+", " ", (value or "").strip().lower())
 
 
 def _resolve_table_by_ref(tables: list[Table], table_ref: str) -> Table | None:
+    """Найти таблицу по ссылке (id или name) с "мягким" сопоставлением.
+
+    Args:
+        tables: Список таблиц организации.
+        table_ref: Ссылка из payload (может быть id или текстовое имя).
+
+    Returns:
+        Table или None.
+    """
     if not table_ref:
         return None
     clean_ref = _normalize_name(table_ref)
@@ -265,6 +351,15 @@ def _resolve_table_by_ref(tables: list[Table], table_ref: str) -> Table | None:
 
 
 def _resolve_column_id(column_ref: Any, columns: list[Column]) -> str | None:
+    """Резолв колонки по ссылке из payload (id/имя).
+
+    Args:
+        column_ref: Ссылка на колонку (id/имя/объект).
+        columns: Колонки таблицы.
+
+    Returns:
+        ID колонки (str) или None.
+    """
     if not column_ref:
         return None
     raw = str(column_ref).strip()
@@ -288,6 +383,14 @@ def _resolve_column_id(column_ref: Any, columns: list[Column]) -> str | None:
 
 
 def _safe_field_type(raw: Any) -> str:
+    """Привести field_type к допустимому значению.
+
+    Args:
+        raw: Сырый тип (строка/любой объект).
+
+    Returns:
+        Корректное значение FieldType (строкой).
+    """
     value = str(raw or "").strip().lower()
     if value in FieldType.ALL:
         return value
@@ -306,6 +409,7 @@ def _safe_field_type(raw: Any) -> str:
 
 
 def _is_generic_widget_title(title: Any) -> bool:
+    """Проверить, что заголовок виджета выглядит "шаблонным" (Widget 1 и т.п.)."""
     value = str(title or "").strip().lower()
     if not value:
         return True
@@ -313,6 +417,14 @@ def _is_generic_widget_title(title: Any) -> bool:
 
 
 def _should_use_inferred_widgets(widgets_payload: list[dict[str, Any]]) -> bool:
+    """Определить, нужно ли заменять/дополнять widgets эвристикой.
+
+    Args:
+        widgets_payload: Список виджетов, который вернул провайдер.
+
+    Returns:
+        True если payload выглядит "низкосигнальным" (шаблонные metric/count).
+    """
     if not widgets_payload:
         return True
     checked = 0
@@ -332,6 +444,16 @@ def _should_use_inferred_widgets(widgets_payload: list[dict[str, Any]]) -> bool:
 
 
 def _pick_column_by_keywords(columns: list[Column], keywords: tuple[str, ...], allow_types: tuple[str, ...] | None = None) -> Column | None:
+    """Подобрать колонку по ключевым словам и (опционально) допустимым типам.
+
+    Args:
+        columns: Колонки таблицы.
+        keywords: Ключевые слова для поиска (в нормализованном имени).
+        allow_types: Если задано, фильтруем только по этим типам.
+
+    Returns:
+        Column или None.
+    """
     for col in columns:
         if allow_types and col.field_type not in allow_types:
             continue
@@ -342,6 +464,15 @@ def _pick_column_by_keywords(columns: list[Column], keywords: tuple[str, ...], a
 
 
 def _infer_widgets_for_table(table_obj: Table, normalized_message: str) -> list[dict[str, Any]]:
+    """Сгенерировать базовый набор виджетов по таблице (эвристика).
+
+    Args:
+        table_obj: Таблица с колонками.
+        normalized_message: Нормализованный текст запроса пользователя.
+
+    Returns:
+        Список payload-виджетов (не более 8).
+    """
     columns = list(table_obj.columns)
     text_cols = [c for c in columns if c.field_type in (FieldType.TEXT, FieldType.SELECT, FieldType.MULTI_SELECT)]
     num_cols = [c for c in columns if c.field_type in (FieldType.NUMBER, FieldType.FORMULA)]
@@ -384,6 +515,15 @@ def _infer_widgets_for_table(table_obj: Table, normalized_message: str) -> list[
 
 
 def _resolve_row_key_to_column_id(row_key: Any, columns: list[Column]) -> str | None:
+    """Сопоставить ключ строки (название колонки/alias) к ID колонки таблицы.
+
+    Args:
+        row_key: Ключ из payload/текста (id/имя).
+        columns: Колонки таблицы.
+
+    Returns:
+        ID колонки (str) или None.
+    """
     if row_key is None:
         return None
     key = str(row_key).strip()
@@ -400,6 +540,14 @@ def _resolve_row_key_to_column_id(row_key: Any, columns: list[Column]) -> str | 
 
 
 def _extract_rows_payload(action_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Извлечь список строк/records из payload действия, нормализуя формат.
+
+    Args:
+        action_payload: Payload create_records.
+
+    Returns:
+        Список словарей-строк (до 200 элементов).
+    """
     source = action_payload.get("records")
     if not isinstance(source, list):
         source = action_payload.get("rows")
@@ -415,6 +563,15 @@ def _extract_rows_payload(action_payload: dict[str, Any]) -> list[dict[str, Any]
 
 
 def _infer_rows_from_message(user_message: str | None, columns: list[Column]) -> list[dict[str, Any]]:
+    """Попытаться извлечь строки из текста пользователя, если payload пустой.
+
+    Args:
+        user_message: Текст пользователя.
+        columns: Колонки таблицы (для подсказок/сопоставления).
+
+    Returns:
+        Список словарей-строк (может быть пустым).
+    """
     text = (user_message or "").strip()
     if not text:
         return []
@@ -500,6 +657,21 @@ async def _create_records_for_table(
     table_obj: Table,
     rows_payload: list[dict[str, Any]],
 ) -> tuple[list[Record], list[dict[str, Any]], int]:
+    """Создать записи в таблице по подготовленному payload.
+
+    Ограничение: не более 20 строк за один вызов, чтобы избежать огромных payload
+    и проблем рендера на фронте.
+
+    Args:
+        uow: UnitOfWork.
+        org_id: ID организации.
+        user_id: ID пользователя (может быть None).
+        table_obj: Таблица (с колонками).
+        rows_payload: Список строк (dict), где ключи могут быть id/именем колонки.
+
+    Returns:
+        (created_records, preview_rows, ignored_count)
+    """
     if not rows_payload:
         return [], [], 0
 
@@ -551,6 +723,18 @@ async def get_or_create_session(
     chat_id: str | None,
     first_message: str,
 ) -> AIChatSession:
+    """Получить существующую сессию чата или создать новую.
+
+    Args:
+        uow: UnitOfWork.
+        org_id: ID организации.
+        user_id: ID пользователя.
+        chat_id: ID существующей сессии (если задан).
+        first_message: Первое сообщение, используется для генерации заголовка.
+
+    Returns:
+        AIChatSession.
+    """
     if chat_id:
         try:
             existing = (
@@ -575,6 +759,14 @@ async def get_or_create_session(
 
 
 def _find_first_action_json(text: str) -> tuple[dict[str, Any] | None, str]:
+    """Найти первый JSON-объект с полем `action` в произвольном тексте.
+
+    Args:
+        text: Текст ответа модели.
+
+    Returns:
+        (payload, cleaned_text) где payload может быть None.
+    """
     decoder = json.JSONDecoder()
     pos = 0
     while True:
@@ -592,6 +784,18 @@ def _find_first_action_json(text: str) -> tuple[dict[str, Any] | None, str]:
 
 
 def extract_action_payload(reply: str) -> tuple[dict[str, Any] | None, str]:
+    """Извлечь `crm_action` из ответа модели.
+
+    Поддерживаем 2 варианта:
+    1) Блок ```crm_action { ... } ```
+    2) "голый" JSON в тексте (fallback)
+
+    Args:
+        reply: Текст ответа модели.
+
+    Returns:
+        (payload, cleaned_reply) где payload может быть None, а cleaned_reply = текст без блока действия.
+    """
     if not reply:
         return None, reply
     pattern = r"```crm_action\s*(\{[\s\S]*?\})\s*```"
@@ -616,6 +820,23 @@ async def handle_create_dashboard_action(
     action_payload: dict[str, Any],
     user_message: str | None = None,
 ) -> dict[str, Any]:
+    """Создать дашборд (отчёт) и набор виджетов по payload.
+
+    Поэтапно:
+    1) создаём ReportDashboard
+    2) выбираем/нормализуем widgets (если провайдер прислал пустое/шаблонное)
+    3) создаём ReportWidget с привязкой к таблицам/колонкам
+
+    Args:
+        uow: UnitOfWork.
+        org_id: ID организации.
+        user_id: ID пользователя (creator).
+        action_payload: Payload `create_dashboard`.
+        user_message: Исходный текст пользователя (для эвристик выбора таблицы/виджетов).
+
+    Returns:
+        dict с результатом (action=..., dashboard=..., items/skipped).
+    """
     name = str(action_payload.get("name") or "AI Dashboard").strip()[:255]
     description = str(action_payload.get("description") or "").strip() or None
     widgets_payload = action_payload.get("widgets") if isinstance(action_payload.get("widgets"), list) else []
@@ -630,11 +851,18 @@ async def handle_create_dashboard_action(
         )
     ).scalars().all()
     table_record_counts: dict[str, int] = {}
-    for table_obj in tables:
-        cnt = (
-            await uow.session.execute(select(func.count(Record.id)).where(Record.table_id == table_obj.id))
-        ).scalar() or 0
-        table_record_counts[str(table_obj.id)] = int(cnt)
+    if tables:
+        cnt_rows = (
+            await uow.session.execute(
+                select(Record.table_id, func.count(Record.id))
+                .where(Record.table_id.in_([t.id for t in tables]))
+                .group_by(Record.table_id)
+            )
+        ).all()
+        table_record_counts = {str(table_id): int(cnt or 0) for table_id, cnt in cnt_rows}
+        # Заполним отсутствующие (если у таблицы нет записей).
+        for t in tables:
+            table_record_counts.setdefault(str(t.id), 0)
 
     normalized_message = _normalize_name(user_message or "")
     wants_bar_like = any(x in normalized_message for x in ("bar", "гистограмм", "диаграм", "chart"))
@@ -784,6 +1012,21 @@ async def handle_create_table_action(
     action_payload: dict[str, Any],
     user_message: str | None = None,
 ) -> dict[str, Any]:
+    """Создать таблицу (с колонками и опциональными записями).
+
+    Важно: payload с большим количеством записей будет обрезан до лимита,
+    чтобы не создавать огромные ответы и не ломать UI.
+
+    Args:
+        uow: UnitOfWork.
+        org_id: ID организации.
+        user_id: ID пользователя.
+        action_payload: Payload `create_table`.
+        user_message: Сообщение пользователя (fallback для генерации строк).
+
+    Returns:
+        dict с результатом создания таблицы.
+    """
     name = str(action_payload.get("name") or action_payload.get("table_name") or "").strip()[:255]
     if not name:
         return {"action": "create_table", "ok": False, "error": "table_name_required"}
@@ -895,6 +1138,18 @@ async def handle_create_columns_action(
     action_payload: dict[str, Any],
     user_message: str | None = None,
 ) -> dict[str, Any]:
+    """Добавить колонки в существующую таблицу и (опционально) создать записи.
+
+    Args:
+        uow: UnitOfWork.
+        org_id: ID организации.
+        user_id: ID пользователя.
+        action_payload: Payload `create_columns`.
+        user_message: Сообщение пользователя (fallback для генерации строк).
+
+    Returns:
+        dict с результатом (созданные колонки + опциональные записи).
+    """
     table_ref = str(action_payload.get("table_id") or action_payload.get("table_name") or "").strip()
     raw_columns = action_payload.get("columns")
     columns_payload = raw_columns if isinstance(raw_columns, list) else []
@@ -991,6 +1246,18 @@ async def handle_create_records_action(
     action_payload: dict[str, Any],
     user_message: str | None = None,
 ) -> dict[str, Any]:
+    """Добавить записи в существующую таблицу.
+
+    Args:
+        uow: UnitOfWork.
+        org_id: ID организации.
+        user_id: ID пользователя.
+        action_payload: Payload `create_records`.
+        user_message: Сообщение пользователя (fallback для генерации строк).
+
+    Returns:
+        dict с результатом добавления записей.
+    """
     table_ref = str(action_payload.get("table_id") or action_payload.get("table_name") or "").strip()
     if not table_ref:
         return {"action": "create_records", "ok": False, "error": "table_ref_required"}
@@ -1021,6 +1288,14 @@ async def handle_create_records_action(
 
 
 def _parse_dt(value: str | None) -> datetime | None:
+    """Распарсить дату-время (RFC3339/ISO) в datetime (UTC по умолчанию).
+
+    Args:
+        value: Строка даты-времени.
+
+    Returns:
+        datetime (timezone-aware) или None если распарсить не удалось.
+    """
     if not value:
         return None
     s = str(value).strip()
@@ -1045,6 +1320,18 @@ async def handle_create_schedule_event_action(
     action_payload: dict[str, Any],
     user_message: str | None = None,
 ) -> dict[str, Any]:
+    """Создать событие в расписании.
+
+    Args:
+        uow: UnitOfWork.
+        org_id: ID организации.
+        user_id: ID пользователя.
+        action_payload: Payload `create_schedule_event`.
+        user_message: Сообщение пользователя (необязательная подсказка).
+
+    Returns:
+        dict с результатом создания события.
+    """
     title = str(action_payload.get("title") or action_payload.get("name") or "").strip()[:500]
     if not title:
         return {"action": "create_schedule_event", "ok": False, "error": "title_required"}
@@ -1103,6 +1390,18 @@ async def handle_create_kb_page_action(
     action_payload: dict[str, Any],
     user_message: str | None = None,
 ) -> dict[str, Any]:
+    """Создать страницу базы знаний.
+
+    Args:
+        uow: UnitOfWork.
+        org_id: ID организации.
+        user_id: ID пользователя.
+        action_payload: Payload `create_kb_page`.
+        user_message: Сообщение пользователя (необязательная подсказка).
+
+    Returns:
+        dict с результатом создания страницы.
+    """
     title = str(action_payload.get("title") or action_payload.get("name") or "").strip()[:500]
     if not title:
         return {"action": "create_kb_page", "ok": False, "error": "title_required"}
@@ -1146,6 +1445,18 @@ def build_messages(
     history: list[dict[str, str]],
     user_message: str,
 ) -> list[dict[str, str]]:
+    """Собрать массив сообщений для OpenAI-compatible chat completions.
+
+    Args:
+        system_prompt: Основной system prompt (настройки ассистента).
+        org_context: Дополнительный контекст организации (как system сообщение).
+        db_messages: История из БД (если есть, она приоритетнее history).
+        history: История из UI (fallback).
+        user_message: Текущее сообщение пользователя.
+
+    Returns:
+        Список сообщений в формате [{role, content}, ...].
+    """
     messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
     if org_context:
         messages.append({"role": "system", "content": f"Organization context:\n\n{org_context}"})
@@ -1202,6 +1513,21 @@ async def call_openai_compatible_api(
     messages: list[dict[str, str]],
     max_tokens: int = 2000,
 ) -> dict[str, Any]:
+    """Вызвать OpenAI-compatible endpoint `/v1/chat/completions`.
+
+    Args:
+        base_url: Базовый URL провайдера (может содержать /v1).
+        bearer_token: Bearer токен.
+        model: Имя модели.
+        messages: Сообщения.
+        max_tokens: Максимум токенов для completion.
+
+    Returns:
+        JSON ответ провайдера (dict).
+
+    Raises:
+        httpx.HTTPStatusError: если провайдер вернул 4xx/5xx.
+    """
     clean_base = base_url.rstrip("/")
     if clean_base.endswith("/v1"):
         clean_base = clean_base[:-3]
@@ -1214,4 +1540,3 @@ async def call_openai_compatible_api(
         )
         resp.raise_for_status()
         return resp.json()
-

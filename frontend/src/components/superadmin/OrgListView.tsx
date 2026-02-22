@@ -1,0 +1,238 @@
+import { useEffect, useMemo, useState } from 'react'
+import { Building2, Loader2, Search } from 'lucide-react'
+
+import type { SuperadminOrgListItem, SuperadminOrgListPage } from '@/lib/api'
+import { superadminApi } from '@/lib/api'
+import { PLAN_LABELS, SUB_STATUS_LABELS } from './constants'
+
+type Props = {
+  selectedOrgId: string
+  onSelectOrg: (orgId: string) => void
+}
+
+export function OrgListView({ selectedOrgId, onSelectOrg }: Props) {
+  const [q, setQ] = useState('')
+  const [plan, setPlan] = useState<string>('')
+  const [subStatus, setSubStatus] = useState<string>('')
+  const [limit, setLimit] = useState(25)
+  const [offset, setOffset] = useState(0)
+
+  const [page, setPage] = useState<SuperadminOrgListPage | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+
+  // Debounce search input.
+  const debouncedQ = useDebounced(q.trim(), 300)
+
+  const load = async (nextOffset = offset) => {
+    setLoading(true)
+    setError('')
+    try {
+      const r = await superadminApi.orgs({
+        q: debouncedQ || undefined,
+        plan: plan || undefined,
+        sub_status: subStatus || undefined,
+        limit,
+        offset: nextOffset,
+      })
+      if (r.data.ok && r.data.data) {
+        setPage(r.data.data)
+        setOffset(r.data.data.offset)
+      } else {
+        setError(r.data.error?.message || 'Не удалось загрузить организации')
+      }
+    } catch (e: any) {
+      setError(e?.response?.data?.error?.message || 'Не удалось загрузить организации')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    setOffset(0)
+    void load(0)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [debouncedQ, plan, subStatus, limit])
+
+  const items = page?.items || []
+  const total = page?.total || 0
+  const canPrev = offset > 0
+  const canNext = offset + limit < total
+
+  const subtitle = useMemo(() => {
+    const parts: string[] = []
+    if (plan) parts.push(`тариф: ${PLAN_LABELS[plan] || plan}`)
+    if (subStatus) parts.push(`подписка: ${SUB_STATUS_LABELS[subStatus] || subStatus}`)
+    if (debouncedQ) parts.push(`поиск: "${debouncedQ}"`)
+    return parts.join(' • ')
+  }, [plan, subStatus, debouncedQ])
+
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="font-semibold flex items-center gap-2">
+            <Building2 className="h-4 w-4" /> Организации
+            <span className="text-xs text-muted-foreground font-normal">({total.toLocaleString('ru-RU')})</span>
+          </h2>
+          {subtitle && <p className="text-xs text-muted-foreground truncate">{subtitle}</p>}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="relative">
+            <Search className="h-4 w-4 text-muted-foreground absolute left-2 top-1/2 -translate-y-1/2" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Поиск по названию/slug"
+              className="h-8 w-64 max-w-[48vw] pl-8 pr-2 rounded-lg border border-border bg-background text-sm outline-none focus:border-primary"
+            />
+          </div>
+          <select
+            value={plan}
+            onChange={(e) => setPlan(e.target.value)}
+            className="h-8 px-2 rounded-lg border border-border bg-background text-sm"
+          >
+            <option value="">Все тарифы</option>
+            <option value="free">{PLAN_LABELS.free}</option>
+            <option value="team">{PLAN_LABELS.team}</option>
+            <option value="business">{PLAN_LABELS.business}</option>
+          </select>
+          <select
+            value={subStatus}
+            onChange={(e) => setSubStatus(e.target.value)}
+            className="h-8 px-2 rounded-lg border border-border bg-background text-sm"
+          >
+            <option value="">Любой статус подписки</option>
+            <option value="active">{SUB_STATUS_LABELS.active}</option>
+            <option value="past_due">{SUB_STATUS_LABELS.past_due}</option>
+            <option value="cancelled">{SUB_STATUS_LABELS.cancelled}</option>
+            <option value="trialing">{SUB_STATUS_LABELS.trialing}</option>
+            <option value="none">{SUB_STATUS_LABELS.none}</option>
+          </select>
+          <select
+            value={String(limit)}
+            onChange={(e) => setLimit(Number(e.target.value))}
+            className="h-8 px-2 rounded-lg border border-border bg-background text-sm"
+          >
+            {[25, 50, 100].map((n) => (
+              <option key={n} value={String(n)}>
+                {n}/стр
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {loading && (
+        <div className="flex items-center justify-center py-14 text-muted-foreground">
+          <Loader2 className="h-6 w-6 animate-spin mr-2" /> Загрузка...
+        </div>
+      )}
+
+      {!loading && error && <div className="px-4 py-8 text-sm text-destructive">{error}</div>}
+
+      {!loading && !error && items.length === 0 && (
+        <div className="px-4 py-10 text-sm text-muted-foreground">Нет организаций по заданным фильтрам.</div>
+      )}
+
+      {!loading && !error && items.length > 0 && (
+        <div className="overflow-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-secondary/20">
+                <th className="px-4 py-3 text-left">Название</th>
+                <th className="px-4 py-3 text-left">Тариф</th>
+                <th className="px-4 py-3 text-left">Подписка</th>
+                <th className="px-4 py-3 text-center">Участники</th>
+                <th className="px-4 py-3 text-center">Таблицы</th>
+                <th className="px-4 py-3 text-center">Записи</th>
+                <th className="px-4 py-3 text-left">Создана</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((org, i) => (
+                <OrgRow
+                  key={org.id}
+                  org={org}
+                  active={org.id === selectedOrgId}
+                  zebra={i % 2 === 1}
+                  onClick={() => onSelectOrg(org.id)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="px-4 py-3 border-t border-border flex items-center justify-between text-sm">
+        <div className="text-muted-foreground">
+          {total > 0 ? (
+            <>
+              Показаны {Math.min(total, offset + 1)}–{Math.min(total, offset + limit)} из {total.toLocaleString('ru-RU')}
+            </>
+          ) : (
+            '—'
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            disabled={!canPrev || loading}
+            onClick={() => void load(Math.max(0, offset - limit))}
+            className="h-8 px-3 rounded-lg border border-border hover:bg-secondary/30 disabled:opacity-50"
+          >
+            Назад
+          </button>
+          <button
+            disabled={!canNext || loading}
+            onClick={() => void load(offset + limit)}
+            className="h-8 px-3 rounded-lg border border-border hover:bg-secondary/30 disabled:opacity-50"
+          >
+            Вперед
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function OrgRow({ org, zebra, active, onClick }: { org: SuperadminOrgListItem; zebra: boolean; active: boolean; onClick: () => void }) {
+  const sub = org.subscription
+  return (
+    <tr
+      onClick={onClick}
+      className={`border-b border-border/30 cursor-pointer ${
+        active ? 'bg-primary/10' : zebra ? 'bg-secondary/5' : ''
+      } hover:bg-secondary/10 transition-colors`}
+    >
+      <td className="px-4 py-3">
+        <div className="font-medium">{org.name}</div>
+        <div className="text-xs text-muted-foreground">{org.slug}</div>
+      </td>
+      <td className="px-4 py-3">{PLAN_LABELS[org.plan] || org.plan}</td>
+      <td className="px-4 py-3">
+        {sub ? (
+          <div className="text-xs">
+            <div className="font-medium">{SUB_STATUS_LABELS[sub.status] || sub.status}</div>
+            <div className="text-muted-foreground">{PLAN_LABELS[sub.plan] || sub.plan}</div>
+          </div>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
+      </td>
+      <td className="px-4 py-3 text-center">{Number(org.members || 0).toLocaleString('ru-RU')}</td>
+      <td className="px-4 py-3 text-center">{Number(org.tables || 0).toLocaleString('ru-RU')}</td>
+      <td className="px-4 py-3 text-center">{Number(org.records || 0).toLocaleString('ru-RU')}</td>
+      <td className="px-4 py-3">{org.created_at ? new Date(org.created_at).toLocaleDateString('ru-RU') : '—'}</td>
+    </tr>
+  )
+}
+
+function useDebounced(value: string, delayMs: number) {
+  const [v, setV] = useState(value)
+  useEffect(() => {
+    const t = window.setTimeout(() => setV(value), delayMs)
+    return () => window.clearTimeout(t)
+  }, [value, delayMs])
+  return v
+}
+

@@ -1,4 +1,4 @@
-"""Pydantic schemas for AI module."""
+"""Pydantic-схемы модуля AI."""
 
 from datetime import datetime
 
@@ -6,11 +6,18 @@ from pydantic import BaseModel, Field
 
 
 class ChatMessage(BaseModel):
+    """Сообщение для передачи истории чата в запросе."""
+
     role: str
     content: str
 
 
 class ChatRequest(BaseModel):
+    """Запрос к AI чату.
+
+    Используется фронтом для отправки сообщения и (опционально) истории/контекста.
+    """
+
     message: str
     history: list[ChatMessage] = Field(default_factory=list)
     system_prompt: str | None = None
@@ -22,6 +29,8 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    """Ответ AI чата (текст + usage + опциональный результат действия)."""
+
     reply: str
     model: str
     usage: dict | None = None
@@ -31,6 +40,8 @@ class ChatResponse(BaseModel):
 
 
 class ChatSessionOut(BaseModel):
+    """Сессия чата для списка истории (id/title/preview)."""
+
     id: str
     title: str
     created_at: datetime
@@ -39,6 +50,8 @@ class ChatSessionOut(BaseModel):
 
 
 class ChatMessageOut(BaseModel):
+    """Сообщение чата для UI истории."""
+
     id: str
     role: str
     content: str
@@ -48,10 +61,17 @@ class ChatMessageOut(BaseModel):
 
 
 class CreateChatRequest(BaseModel):
+    """Создание новой чат-сессии."""
+
     title: str | None = None
 
 
 class ContextEstimateRequest(BaseModel):
+    """Запрос на оценку контекста (примерная стоимость в токенах).
+
+    Важно: это оценка/эвристика, т.к. токенизация зависит от провайдера/модели.
+    """
+
     include_context: bool = True
     context_options: dict | None = None
     system_prompt: str | None = None

@@ -37,6 +37,9 @@ frontend/.env.local
 .DS_Store
 Thumbs.db
 
+# Local scratch (created by smoke tests / exports)
+.tmp/
+
 # Coverage
 htmlcov/
 .coverage

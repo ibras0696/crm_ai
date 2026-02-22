@@ -163,10 +163,10 @@ export default function AdminPage() {
           </div>
           <div className="divide-y divide-border">
             {members.map(m => (
-              <div key={m.id} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/10 transition-colors group">
-                <div className="h-9 w-9 rounded-full bg-secondary flex items-center justify-center text-sm font-medium shrink-0">
-                  {(m.user_first_name || m.user_email || '?')[0].toUpperCase()}
-                </div>
+                <div key={m.id} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/10 transition-colors group">
+                  <div className="h-9 w-9 rounded-full bg-secondary flex items-center justify-center text-sm font-medium shrink-0">
+                  {(m.user_first_name || m.user_email || '?').charAt(0).toUpperCase()}
+                  </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{m.user_first_name} {m.user_last_name}</p>
                   <p className="text-xs text-muted-foreground truncate">{m.user_email}</p>

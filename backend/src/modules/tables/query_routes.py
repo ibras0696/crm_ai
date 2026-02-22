@@ -1,25 +1,23 @@
-"""Record filter/search and table export/import endpoints."""
+"""Эндпоинты фильтрации/экспорта/импорта записей таблиц.
+
+Роуты должны быть тонкими: валидация входа + вызов сервиса.
+Бизнес-логика вынесена в `TableQueryService`.
+"""
 
 from __future__ import annotations
 
-import csv
-import io
 import uuid
-from io import BytesIO
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import StreamingResponse
-from openpyxl import Workbook
 
 from src.common.enums import UserRole
 from src.common.http_headers import content_disposition_attachment
 from src.common.schemas import ApiResponse
-from src.infrastructure.metrics_custom import EXPORTS_TOTAL, IMPORTS_TOTAL
 from src.infrastructure.uow import UnitOfWork
 from src.modules.access.dependencies import require_access
 from src.modules.auth.dependencies import CurrentUser, require_roles
-from src.modules.tables.repository import TableRepository
-from src.modules.tables.records import Record, RecordRepository
+from src.modules.tables.query_service import TableQueryService
 from src.modules.tables.schemas import FilterRequest, RecordOut
 
 
@@ -37,47 +35,24 @@ async def filter_records(
     ),
     _: None = Depends(require_access(resource_type="table", permission="can_read", resource_id_param="table_id")),
 ):
-    """Filter records. Current implementation is in-memory, intended for small datasets."""
+    """Фильтр записей (в памяти, для небольших объемов)."""
     async with UnitOfWork() as uow:
-        t_repo = TableRepository(uow.session)
-        table = await t_repo.get_by_id(table_id, with_columns=False)
-        if not table or table.org_id != current_user.org_id:
+        svc = TableQueryService(uow.session)
+        try:
+            result = await svc.filter_records(
+                table_id=table_id,
+                org_id=current_user.org_id,
+                filters=body.filters,
+                sorts=body.sorts,
+                limit=limit,
+                offset=offset,
+            )
+        except LookupError:
             return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Таблица не найдена"})
 
-        r_repo = RecordRepository(uow.session)
-        all_records = await r_repo.list_by_table(table_id, limit=500, offset=0)
-
-        filtered = all_records
-        if body.filters:
-            for col_id, cond in body.filters.items():
-                op = cond.get("op", "eq") if isinstance(cond, dict) else "eq"
-                val = cond.get("value", "") if isinstance(cond, dict) else cond
-                val_str = str(val).lower()
-                new_filtered = []
-                for rec in filtered:
-                    cell = str(rec.data.get(col_id, "")).lower()
-                    if op == "eq" and cell == val_str:
-                        new_filtered.append(rec)
-                    elif op == "contains" and val_str in cell:
-                        new_filtered.append(rec)
-                    elif op == "gt" and cell > val_str:
-                        new_filtered.append(rec)
-                    elif op == "lt" and cell < val_str:
-                        new_filtered.append(rec)
-                    elif op == "neq" and cell != val_str:
-                        new_filtered.append(rec)
-                filtered = new_filtered
-
-        if body.sorts:
-            for s in reversed(body.sorts):
-                col_id = s.get("col_id", "")
-                desc = s.get("dir", "asc") == "desc"
-                filtered.sort(key=lambda r: str(r.data.get(col_id, "")), reverse=desc)
-
-        total = len(filtered)
-        page = filtered[offset : offset + limit]
-        items = [RecordOut.model_validate(r) for r in page]
-    return ApiResponse(data={"records": [i.model_dump() for i in items], "total": total})
+        items = [RecordOut.model_validate(r) for r in result["records"]]
+        total = int(result["total"])
+        return ApiResponse(data={"records": [i.model_dump() for i in items], "total": total})
 
 
 @router.get("/export/csv")
@@ -86,32 +61,18 @@ async def export_csv(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
     _: None = Depends(require_access(resource_type="table", permission="can_read", resource_id_param="table_id")),
 ):
+    """Экспорт таблицы в CSV."""
     async with UnitOfWork() as uow:
-        t_repo = TableRepository(uow.session)
-        table = await t_repo.get_by_id(table_id, with_columns=True)
-        if not table or table.org_id != current_user.org_id:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Таблица не найдена"})
-
-        r_repo = RecordRepository(uow.session)
-        records = await r_repo.list_by_table(table_id, limit=5000, offset=0)
-
-        columns = sorted(table.columns, key=lambda c: c.position)
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow([c.name for c in columns])
-        for rec in records:
-            writer.writerow([str(rec.data.get(str(c.id), "")) for c in columns])
-
-        payload = output.getvalue().encode("utf-8-sig")
+        svc = TableQueryService(uow.session)
         try:
-            EXPORTS_TOTAL.labels(format="csv").inc()
-        except Exception:
-            pass
+            payload, media_type, filename = await svc.export_csv(table_id=table_id, org_id=current_user.org_id)
+        except LookupError:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Таблица не найдена"})
 
         return StreamingResponse(
             iter([payload]),
-            media_type="text/csv; charset=utf-8",
-            headers={"Content-Disposition": content_disposition_attachment(f"{table.name}.csv")},
+            media_type=media_type,
+            headers={"Content-Disposition": content_disposition_attachment(filename)},
         )
 
 
@@ -121,36 +82,18 @@ async def export_xlsx(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
     _: None = Depends(require_access(resource_type="table", permission="can_read", resource_id_param="table_id")),
 ):
+    """Экспорт таблицы в XLSX."""
     async with UnitOfWork() as uow:
-        t_repo = TableRepository(uow.session)
-        table = await t_repo.get_by_id(table_id, with_columns=True)
-        if not table or table.org_id != current_user.org_id:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Таблица не найдена"})
-
-        r_repo = RecordRepository(uow.session)
-        records = await r_repo.list_by_table(table_id, limit=5000, offset=0)
-
-        columns = sorted(table.columns, key=lambda c: c.position)
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Table"
-        ws.append([c.name for c in columns])
-        for rec in records:
-            ws.append([str(rec.data.get(str(c.id), "")) for c in columns])
-
-        output = BytesIO()
-        wb.save(output)
-        payload = output.getvalue()
-
+        svc = TableQueryService(uow.session)
         try:
-            EXPORTS_TOTAL.labels(format="xlsx").inc()
-        except Exception:
-            pass
+            payload, media_type, filename = await svc.export_xlsx(table_id=table_id, org_id=current_user.org_id)
+        except LookupError:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Таблица не найдена"})
 
         return StreamingResponse(
             iter([payload]),
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": content_disposition_attachment(f"{table.name}.xlsx")},
+            media_type=media_type,
+            headers={"Content-Disposition": content_disposition_attachment(filename)},
         )
 
 
@@ -161,75 +104,27 @@ async def import_csv(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
     _: None = Depends(require_access(resource_type="table", permission="can_write", resource_id_param="table_id")),
 ):
-    """
-    Import CSV into an existing table (basic version).
-
-    Behavior:
-    - matches CSV header columns to existing table columns by name (case-insensitive).
-    - creates records for matched columns only.
-    """
+    """Импорт CSV в существующую таблицу (простая версия)."""
     async with UnitOfWork() as uow:
-        t_repo = TableRepository(uow.session)
-        table = await t_repo.get_by_id(table_id, with_columns=True)
-        if not table or table.org_id != current_user.org_id:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Таблица не найдена"})
-
+        svc = TableQueryService(uow.session)
         raw = await file.read()
-        text = raw.decode("utf-8", errors="replace")
-        reader = csv.reader(io.StringIO(text))
         try:
-            header = next(reader)
-        except StopIteration:
-            return ApiResponse(ok=False, data=None, error={"code": "BAD_REQUEST", "message": "Пустой CSV"})
-
-        by_name = {str(c.name).strip().lower(): c for c in table.columns}
-        col_map: list[tuple[int, str]] = []
-        for idx, name in enumerate(header):
-            col = by_name.get(str(name).strip().lower())
-            if col:
-                col_map.append((idx, str(col.id)))
-
-        if not col_map:
-            return ApiResponse(
-                ok=False,
-                data=None,
-                error={"code": "NO_MATCHING_COLUMNS", "message": "В CSV не найдено совпадений с колонками таблицы."},
+            result = await svc.import_csv(
+                table_id=table_id,
+                org_id=current_user.org_id,
+                user_id=current_user.user_id,
+                raw_bytes=raw,
             )
-
-        r_repo = RecordRepository(uow.session)
-        created = 0
-        max_pos = await r_repo.get_max_position(table_id)
-        to_create: list[Record] = []
-        for row in reader:
-            data: dict[str, str] = {}
-            for idx, col_id in col_map:
-                if idx < len(row):
-                    v = row[idx]
-                    if v is not None and str(v).strip() != "":
-                        data[col_id] = str(v)
-            if not data:
-                continue
-            to_create.append(
-                Record(
-                    table_id=table_id,
-                    org_id=current_user.org_id,
-                    created_by=current_user.user_id,
-                    data=data,
-                    position=max_pos + created + 1,
-                )
-            )
-            created += 1
-            if created >= 2000:
-                break
-
-        if to_create:
-            await r_repo.bulk_create(to_create)
+        except LookupError:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Таблица не найдена"})
+        except ValueError as exc:
+            code = str(exc)
+            if code == "EMPTY_CSV":
+                return ApiResponse(ok=False, data=None, error={"code": "BAD_REQUEST", "message": "Пустой CSV"})
+            if code == "NO_MATCHING_COLUMNS":
+                return ApiResponse(ok=False, data=None, error={"code": "NO_MATCHING_COLUMNS", "message": "В CSV нет совпадений с колонками таблицы."})
+            return ApiResponse(ok=False, data=None, error={"code": "BAD_REQUEST", "message": "Некорректный CSV"})
 
         await uow.commit()
+        return ApiResponse(data={"records_created": int(result.get("created", 0))})
 
-        try:
-            IMPORTS_TOTAL.labels(format="csv").inc()
-        except Exception:
-            pass
-
-    return ApiResponse(data={"records_created": created})

@@ -453,7 +453,7 @@ export default function AIPage() {
                     includeContext={includeContext}
                     disabled={sending || statusError === 'auth' || status?.enabled === false || !status?.configured}
                     tables={contextSources.tables}
-                    selectedTableIds={contextOptions.selected_table_ids}
+                    selectedTableIds={contextOptions.selected_table_ids ?? []}
                     onSelect={(intent) => { setUiIntent(intent); requestAnimationFrame(() => textareaRef.current?.focus()) }}
                   />
                   <button

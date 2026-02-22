@@ -6,15 +6,19 @@ from datetime import UTC, datetime, timedelta, timezone
 import jwt as pyjwt
 from sqlalchemy import func, select, text
 
-from src.common.enums import PlanTier, UserRole
+from src.common.enums import AuditAction, PlanTier, SubscriptionStatus, UserRole
 from src.config import settings
 from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.models import AIUsageLog
+from src.modules.audit.repository import AuditRepository
 from src.modules.auth.models import User
 from src.modules.files.models import File
-from src.modules.org.models import Membership, Organization
+from src.modules.org.models import Membership, Organization, Subscription
 from src.modules.tables.models import Table
 from src.modules.tables.records import Record
+from src.modules.superadmin.repository import SuperadminRepository
+from src.modules.tables.repository import TableRepository
+from src.modules.tables.records import RecordRepository
 
 
 def authenticate_superadmin(email: str, password: str) -> str:
@@ -30,7 +34,15 @@ def authenticate_superadmin(email: str, password: str) -> str:
         "iat": now,
         "exp": now + timedelta(hours=12),
     }
-    return pyjwt.encode(payload, settings.SECRET_KEY, algorithm="HS256")
+    # Must match auth/security.py decode_access_token algorithm.
+    return pyjwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def _safe_int(v) -> int:
+    try:
+        return int(v or 0)
+    except Exception:
+        return 0
 
 
 async def dashboard_data() -> dict:
@@ -60,72 +72,61 @@ async def dashboard_data() -> dict:
 
     return {
         "totals": {
-            "orgs": orgs_count,
-            "users": users_count,
-            "tables": tables_count,
-            "records": records_count,
-            "files": files_row[0],
-            "storage_bytes": files_row[1],
-            "ai_requests": ai_row[0],
-            "ai_tokens": ai_row[1],
+            "orgs": _safe_int(orgs_count),
+            "users": _safe_int(users_count),
+            "tables": _safe_int(tables_count),
+            "records": _safe_int(records_count),
+            "files": _safe_int(files_row[0]),
+            "storage_bytes": _safe_int(files_row[1]),
+            "ai_requests": _safe_int(ai_row[0]),
+            "ai_tokens": _safe_int(ai_row[1]),
         },
         "registrations_timeline": [{"date": str(r.day)[:10], "count": r.cnt} for r in reg_rows],
         "orgs_by_plan": [{"plan": str(r.plan.value if hasattr(r.plan, "value") else r.plan), "count": r.cnt} for r in plan_rows],
     }
 
 
-async def list_orgs(limit: int, offset: int) -> list[dict]:
+async def list_orgs_page(*, q: str | None, plan: str | None, sub_status: str | None, limit: int, offset: int) -> dict:
     async with UnitOfWork() as uow:
-        stmt = select(Organization).order_by(Organization.created_at.desc()).limit(limit).offset(offset)
-        orgs = list((await uow.session.execute(stmt)).scalars().all())
-        result: list[dict] = []
-        for org in orgs:
-            mem_cnt = (
-                await uow.session.execute(select(func.count()).select_from(Membership).where(Membership.org_id == org.id))
-            ).scalar() or 0
-            tbl_cnt = (
-                await uow.session.execute(select(func.count()).select_from(Table).where(Table.org_id == org.id))
-            ).scalar() or 0
-            rec_cnt = (
-                await uow.session.execute(select(func.count()).select_from(Record).where(Record.org_id == org.id))
-            ).scalar() or 0
-            result.append(
-                {
-                    "id": str(org.id),
-                    "name": org.name,
-                    "slug": org.slug,
-                    "plan": org.plan.value if hasattr(org.plan, "value") else str(org.plan),
-                    "created_at": org.created_at.isoformat() if org.created_at else None,
-                    "members": mem_cnt,
-                    "tables": tbl_cnt,
-                    "records": rec_cnt,
-                }
-            )
-    return result
+        repo = SuperadminRepository(uow.session)
+        items, total = await repo.list_orgs_page(q=q, plan=plan, sub_status=sub_status, limit=limit, offset=offset)
+    return {"items": items, "total": total, "limit": int(limit), "offset": int(offset)}
 
 
-async def list_users(limit: int, offset: int) -> list[dict]:
+async def org_detail(org_id: str) -> dict:
     async with UnitOfWork() as uow:
-        stmt = select(User).order_by(User.created_at.desc()).limit(limit).offset(offset)
-        users = list((await uow.session.execute(stmt)).scalars().all())
-        result: list[dict] = []
-        for user in users:
-            memberships = [
-                {"org_id": str(m.org_id), "role": m.role.value if hasattr(m.role, "value") else str(m.role)}
-                for m in user.memberships
-            ]
-            result.append(
-                {
-                    "id": str(user.id),
-                    "email": user.email,
-                    "first_name": user.first_name,
-                    "last_name": user.last_name,
-                    "is_active": user.is_active,
-                    "created_at": user.created_at.isoformat() if user.created_at else None,
-                    "orgs": memberships,
-                }
-            )
-    return result
+        repo = SuperadminRepository(uow.session)
+        data = await repo.get_org_detail(org_id=uuid.UUID(org_id))
+        if not data:
+            raise LookupError("NOT_FOUND")
+    return data
+
+
+async def org_members_page(org_id: str, *, limit: int, offset: int) -> dict:
+    async with UnitOfWork() as uow:
+        repo = SuperadminRepository(uow.session)
+        items, total = await repo.list_org_members(org_id=uuid.UUID(org_id), limit=limit, offset=offset)
+    return {"items": items, "total": total, "limit": int(limit), "offset": int(offset)}
+
+
+async def list_users_page(
+    *,
+    q: str | None,
+    org_id: str | None,
+    is_active: bool | None,
+    limit: int,
+    offset: int,
+) -> dict:
+    async with UnitOfWork() as uow:
+        repo = SuperadminRepository(uow.session)
+        items, total = await repo.list_users_page(
+            q=q,
+            org_id=uuid.UUID(org_id) if org_id else None,
+            is_active=is_active,
+            limit=limit,
+            offset=offset,
+        )
+    return {"items": items, "total": total, "limit": int(limit), "offset": int(offset)}
 
 
 async def list_tables(limit: int, offset: int) -> list[dict]:
@@ -171,8 +172,8 @@ async def ai_usage_by_org() -> list[dict]:
         {
             "org_id": str(r.org_id),
             "org_name": orgs_map.get(r.org_id, "—"),
-            "requests": r.requests,
-            "tokens": r.tokens,
+            "requests": _safe_int(r.requests),
+            "tokens": _safe_int(r.tokens),
         }
         for r in rows
     ]
@@ -185,10 +186,32 @@ async def set_plan(org_id: str, plan_name: str) -> dict:
         raise ValueError("INVALID_PLAN") from exc
 
     async with UnitOfWork() as uow:
-        org = (await uow.session.execute(select(Organization).where(Organization.id == uuid.UUID(org_id)))).scalar_one_or_none()
+        org_uuid = uuid.UUID(org_id)
+        org = (await uow.session.execute(select(Organization).where(Organization.id == org_uuid))).scalar_one_or_none()
         if not org:
             raise LookupError("NOT_FOUND")
+        old_plan = org.plan.value if hasattr(org.plan, "value") else str(org.plan)
+
+        # Update subscription (source of truth for many checks) and keep org.plan in sync (legacy).
+        sub = (await uow.session.execute(select(Subscription).where(Subscription.org_id == org_uuid))).scalar_one_or_none()
+        if sub:
+            sub.plan = plan_tier
+            sub.status = SubscriptionStatus.ACTIVE
+        else:
+            sub = Subscription(org_id=org_uuid, plan=plan_tier, status=SubscriptionStatus.ACTIVE)
+            uow.session.add(sub)
+
         org.plan = plan_tier
+
+        audit_repo = AuditRepository(uow.session)
+        await audit_repo.log(
+            org_id=org_uuid,
+            actor_id=None,
+            action=AuditAction.UPDATE,
+            entity_type="org_plan",
+            entity_id=str(org_uuid),
+            meta={"superadmin": True, "old_plan": old_plan, "new_plan": plan_tier.value},
+        )
         await uow.commit()
     return {"org_id": org_id, "plan": plan_name}
 
@@ -205,3 +228,225 @@ def ai_config() -> dict:
         "key_configured": bool(key),
         "key_prefix": f"{key[:4]}***" if key else "",
     }
+
+
+async def list_org_options(limit: int = 200) -> list[dict]:
+    """Minimal org list for a superadmin selector (no heavy per-org counts)."""
+    async with UnitOfWork() as uow:
+        stmt = select(Organization).order_by(Organization.created_at.desc()).limit(limit)
+        orgs = list((await uow.session.execute(stmt)).scalars().all())
+        return [
+            {
+                "id": str(o.id),
+                "name": o.name,
+                "slug": o.slug,
+                "plan": o.plan.value if hasattr(o.plan, "value") else str(o.plan),
+                "created_at": o.created_at.isoformat() if o.created_at else None,
+            }
+            for o in orgs
+        ]
+
+
+async def overview_data(org_limit: int = 200) -> dict:
+    """Dashboard + org selector options for the superadmin UI."""
+    dash = await dashboard_data()
+    orgs = await list_org_options(limit=org_limit)
+    return {
+        "dashboard": dash,
+        "orgs": orgs,
+        "generated_at": datetime.now(UTC).isoformat(),
+    }
+
+
+async def audit_logs_page(*, org_id: str | None, limit: int, offset: int) -> dict:
+    async with UnitOfWork() as uow:
+        repo = SuperadminRepository(uow.session)
+        items, total = await repo.list_audit_logs_page(
+            org_id=uuid.UUID(org_id) if org_id else None,
+            limit=limit,
+            offset=offset,
+        )
+    return {"items": items, "total": total, "limit": int(limit), "offset": int(offset)}
+
+
+async def org_tables_page(
+    org_id: str,
+    *,
+    q: str | None,
+    include_archived: bool,
+    limit: int,
+    offset: int,
+) -> dict:
+    async with UnitOfWork() as uow:
+        repo = SuperadminRepository(uow.session)
+        items, total = await repo.list_tables_by_org_page(
+            org_id=uuid.UUID(org_id),
+            q=q,
+            include_archived=include_archived,
+            limit=limit,
+            offset=offset,
+        )
+    return {"items": items, "total": total, "limit": int(limit), "offset": int(offset)}
+
+
+async def org_table_detail(org_id: str, table_id: str) -> dict:
+    async with UnitOfWork() as uow:
+        repo = SuperadminRepository(uow.session)
+        table = await repo.get_table_in_org(org_id=uuid.UUID(org_id), table_id=uuid.UUID(table_id))
+        if not table:
+            raise LookupError("NOT_FOUND")
+        # Serialize minimal table with columns for read-only UI.
+        columns = [
+            {
+                "id": str(c.id),
+                "name": c.name,
+                "field_type": c.field_type,
+                "position": int(c.position),
+                "is_required": bool(c.is_required),
+                "is_primary": bool(c.is_primary),
+                "config": c.config,
+                "default_value": c.default_value,
+            }
+            for c in sorted(table.columns or [], key=lambda x: x.position)
+        ]
+        return {
+            "id": str(table.id),
+            "org_id": str(table.org_id),
+            "folder_id": str(table.folder_id) if table.folder_id else None,
+            "name": table.name,
+            "description": table.description,
+            "icon": table.icon,
+            "color": table.color,
+            "is_archived": bool(table.is_archived),
+            "created_at": table.created_at.isoformat() if table.created_at else None,
+            "columns": columns,
+        }
+
+
+async def org_table_records_page(
+    org_id: str,
+    table_id: str,
+    *,
+    q: str | None,
+    sort_col_id: str | None,
+    sort_dir: str,
+    limit: int,
+    offset: int,
+) -> dict:
+    if sort_dir not in {"asc", "desc"}:
+        sort_dir = "asc"
+    async with UnitOfWork() as uow:
+        repo = SuperadminRepository(uow.session)
+        # Ensure table belongs to org.
+        table = await repo.get_table_in_org(org_id=uuid.UUID(org_id), table_id=uuid.UUID(table_id))
+        if not table:
+            raise LookupError("NOT_FOUND")
+        rows, total = await repo.list_table_records_page(
+            org_id=uuid.UUID(org_id),
+            table_id=uuid.UUID(table_id),
+            q=q,
+            sort_col_id=sort_col_id,
+            sort_dir=sort_dir,
+            limit=limit,
+            offset=offset,
+        )
+        items = []
+        for r in rows:
+            items.append(
+                {
+                    "id": str(r.id),
+                    "table_id": str(r.table_id),
+                    "data": r.data,
+                    "created_by": str(r.created_by) if r.created_by else None,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+                    "position": int(r.position),
+                }
+            )
+    return {"items": items, "total": total, "limit": int(limit), "offset": int(offset)}
+
+
+async def export_table_csv(*, org_id: str, table_id: str) -> tuple[bytes, str]:
+    """Экспорт таблицы в CSV (UTF-8 with BOM) для supеradmin."""
+    import csv
+    import io
+
+    async with UnitOfWork() as uow:
+        t_repo = TableRepository(uow.session)
+        table_uuid = uuid.UUID(table_id)
+        org_uuid = uuid.UUID(org_id)
+
+        table = await t_repo.get_by_id(table_uuid, with_columns=True)
+        if not table or table.org_id != org_uuid:
+            raise LookupError("NOT_FOUND")
+
+        r_repo = RecordRepository(uow.session)
+        records = await r_repo.list_by_table(table_uuid, limit=5000, offset=0)
+
+        columns = sorted(table.columns, key=lambda c: c.position)
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([c.name for c in columns])
+        for rec in records:
+            writer.writerow([str(rec.data.get(str(c.id), "")) for c in columns])
+
+        payload = output.getvalue().encode("utf-8-sig")
+
+        audit_repo = AuditRepository(uow.session)
+        await audit_repo.log(
+            org_id=org_uuid,
+            actor_id=None,
+            action=AuditAction.EXPORT,
+            entity_type="table_export",
+            entity_id=str(table_uuid),
+            meta={"superadmin": True, "format": "csv"},
+        )
+        await uow.commit()
+
+        filename = f"{table.name}.csv"
+        return payload, filename
+
+
+async def export_table_xlsx(*, org_id: str, table_id: str) -> tuple[bytes, str]:
+    """Экспорт таблицы в XLSX для supеradmin."""
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    async with UnitOfWork() as uow:
+        t_repo = TableRepository(uow.session)
+        table_uuid = uuid.UUID(table_id)
+        org_uuid = uuid.UUID(org_id)
+
+        table = await t_repo.get_by_id(table_uuid, with_columns=True)
+        if not table or table.org_id != org_uuid:
+            raise LookupError("NOT_FOUND")
+
+        r_repo = RecordRepository(uow.session)
+        records = await r_repo.list_by_table(table_uuid, limit=5000, offset=0)
+
+        columns = sorted(table.columns, key=lambda c: c.position)
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Table"
+        ws.append([c.name for c in columns])
+        for rec in records:
+            ws.append([str(rec.data.get(str(c.id), "")) for c in columns])
+
+        output = BytesIO()
+        wb.save(output)
+        payload = output.getvalue()
+
+        audit_repo = AuditRepository(uow.session)
+        await audit_repo.log(
+            org_id=org_uuid,
+            actor_id=None,
+            action=AuditAction.EXPORT,
+            entity_type="table_export",
+            entity_id=str(table_uuid),
+            meta={"superadmin": True, "format": "xlsx"},
+        )
+        await uow.commit()
+
+        filename = f"{table.name}.xlsx"
+        return payload, filename

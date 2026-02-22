@@ -28,28 +28,24 @@ def apply_ui_intent_overrides(action_payload: dict[str, Any] | None, ui_intent: 
     action_name = str(action_payload.get("action") or "").strip()
     params = ui_params if isinstance(ui_params, dict) else {}
 
-    # If user selected a dashboard widget type in UI, ensure dashboard payload matches.
+    # If user selected a dashboard widget type/table in UI, ensure dashboard payload matches.
     if intent == "create_dashboard" and action_name == "create_dashboard":
         forced = str(params.get("widget_type") or "").strip().lower()
+        table_name = str(params.get("table_name") or "").strip()
+
+        # Keep table hint from UI when provider omitted it.
+        if table_name and not action_payload.get("table_name") and not action_payload.get("table_id"):
+            action_payload["table_name"] = table_name
+
         if forced in {"metric", "bar", "line", "pie", "table"}:
+            action_payload["preferred_widget_type"] = forced
             widgets = action_payload.get("widgets")
             if isinstance(widgets, list) and widgets:
-                # Normalize missing/metric widgets to the forced type.
-                if forced != "metric":
-                    for w in widgets:
-                        if not isinstance(w, dict):
-                            continue
-                        wtype = str(w.get("widget_type") or "").strip().lower()
-                        if not wtype or wtype == "metric":
-                            w["widget_type"] = forced
-
-                # Guarantee at least one widget has the forced type.
-                has_forced = any(
-                    isinstance(w, dict) and str(w.get("widget_type") or "").strip().lower() == forced for w in widgets
-                )
-                if not has_forced:
-                    first = next((w for w in widgets if isinstance(w, dict)), None)
-                    if first is not None:
-                        first["widget_type"] = forced
+                # User selected one chart style in UI: normalize all widgets to this type
+                # for predictable UX.
+                for w in widgets:
+                    if not isinstance(w, dict):
+                        continue
+                    w["widget_type"] = forced
 
     return action_payload

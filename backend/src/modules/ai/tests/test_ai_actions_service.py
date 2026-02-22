@@ -42,6 +42,28 @@ async def test_extract_action_payload_from_codeblock_and_plain_json():
     assert "create_dashboard" not in cleaned2 or cleaned2 != reply2
 
 
+def test_ui_intent_overrides_force_widget_type_and_table_hint():
+    from src.modules.ai.intent_overrides import apply_ui_intent_overrides
+
+    payload = {
+        "action": "create_dashboard",
+        "name": "Аналитика",
+        "widgets": [
+            {"title": "W1", "widget_type": "line"},
+            {"title": "W2", "widget_type": "bar"},
+        ],
+    }
+    updated = apply_ui_intent_overrides(
+        payload,
+        "create_dashboard",
+        {"widget_type": "pie", "table_name": "Продажи курсов"},
+    )
+    assert isinstance(updated, dict)
+    assert updated["preferred_widget_type"] == "pie"
+    assert updated["table_name"] == "Продажи курсов"
+    assert all(str(w.get("widget_type")) == "pie" for w in updated["widgets"])
+
+
 @pytest.mark.asyncio
 async def test_ai_service_can_create_table_columns_records_and_event(client: AsyncClient):
     token, email = await _register_owner(client)
@@ -133,3 +155,146 @@ async def test_ai_service_can_create_table_columns_records_and_event(client: Asy
         e = (await uow2.session.execute(select(Event).where(Event.org_id == t.org_id))).scalars().first()
         assert e is not None
 
+
+@pytest.mark.asyncio
+async def test_ai_dashboard_builder_normalizes_sales_widgets(client: AsyncClient):
+    token, email = await _register_owner(client)
+    assert token
+
+    from src.infrastructure.uow import UnitOfWork
+    from src.modules.ai.service import handle_create_dashboard_action, handle_create_table_action
+    from src.modules.auth.models import User
+    from src.modules.org.models import Membership
+
+    async with UnitOfWork() as uow:
+        user = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
+        assert user is not None
+        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        assert membership is not None
+
+        org_id = membership.org_id
+        user_id = user.id
+
+        table_result = await handle_create_table_action(
+            uow,
+            org_id,
+            user_id,
+            {
+                "action": "create_table",
+                "name": "Продажи курсов",
+                "columns": [
+                    {"name": "Название курса", "field_type": "text", "is_primary": True},
+                    {"name": "Выручка", "field_type": "number"},
+                    {"name": "Статус", "field_type": "select", "config": {"options": ["Оплачено", "Ожидание"]}},
+                    {"name": "Дата оплаты", "field_type": "date"},
+                ],
+                "records": [
+                    {"Название курса": "Веб-дизайн", "Выручка": 45000, "Статус": "Оплачено", "Дата оплаты": "2026-02-20"},
+                    {"Название курса": "Data Science PRO", "Выручка": 62000, "Статус": "Оплачено", "Дата оплаты": "2026-02-21"},
+                    {"Название курса": "AI Basics", "Выручка": 15000, "Статус": "Ожидание", "Дата оплаты": "2026-02-22"},
+                ],
+            },
+            user_message="создай таблицу продаж",
+        )
+        assert table_result["ok"] is True
+
+        dashboard_result = await handle_create_dashboard_action(
+            uow,
+            org_id,
+            user_id,
+            {
+                "action": "create_dashboard",
+                "name": "Аналитика продаж курсов",
+                "table_name": "Продажи курсов",
+                "widgets": [
+                    {"title": "Общая выручка", "widget_type": "line", "aggregation": "count"},
+                    {"title": "Статусы оплат", "widget_type": "line", "aggregation": "count"},
+                    {"title": "Динамика продаж", "widget_type": "line", "aggregation": "count"},
+                ],
+            },
+            user_message="собери дашборд по продажам курсов: общая выручка, статусы оплат и динамика по датам",
+        )
+        await uow.commit()
+
+    items_by_title = {str(item["title"]): item for item in dashboard_result["items"]}
+
+    total = items_by_title.get("Общая выручка")
+    assert total is not None
+    assert total["widget_type"] == "metric"
+    assert total["config"]["aggregation"] == "sum"
+    assert total["config"]["value_column_id"]
+
+    status = items_by_title.get("Статусы оплат")
+    assert status is not None
+    assert status["widget_type"] == "pie"
+    assert status["config"]["aggregation"] == "count"
+    assert status["config"]["group_by_column_id"]
+
+    trend = items_by_title.get("Динамика продаж")
+    assert trend is not None
+    assert trend["widget_type"] == "line"
+    assert trend["config"]["aggregation"] == "sum"
+    assert trend["config"]["time_column_id"]
+
+
+@pytest.mark.asyncio
+async def test_ai_dashboard_builder_respects_preferred_widget_type(client: AsyncClient):
+    token, email = await _register_owner(client)
+    assert token
+
+    from src.infrastructure.uow import UnitOfWork
+    from src.modules.ai.service import handle_create_dashboard_action, handle_create_table_action
+    from src.modules.auth.models import User
+    from src.modules.org.models import Membership
+
+    async with UnitOfWork() as uow:
+        user = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
+        assert user is not None
+        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        assert membership is not None
+
+        org_id = membership.org_id
+        user_id = user.id
+
+        table_result = await handle_create_table_action(
+            uow,
+            org_id,
+            user_id,
+            {
+                "action": "create_table",
+                "name": "Sales Table",
+                "columns": [
+                    {"name": "Client", "field_type": "text", "is_primary": True},
+                    {"name": "Revenue", "field_type": "number"},
+                    {"name": "Status", "field_type": "text"},
+                ],
+                "records": [
+                    {"Client": "A", "Revenue": 100, "Status": "Paid"},
+                    {"Client": "B", "Revenue": 200, "Status": "Pending"},
+                ],
+            },
+            user_message="create sales table",
+        )
+        assert table_result["ok"] is True
+
+        dashboard_result = await handle_create_dashboard_action(
+            uow,
+            org_id,
+            user_id,
+            {
+                "action": "create_dashboard",
+                "name": "Sales Pie Dashboard",
+                "table_name": "Sales Table",
+                "preferred_widget_type": "pie",
+                "widgets": [
+                    {"title": "Total revenue", "widget_type": "metric", "aggregation": "sum"},
+                    {"title": "Statuses", "widget_type": "line", "aggregation": "count"},
+                    {"title": "Top clients", "widget_type": "bar", "aggregation": "sum"},
+                ],
+            },
+            user_message="build dashboard",
+        )
+        await uow.commit()
+
+    assert dashboard_result["items"]
+    assert all(item["widget_type"] == "pie" for item in dashboard_result["items"])

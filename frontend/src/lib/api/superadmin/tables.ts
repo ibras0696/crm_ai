@@ -1,5 +1,5 @@
-import type { ApiResponse } from './types'
-import { superadminHttp } from './superadmin_client'
+import type { ApiResponse } from '../core/types'
+import { superadminHttp } from './client'
 
 export interface SATableListItem {
   id: string

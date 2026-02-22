@@ -8,29 +8,27 @@ from fastapi import APIRouter, Depends, Query
 from src.common.enums import UserRole
 from src.common.schemas import ApiResponse
 from src.infrastructure.uow import UnitOfWork
-from src.modules.auth.dependencies import CurrentUser, require_roles
 from src.modules.access.dependencies import require_access
+from src.modules.auth.dependencies import CurrentUser, require_roles
 from src.modules.schedule.schemas import CreateEventRequest, EventOut, UpdateEventRequest
-from src.modules.schedule.service import (
-    create_event as create_event_service,
-    delete_event as delete_event_service,
-    get_event_by_id,
-    list_events as list_events_service,
-    update_event as update_event_service,
-)
+from src.modules.schedule.service import ScheduleService
 
 router = APIRouter(prefix="/schedule", tags=["schedule"])
+
+EVENT_NOT_FOUND_MESSAGE = "Событие не найдено"
 
 
 @router.post("/events", response_model=ApiResponse[EventOut])
 async def create_event(
     body: CreateEventRequest,
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE),
+    ),
     _: None = Depends(require_access(resource_type="schedule", permission="can_write")),
 ):
     async with UnitOfWork() as uow:
-        event = await create_event_service(
-            uow,
+        service = ScheduleService(uow.session)
+        event = await service.create_event(
             org_id=current_user.org_id,
             user_id=current_user.user_id,
             body=body,
@@ -44,25 +42,31 @@ async def create_event(
 async def list_events(
     start: datetime | None = Query(default=None),
     end: datetime | None = Query(default=None),
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY),
+    ),
     _: None = Depends(require_access(resource_type="schedule", permission="can_read")),
 ):
     async with UnitOfWork() as uow:
-        events = await list_events_service(uow, org_id=current_user.org_id, start=start, end=end)
-        items = [EventOut.model_validate(e) for e in events]
+        service = ScheduleService(uow.session)
+        events = await service.list_events(org_id=current_user.org_id, start=start, end=end)
+        items = [EventOut.model_validate(event) for event in events]
     return ApiResponse(data=items)
 
 
 @router.get("/events/{event_id}", response_model=ApiResponse[EventOut])
 async def get_event(
     event_id: uuid.UUID,
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY),
+    ),
     _: None = Depends(require_access(resource_type="schedule", permission="can_read", resource_id_param="event_id")),
 ):
     async with UnitOfWork() as uow:
-        event = await get_event_by_id(uow, event_id=event_id, org_id=current_user.org_id)
-        if not event:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Событие не найдено"})
+        service = ScheduleService(uow.session)
+        event = await service.get_event_by_id(event_id=event_id, org_id=current_user.org_id)
+        if event is None:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": EVENT_NOT_FOUND_MESSAGE})
         item = EventOut.model_validate(event)
     return ApiResponse(data=item)
 
@@ -71,14 +75,17 @@ async def get_event(
 async def update_event(
     event_id: uuid.UUID,
     body: UpdateEventRequest,
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE),
+    ),
     _: None = Depends(require_access(resource_type="schedule", permission="can_write", resource_id_param="event_id")),
 ):
     async with UnitOfWork() as uow:
-        event = await get_event_by_id(uow, event_id=event_id, org_id=current_user.org_id)
-        if not event:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Событие не найдено"})
-        updated = await update_event_service(uow, event=event, body=body)
+        service = ScheduleService(uow.session)
+        event = await service.get_event_by_id(event_id=event_id, org_id=current_user.org_id)
+        if event is None:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": EVENT_NOT_FOUND_MESSAGE})
+        updated = await service.update_event(event=event, body=body)
         await uow.commit()
         item = EventOut.model_validate(updated)
     return ApiResponse(data=item)
@@ -91,9 +98,10 @@ async def delete_event(
     _: None = Depends(require_access(resource_type="schedule", permission="can_delete", resource_id_param="event_id")),
 ):
     async with UnitOfWork() as uow:
-        event = await get_event_by_id(uow, event_id=event_id, org_id=current_user.org_id)
-        if not event:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Событие не найдено"})
-        await delete_event_service(uow, event=event)
+        service = ScheduleService(uow.session)
+        event = await service.get_event_by_id(event_id=event_id, org_id=current_user.org_id)
+        if event is None:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": EVENT_NOT_FOUND_MESSAGE})
+        await service.delete_event(event=event)
         await uow.commit()
     return ApiResponse(data=None)

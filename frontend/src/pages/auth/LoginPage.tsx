@@ -4,7 +4,16 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useAuth } from '@/contexts/AuthContext'
+import { AuthError } from '@/contexts/AuthContext'
 import { Loader2, ArrowRight, Zap, Shield, Users } from 'lucide-react'
+
+const AUTH_ERRORS_RU: Record<string, string> = {
+  UNAUTHORIZED: 'Неверный email или пароль',
+  NOT_FOUND: 'Аккаунт не найден',
+  FORBIDDEN: 'Аккаунт деактивирован',
+}
+
+type FieldErrors = { email?: string; password?: string }
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -12,22 +21,46 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [loading, setLoading] = useState(false)
 
   if (isAuthenticated) return <Navigate to="/dashboard" replace />
 
+  const validate = (): boolean => {
+    const errs: FieldErrors = {}
+    if (!email.trim()) {
+      errs.email = 'Введите email'
+    } else if (!email.includes('@')) {
+      errs.email = 'Введите корректный email'
+    }
+    if (!password) {
+      errs.password = 'Введите пароль'
+    }
+    setFieldErrors(errs)
+    return Object.keys(errs).length === 0
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    if (!validate()) return
     setLoading(true)
     try {
       await login(email, password)
       navigate('/dashboard')
-    } catch (err: any) {
-      setError(err?.message || 'Login failed')
+    } catch (err: unknown) {
+      if (err instanceof AuthError) {
+        setError(AUTH_ERRORS_RU[err.code ?? ''] || err.message || 'Ошибка входа')
+      } else {
+        setError('Ошибка входа. Попробуйте позже.')
+      }
     } finally {
       setLoading(false)
     }
+  }
+
+  const clearFieldError = (field: keyof FieldErrors) => {
+    if (fieldErrors[field]) setFieldErrors((prev) => ({ ...prev, [field]: undefined }))
   }
 
   return (
@@ -100,29 +133,33 @@ export default function LoginPage() {
                 {error}
               </div>
             )}
-            <div className="space-y-2">
+            <div className="space-y-1">
               <Label htmlFor="email">Эл. почта</Label>
               <Input
                 id="email"
-                type="email"
+                type="text"
                 placeholder="you@company.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="h-11 bg-secondary/50"
+                onChange={(e) => { setEmail(e.target.value); clearFieldError('email') }}
+                className={`h-11 bg-secondary/50 ${fieldErrors.email ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
               />
+              {fieldErrors.email && (
+                <p className="text-xs text-red-400">{fieldErrors.email}</p>
+              )}
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1">
               <Label htmlFor="password">Пароль</Label>
               <Input
                 id="password"
                 type="password"
                 placeholder="Введите пароль"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className="h-11 bg-secondary/50"
+                onChange={(e) => { setPassword(e.target.value); clearFieldError('password') }}
+                className={`h-11 bg-secondary/50 ${fieldErrors.password ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
               />
+              {fieldErrors.password && (
+                <p className="text-xs text-red-400">{fieldErrors.password}</p>
+              )}
             </div>
             <Button type="submit" className="w-full h-11 gradient-primary border-0 text-white font-semibold" disabled={loading}>
               {loading ? (

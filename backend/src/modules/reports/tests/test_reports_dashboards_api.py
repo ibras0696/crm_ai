@@ -49,7 +49,11 @@ async def test_reports_dashboard_crud_and_data(client: AsyncClient):
     assert r.status_code == 200
 
     # Dashboard CRUD
-    d = await client.post("/api/v1/reports/dashboards", json={"name": "My dashboard", "description": "Desc"}, headers=_headers(token))
+    d = await client.post(
+        "/api/v1/reports/dashboards",
+        json={"name": "My dashboard", "description": "Desc"},
+        headers=_headers(token),
+    )
     assert d.status_code == 200
     dash_id = d.json()["data"]["id"]
 
@@ -82,9 +86,12 @@ async def test_reports_dashboard_crud_and_data(client: AsyncClient):
     wd = await client.delete(f"/api/v1/reports/dashboards/{dash_id}/widgets/{widget_id}", headers=_headers(token))
     assert wd.status_code == 200
 
-    du = await client.patch(f"/api/v1/reports/dashboards/{dash_id}", json={"description": "New"}, headers=_headers(token))
+    du = await client.patch(
+        f"/api/v1/reports/dashboards/{dash_id}",
+        json={"description": "New"},
+        headers=_headers(token),
+    )
     assert du.status_code == 200
 
     dd = await client.delete(f"/api/v1/reports/dashboards/{dash_id}", headers=_headers(token))
     assert dd.status_code == 200
-

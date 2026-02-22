@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import type { AxiosResponse } from 'axios'
-import type { ApiResponse } from '@/lib/api/types'
+import type { ApiResponse } from '@/lib/api'
 
 /**
  * Generic hook for simple data fetching with loading state.

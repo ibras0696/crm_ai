@@ -80,40 +80,9 @@ def create_app() -> FastAPI:
     application.add_exception_handler(AppError, app_error_handler)
     application.add_exception_handler(Exception, generic_error_handler)
 
-    # Routers
-    from src.modules.auth.routes import router as auth_router
-    from src.modules.org.routes import router as org_router
-    from src.modules.audit.routes import router as audit_router
-    from src.modules.files.routes import router as files_router
-    from src.modules.notifications.routes import router as notif_router
-    from src.modules.tables.routes import router as tables_router
-    from src.modules.tables.record_routes import router as records_router
-    from src.modules.tables.view_routes import router as views_router
-    from src.modules.tables.query_routes import router as query_router
-    from src.modules.knowledge.routes import router as kb_router
-    from src.modules.reports.routes import router as reports_router
-    from src.modules.billing.routes import router as billing_router
-    from src.modules.ai.routes import router as ai_router
-    from src.modules.schedule.routes import router as schedule_router
-    from src.modules.access.routes import router as access_router
-    from src.modules.superadmin.routes import router as superadmin_router
+    from src.router import router as api_router
 
-    application.include_router(auth_router, prefix="/api/v1")
-    application.include_router(org_router, prefix="/api/v1")
-    application.include_router(audit_router, prefix="/api/v1")
-    application.include_router(files_router, prefix="/api/v1")
-    application.include_router(notif_router, prefix="/api/v1")
-    application.include_router(tables_router, prefix="/api/v1")
-    application.include_router(records_router, prefix="/api/v1")
-    application.include_router(views_router, prefix="/api/v1")
-    application.include_router(query_router, prefix="/api/v1")
-    application.include_router(kb_router, prefix="/api/v1")
-    application.include_router(reports_router, prefix="/api/v1")
-    application.include_router(billing_router, prefix="/api/v1")
-    application.include_router(ai_router, prefix="/api/v1")
-    application.include_router(schedule_router, prefix="/api/v1")
-    application.include_router(access_router, prefix="/api/v1")
-    application.include_router(superadmin_router, prefix="/api/v1")
+    application.include_router(api_router)
 
     @application.get("/api/health")
     async def health():

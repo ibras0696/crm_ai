@@ -1,17 +1,18 @@
-﻿export { default } from './client'
-export * from './types'
+// Core
+export { default } from './core/client'
+export * from './core/types'
+
+// Auth domain: authApi, profileApi, UserInfo, TokenResponse, ...
 export * from './auth'
-export * from './audit'
-export * from './files'
-export * from './notifications'
-export * from './tables'
-export * from './records'
-export * from './knowledge'
-export * from './reports'
-export * from './billing'
-export * from './ai'
-export * from './schedule'
-export * from './access'
+
+// Org domain: orgApi, auditApi, accessApi, notificationsApi, OrgInfo, MemberInfo, ...
+export * from './org'
+
+// Data domain: tablesApi, recordsApi, filesApi, TableInfo, ColumnInfo, RecordInfo, ...
+export * from './data'
+
+// Feature domains: aiApi, knowledgeApi, scheduleApi, reportsApi, billingApi, ...
+export * from './features'
+
+// Superadmin domain (separate auth context)
 export * from './superadmin'
-export * from './superadmin_tables'
-export * from './superadmin_client'

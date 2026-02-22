@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -10,6 +10,8 @@ from src.modules.org.models import Invite, Membership, Organization, Subscriptio
 
 
 class OrganizationRepository:
+    """Repository for organization entities."""
+
     def __init__(self, session: AsyncSession):
         self.session = session
 
@@ -26,8 +28,14 @@ class OrganizationRepository:
         await self.session.flush()
         return org
 
+    async def delete(self, org: Organization) -> None:
+        await self.session.delete(org)
+        await self.session.flush()
+
 
 class MembershipRepository:
+    """Repository for membership entities."""
+
     def __init__(self, session: AsyncSession):
         self.session = session
 
@@ -36,6 +44,11 @@ class MembershipRepository:
             Membership.user_id == user_id,
             Membership.org_id == org_id,
         )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_by_id_for_org(self, membership_id: uuid.UUID, org_id: uuid.UUID) -> Membership | None:
+        stmt = select(Membership).where(Membership.id == membership_id, Membership.org_id == org_id).limit(1)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
@@ -57,6 +70,14 @@ class MembershipRepository:
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
+    async def count_org_owners(self, org_id: uuid.UUID) -> int:
+        stmt = select(func.count(Membership.id)).where(
+            Membership.org_id == org_id,
+            Membership.role == UserRole.OWNER,
+        )
+        result = await self.session.execute(stmt)
+        return int(result.scalar_one() or 0)
+
     async def create(self, membership: Membership) -> Membership:
         self.session.add(membership)
         await self.session.flush()
@@ -66,14 +87,14 @@ class MembershipRepository:
         stmt = update(Membership).where(Membership.id == membership_id).values(role=role)
         await self.session.execute(stmt)
 
-    async def delete(self, membership_id: uuid.UUID) -> None:
-        m = await self.session.get(Membership, membership_id)
-        if m:
-            await self.session.delete(m)
-            await self.session.flush()
+    async def delete(self, membership: Membership) -> None:
+        await self.session.delete(membership)
+        await self.session.flush()
 
 
 class InviteRepository:
+    """Repository for invite entities."""
+
     def __init__(self, session: AsyncSession):
         self.session = session
 
@@ -119,6 +140,8 @@ class InviteRepository:
 
 
 class SubscriptionRepository:
+    """Repository for subscription entities."""
+
     def __init__(self, session: AsyncSession):
         self.session = session
 

@@ -2,6 +2,17 @@ import { createContext, useContext, useState, useEffect, useCallback, type React
 import { authApi, orgApi, type UserInfo, type OrgInfo, type MemberInfo } from '@/lib/api'
 import { getAccessToken, saveTokens, clearTokens } from '@/lib/auth'
 
+export class AuthError extends Error {
+  code: string | null
+  field: string | null
+  constructor(message: string, code: string | null, field: string | null) {
+    super(message)
+    this.name = 'AuthError'
+    this.code = code
+    this.field = field
+  }
+}
+
 interface AuthState {
   user: UserInfo | null
   org: OrgInfo | null
@@ -54,7 +65,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       saveTokens(resp.data.data.access_token, resp.data.data.refresh_token)
       await loadProfile()
     } else {
-      throw new Error(resp.data.error?.message || 'Login failed')
+      throw new AuthError(
+        resp.data.error?.message || 'Login failed',
+        resp.data.error?.code ?? null,
+        resp.data.error?.field ?? null,
+      )
     }
   }
 
@@ -64,7 +79,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       saveTokens(resp.data.data.access_token, resp.data.data.refresh_token)
       await loadProfile()
     } else {
-      throw new Error(resp.data.error?.message || 'Registration failed')
+      throw new AuthError(
+        resp.data.error?.message || 'Registration failed',
+        resp.data.error?.code ?? null,
+        resp.data.error?.field ?? null,
+      )
     }
   }
 

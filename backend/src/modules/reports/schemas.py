@@ -22,7 +22,7 @@ class OrgReport(BaseModel):
 
 class ColumnAggRequest(BaseModel):
     table_id: str
-    column_ids: list[str] = []
+    column_ids: list[str] = Field(default_factory=list)
 
 
 class ColumnAggResult(BaseModel):
@@ -35,7 +35,7 @@ class ColumnAggResult(BaseModel):
     avg: float | None = None
     min_val: str | None = None
     max_val: str | None = None
-    top_values: list[dict] | None = None
+    top_values: list[dict[str, int | str]] | None = None
 
 
 class TableAggResponse(BaseModel):

@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.enums import AuditAction
@@ -54,3 +55,20 @@ class AuditRepository:
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def count_actions_since(
+        self,
+        *,
+        org_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        action: AuditAction,
+        since: datetime,
+    ) -> int:
+        stmt = select(func.count(AuditLog.id)).where(
+            AuditLog.org_id == org_id,
+            AuditLog.actor_id == actor_id,
+            AuditLog.action == action,
+            AuditLog.created_at >= since,
+        )
+        result = await self.session.execute(stmt)
+        return int(result.scalar_one() or 0)

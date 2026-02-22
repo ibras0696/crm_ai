@@ -1,64 +1,36 @@
 import uuid
-from datetime import datetime
 
-from fastapi import APIRouter, Depends, Query, UploadFile, File as FastAPIFile
+from fastapi import APIRouter, Depends, Query, UploadFile
+from fastapi import File as FastAPIFile
 from fastapi.responses import Response
-from pydantic import BaseModel
 
+from src.common.enums import UserRole
 from src.common.http_headers import content_disposition_attachment
 from src.common.schemas import ApiResponse
-from src.common.enums import UserRole
-from src.modules.auth.dependencies import CurrentUser, require_roles
-from src.modules.access.dependencies import require_access
-from src.modules.files.models import File
-from src.modules.files.repository import FileRepository
-from src.modules.files import storage
 from src.infrastructure.uow import UnitOfWork
+from src.modules.access.dependencies import require_access
+from src.modules.auth.dependencies import CurrentUser, require_roles
+from src.modules.files.schemas import FileItem
+from src.modules.files.service import FilesService
 
 router = APIRouter(prefix="/files", tags=["files"])
 
-
-class FileItem(BaseModel):
-    id: uuid.UUID
-    org_id: uuid.UUID
-    uploaded_by: uuid.UUID | None
-    filename: str
-    original_name: str
-    content_type: str
-    size: int
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
+FILE_NOT_FOUND_MESSAGE = "\u0424\u0430\u0439\u043b \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d"
 
 
 @router.post("/upload", response_model=ApiResponse[FileItem])
 async def upload_file(
     file: UploadFile = FastAPIFile(...),
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE),
+    ),
     _: None = Depends(require_access(resource_type="files", permission="can_write")),
 ):
-    data = await file.read()
-    content_type = file.content_type or "application/octet-stream"
-    original_name = file.filename or "unnamed"
-
-    s3_key, bucket = storage.upload_file(data, content_type, current_user.org_id, original_name)
-
     async with UnitOfWork() as uow:
-        repo = FileRepository(uow.session)
-        db_file = File(
-            org_id=current_user.org_id,
-            uploaded_by=current_user.user_id,
-            filename=s3_key.split("/")[-1],
-            original_name=original_name,
-            content_type=content_type,
-            size=len(data),
-            s3_key=s3_key,
-            s3_bucket=bucket,
-        )
-        db_file = await repo.create(db_file)
+        service = FilesService(uow.session)
+        db_file = await service.upload(org_id=current_user.org_id, user_id=current_user.user_id, file=file)
         await uow.commit()
         item = FileItem.model_validate(db_file)
-
     return ApiResponse(data=item)
 
 
@@ -66,32 +38,36 @@ async def upload_file(
 async def list_files(
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY),
+    ),
     _: None = Depends(require_access(resource_type="files", permission="can_read")),
 ):
     async with UnitOfWork() as uow:
-        repo = FileRepository(uow.session)
-        files = await repo.list_by_org(current_user.org_id, limit=limit, offset=offset)
-        items = [FileItem.model_validate(f) for f in files]
+        service = FilesService(uow.session)
+        files = await service.list_org_files(org_id=current_user.org_id, limit=limit, offset=offset)
+        items = [FileItem.model_validate(db_file) for db_file in files]
     return ApiResponse(data=items)
 
 
 @router.get("/{file_id}/download")
 async def download_file(
     file_id: uuid.UUID,
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY),
+    ),
     _: None = Depends(require_access(resource_type="files", permission="can_read", resource_id_param="file_id")),
 ):
     async with UnitOfWork() as uow:
-        repo = FileRepository(uow.session)
-        db_file = await repo.get_by_id(file_id)
-        if not db_file or db_file.org_id != current_user.org_id:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Файл не найден"})
+        service = FilesService(uow.session)
+        db_file = await service.get_for_org(org_id=current_user.org_id, file_id=file_id)
+        if db_file is None:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": FILE_NOT_FOUND_MESSAGE})
 
-    data, ct = storage.download_file(db_file.s3_key, db_file.s3_bucket)
+    data, content_type = service.download_payload(db_file)
     return Response(
         content=data,
-        media_type=ct,
+        media_type=content_type,
         headers={"Content-Disposition": content_disposition_attachment(db_file.original_name)},
     )
 
@@ -103,13 +79,9 @@ async def delete_file(
     _: None = Depends(require_access(resource_type="files", permission="can_delete", resource_id_param="file_id")),
 ):
     async with UnitOfWork() as uow:
-        repo = FileRepository(uow.session)
-        db_file = await repo.get_by_id(file_id)
-        if not db_file or db_file.org_id != current_user.org_id:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Файл не найден"})
-
-        storage.delete_file(db_file.s3_key, db_file.s3_bucket)
-        await repo.delete(db_file)
+        service = FilesService(uow.session)
+        deleted = await service.delete_for_org(org_id=current_user.org_id, file_id=file_id)
+        if not deleted:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": FILE_NOT_FOUND_MESSAGE})
         await uow.commit()
-
     return ApiResponse(data=None)

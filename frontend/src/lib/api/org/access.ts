@@ -1,5 +1,5 @@
-﻿import api from './client'
-import type { ApiResponse } from './types'
+﻿import api from '../core/client'
+import type { ApiResponse } from '../core/types'
 
 export interface AccessRule {
   id: string

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query, UploadFile, File as FastAPIFile
 from fastapi.responses import Response
 from pydantic import BaseModel
 
+from src.common.http_headers import content_disposition_attachment
 from src.common.schemas import ApiResponse
 from src.common.enums import UserRole
 from src.modules.auth.dependencies import CurrentUser, require_roles
@@ -84,7 +85,11 @@ async def download_file(
             return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Файл не найден"})
 
     data, ct = storage.download_file(db_file.s3_key, db_file.s3_bucket)
-    return Response(content=data, media_type=ct, headers={"Content-Disposition": f'attachment; filename="{db_file.original_name}"'})
+    return Response(
+        content=data,
+        media_type=ct,
+        headers={"Content-Disposition": content_disposition_attachment(db_file.original_name)},
+    )
 
 
 @router.delete("/{file_id}", response_model=ApiResponse[None])

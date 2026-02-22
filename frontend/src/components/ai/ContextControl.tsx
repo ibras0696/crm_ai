@@ -9,6 +9,9 @@ type Props = {
   setContextOptions: (updater: (prev: AIContextOptions) => AIContextOptions) => void
   contextEstimate: AIContextEstimate | null
   contextSources: { kb_pages: AIContextSourcePage[]; tables: AIContextSourceTable[] }
+  showSummary?: boolean
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
 }
 
 function clampInt(value: string, fallback: number, min: number, max: number): number {
@@ -82,8 +85,16 @@ export default function ContextControl({
   setContextOptions,
   contextEstimate,
   contextSources,
+  showSummary = true,
+  open,
+  onOpenChange,
 }: Props) {
-  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [drawerOpenUncontrolled, setDrawerOpenUncontrolled] = useState(false)
+  const drawerOpen = typeof open === 'boolean' ? open : drawerOpenUncontrolled
+  const setDrawerOpen = (next: boolean) => {
+    onOpenChange?.(next)
+    if (typeof open !== 'boolean') setDrawerOpenUncontrolled(next)
+  }
   const [kbQuery, setKbQuery] = useState('')
   const [tablesQuery, setTablesQuery] = useState('')
 
@@ -134,65 +145,67 @@ export default function ContextControl({
 
   return (
     <>
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="px-4 py-3 flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-sm font-medium">
-              <Database className="h-4 w-4" />
-              <span>Контроль контекста</span>
+      {showSummary && (
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="px-4 py-3 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Database className="h-4 w-4" />
+                <span>Контроль контекста</span>
+              </div>
+              <div className="text-xs text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span>~{totalTokens} токенов (запрос)</span>
+                <span>объектов: {totalObjects}</span>
+              </div>
             </div>
-            <div className="text-xs text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-              <span>~{totalTokens} токенов (запрос)</span>
-              <span>объектов: {totalObjects}</span>
-            </div>
+            <button
+              onClick={() => setDrawerOpen(true)}
+              className="h-9 px-3 rounded-lg border border-border text-sm hover:bg-secondary transition-colors shrink-0"
+            >
+              Настроить
+            </button>
           </div>
-          <button
-            onClick={() => setDrawerOpen(true)}
-            className="h-9 px-3 rounded-lg border border-border text-sm hover:bg-secondary transition-colors shrink-0"
-          >
-            Настроить
-          </button>
-        </div>
 
-        <div className="px-4 pb-4">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-            <label className="flex items-center gap-2 text-sm cursor-pointer px-3 py-2 rounded-lg bg-secondary/40">
-              <input type="checkbox" checked={includeContext} onChange={(e) => setIncludeContext(e.target.checked)} className="rounded" />
-              Контекст
-            </label>
-            <label className="flex items-center gap-2 text-sm cursor-pointer px-3 py-2 rounded-lg bg-secondary/20">
-              <input
-                type="checkbox"
-                checked={!!contextOptions.include_kb}
-                onChange={(e) => setContextOptions((p) => ({ ...p, include_kb: e.target.checked }))}
-                className="rounded"
-                disabled={!includeContext}
-              />
-              База знаний
-            </label>
-            <label className="flex items-center gap-2 text-sm cursor-pointer px-3 py-2 rounded-lg bg-secondary/20">
-              <input
-                type="checkbox"
-                checked={!!contextOptions.include_table_schema}
-                onChange={(e) => setContextOptions((p) => ({ ...p, include_table_schema: e.target.checked }))}
-                className="rounded"
-                disabled={!includeContext}
-              />
-              Таблицы
-            </label>
-            <label className="flex items-center gap-2 text-sm cursor-pointer px-3 py-2 rounded-lg bg-secondary/20">
-              <input
-                type="checkbox"
-                checked={!!contextOptions.include_table_records}
-                onChange={(e) => setContextOptions((p) => ({ ...p, include_table_records: e.target.checked }))}
-                className="rounded"
-                disabled={!includeContext}
-              />
-              Примеры
-            </label>
+          <div className="px-4 pb-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
+              <label className="flex items-center gap-2 text-sm cursor-pointer px-3 py-2 rounded-lg bg-secondary/40">
+                <input type="checkbox" checked={includeContext} onChange={(e) => setIncludeContext(e.target.checked)} className="rounded" />
+                Контекст
+              </label>
+              <label className="flex items-center gap-2 text-sm cursor-pointer px-3 py-2 rounded-lg bg-secondary/20">
+                <input
+                  type="checkbox"
+                  checked={!!contextOptions.include_kb}
+                  onChange={(e) => setContextOptions((p) => ({ ...p, include_kb: e.target.checked }))}
+                  className="rounded"
+                  disabled={!includeContext}
+                />
+                База знаний
+              </label>
+              <label className="flex items-center gap-2 text-sm cursor-pointer px-3 py-2 rounded-lg bg-secondary/20">
+                <input
+                  type="checkbox"
+                  checked={!!contextOptions.include_table_schema}
+                  onChange={(e) => setContextOptions((p) => ({ ...p, include_table_schema: e.target.checked }))}
+                  className="rounded"
+                  disabled={!includeContext}
+                />
+                Таблицы
+              </label>
+              <label className="flex items-center gap-2 text-sm cursor-pointer px-3 py-2 rounded-lg bg-secondary/20">
+                <input
+                  type="checkbox"
+                  checked={!!contextOptions.include_table_records}
+                  onChange={(e) => setContextOptions((p) => ({ ...p, include_table_records: e.target.checked }))}
+                  className="rounded"
+                  disabled={!includeContext}
+                />
+                Примеры
+              </label>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {drawerOpen && (
         <div className="fixed inset-0 z-50">

@@ -24,14 +24,14 @@ async def superadmin_login(body: SuperadminLoginRequest):
     try:
         token = authenticate_superadmin(body.email, body.password)
     except RuntimeError:
-        return ApiResponse(
-            ok=False,
-            data=None,
-            error={
-                "code": "SUPERADMIN_NOT_CONFIGURED",
-                "message": "Суперадмин не настроен. Добавьте SUPERADMIN_EMAIL и SUPERADMIN_PASSWORD в .env",
-            },
-        )
+            return ApiResponse(
+                ok=False,
+                data=None,
+                error={
+                    "code": "SUPERADMIN_NOT_CONFIGURED",
+                    "message": "Суперадмин не настроен. Задайте SUPERADMIN_EMAIL и SUPERADMIN_PASSWORD (через secrets.yml или переменные окружения) и перезапустите backend.",
+                },
+            )
     except ValueError:
         return ApiResponse(ok=False, data=None, error={"code": "UNAUTHORIZED", "message": "Invalid credentials"})
     return ApiResponse(data=SuperadminTokenResponse(access_token=token))

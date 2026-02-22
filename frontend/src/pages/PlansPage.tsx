@@ -1,44 +1,48 @@
 import { Check, X, Zap, Users, Database, Bot, Shield, BarChart2, Lock, RefreshCw } from 'lucide-react'
 
+type PlanKey = 'free' | 'team' | 'business'
+type Cell = string | boolean
+type FeatureRow = { label: string } & Record<PlanKey, Cell>
+
 const FEATURES = [
   {
     category: 'Данные',
     icon: Database,
     rows: [
-      { label: 'Участников в организации', free: '10',       team: 'Без ограничений' },
-      { label: 'Таблиц',                   free: '10',       team: 'Без ограничений' },
-      { label: 'Записей на таблицу',       free: '10 000',   team: 'Без ограничений' },
-      { label: 'Хранилище файлов',         free: '500 МБ',   team: 'Без ограничений' },
-    ],
+      { label: 'Участников в организации', free: '10',       team: '50',           business: '200' },
+      { label: 'Таблиц',                   free: '10',       team: '100',          business: '500' },
+      { label: 'Записей в организации',    free: '10 000',   team: '200 000',      business: '2 000 000' },
+      { label: 'Хранилище файлов',         free: '500 МБ',   team: '10 ГБ',        business: '100 ГБ' },
+    ] as FeatureRow[],
   },
   {
     category: 'Функции',
     icon: Zap,
     rows: [
-      { label: 'Поиск и фильтрация',       free: true,  team: true },
-      { label: 'Сортировка по столбцам',   free: true,  team: true },
-      { label: 'Экспорт в CSV',            free: true,  team: true },
-      { label: 'Расписание и события',     free: true,  team: true },
-      { label: 'Кастомные поля',           free: true,  team: true },
-      { label: 'База знаний',              free: true,  team: true },
-      { label: 'Уведомления',              free: true,  team: true },
-    ],
+      { label: 'Поиск и фильтрация',       free: true,  team: true, business: true },
+      { label: 'Сортировка по столбцам',   free: true,  team: true, business: true },
+      { label: 'Экспорт в CSV',            free: true,  team: true, business: true },
+      { label: 'Расписание и события',     free: true,  team: true, business: true },
+      { label: 'Кастомные поля',           free: true,  team: true, business: true },
+      { label: 'База знаний',              free: true,  team: true, business: true },
+      { label: 'Уведомления',              free: true,  team: true, business: true },
+    ] as FeatureRow[],
   },
   {
     category: 'AI агент',
     icon: Bot,
     rows: [
-      { label: 'AI агент (чат с данными)', free: false, team: true },
-      { label: 'Умный поиск по данным',    free: false, team: true },
-    ],
+      { label: 'AI агент (чат с данными)', free: true, team: true, business: true },
+      { label: 'Лимиты AI', free: 'Базовые', team: 'Повышенные', business: 'Максимальные' },
+    ] as FeatureRow[],
   },
   {
     category: 'Безопасность',
     icon: Shield,
     rows: [
-      { label: 'SSL шифрование',           free: true,  team: true },
-      { label: 'Аудит действий',           free: true,  team: true },
-    ],
+      { label: 'SSL шифрование',           free: true,  team: true, business: true },
+      { label: 'Аудит действий',           free: true,  team: true, business: true },
+    ] as FeatureRow[],
   },
 ]
 
@@ -58,16 +62,27 @@ const PLANS = [
     key: 'team',
     name: 'Команда',
     price: 1490,
-    desc: 'Для команд с расширенными возможностями и AI агентом',
+    desc: 'Для команд с расширенными возможностями и повышенными AI лимитами',
     color: 'text-blue-500',
     border: 'border-blue-500/40',
     bg: 'bg-blue-500/5',
     badge: 'Популярный',
     icon: Users,
   },
+  {
+    key: 'business',
+    name: 'Бизнес',
+    price: 4990,
+    desc: 'Для компаний: большие лимиты, больше данных и приоритет',
+    color: 'text-violet-500',
+    border: 'border-violet-500/40',
+    bg: 'bg-violet-500/5',
+    badge: 'Для бизнеса',
+    icon: Shield,
+  },
 ]
 
-function CellValue({ value }: { value: string | boolean }) {
+function CellValue({ value }: { value: Cell }) {
   if (value === true)  return <Check className="h-4 w-4 text-emerald-500 mx-auto" />
   if (value === false) return <X className="h-4 w-4 text-muted-foreground/30 mx-auto" />
   return <span className="text-sm text-center block">{value}</span>
@@ -87,7 +102,7 @@ export default function PlansPage() {
       </div>
 
       {/* Plan cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-xl">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-3xl">
         {PLANS.map(plan => (
           <div key={plan.key} className={`rounded-2xl border-2 ${plan.border} ${plan.bg} p-5 relative`}>
             {plan.badge && (
@@ -130,11 +145,12 @@ export default function PlansPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {section.rows.map((row, i) => (
+                  {(section.rows as FeatureRow[]).map((row, i) => (
                     <tr key={i} className={`border-b border-border/30 ${i % 2 === 0 ? '' : 'bg-secondary/10'}`}>
                       <td className="px-4 py-2.5 text-sm">{row.label}</td>
                       <td className="px-4 py-2.5 text-center"><CellValue value={row.free} /></td>
                       <td className="px-4 py-2.5 text-center"><CellValue value={row.team} /></td>
+                      <td className="px-4 py-2.5 text-center"><CellValue value={row.business} /></td>
                     </tr>
                   ))}
                 </tbody>

@@ -11,7 +11,7 @@
 # ============================================================
 
 .PHONY: help init up down build restart ps logs logs-api logs-front \
-        migrate migration shell-api shell-db \
+        bootstrap migrate migration shell-api shell-db \
         up-prod down-prod restart-prod logs-prod \
         test lint lint-fix clean clean-all
 
@@ -22,7 +22,7 @@ COMPOSE_DEV_FILES := -f docker-compose.yml
 ifneq ($(wildcard $(SECRETS_FILE)),)
 COMPOSE_DEV_FILES += -f $(SECRETS_FILE)
 endif
-COMPOSE_DEV := $(COMPOSE) $(COMPOSE_DEV_FILES)
+COMPOSE_DEV := $(COMPOSE) --profile dev $(COMPOSE_DEV_FILES)
 
 COMPOSE_PROD_FILES := -f docker-compose.prod.yml
 ifneq ($(wildcard $(SECRETS_FILE)),)
@@ -30,59 +30,90 @@ COMPOSE_PROD_FILES += -f $(SECRETS_FILE)
 endif
 COMPOSE_PROD := $(COMPOSE) $(COMPOSE_PROD_FILES)
 
-# Цвета (опционально)
-GREEN  := \033[0;32m
-YELLOW := \033[0;33m
-CYAN   := \033[0;36m
-RESET  := \033[0m
-
 help:
 	@echo ""
-	@echo "$(CYAN)CRM — доступные команды$(RESET)"
+	@echo "CRM - available commands"
 	@echo ""
-	@echo "$(GREEN)DEV$(RESET)"
-	@echo "  make init          — подготовка (создаёт secrets.yml из example, если нужно)"
-	@echo "  make up            — поднять dev (docker-compose.yml + secrets.yml если есть)"
-	@echo "  make down          — остановить dev"
-	@echo "  make restart       — пересобрать и перезапустить dev"
-	@echo "  make logs          — логи dev (все сервисы)"
-	@echo "  make logs-api      — логи dev (api)"
-	@echo "  make logs-front    — логи dev (frontend)"
-	@echo "  make ps            — статус контейнеров dev"
+	@echo "DEV"
+	@echo "  make init          - prepare (creates secrets.yml from secrets.yml.example if needed)"
+	@echo "  make up            - start dev (docker-compose.yml + secrets.yml if exists)"
+	@echo "  make down          - stop dev"
+	@echo "  make restart       - rebuild and restart dev"
+	@echo "  make logs          - logs dev (all services)"
+	@echo "  make logs-api      - logs dev (api)"
+	@echo "  make logs-front    - logs dev (frontend)"
+	@echo "  make ps            - dev containers status"
 	@echo ""
-	@echo "$(GREEN)PROD$(RESET)"
-	@echo "  make up-prod       — поднять prod (docker-compose.prod.yml + secrets.yml если есть)"
-	@echo "  make down-prod     — остановить prod"
-	@echo "  make restart-prod  — пересобрать и перезапустить prod"
-	@echo "  make logs-prod     — логи prod"
+	@echo "PROD"
+	@echo "  make up-prod       - start prod (docker-compose.prod.yml + secrets.yml if exists)"
+	@echo "  make down-prod     - stop prod"
+	@echo "  make restart-prod  - rebuild and restart prod"
+	@echo "  make logs-prod     - logs prod"
 	@echo ""
-	@echo "$(GREEN)БД / миграции$(RESET)"
-	@echo "  make migrate       — применить миграции Alembic (dev)"
-	@echo "  make migration m=  — создать миграцию (m='название') (dev)"
-	@echo "  make shell-db      — psql в контейнере db (dev)"
-	@echo "  make shell-api     — sh в контейнере api (dev)"
+	@echo "DB / migrations"
+	@echo "  make migrate       - apply Alembic migrations (dev)"
+	@echo "  make migration m=  - create migration (m='name') (dev)"
+	@echo "  make shell-db      - psql inside db container (dev)"
+	@echo "  make shell-api     - sh inside api container (dev)"
 	@echo ""
-	@echo "$(GREEN)Качество$(RESET)"
-	@echo "  make test          — pytest (dev)"
-	@echo "  make lint          — ruff check (dev)"
-	@echo "  make lint-fix      — ruff --fix (dev)"
+	@echo "QUALITY"
+	@echo "  make test          - pytest (dev)"
+	@echo "  make lint          - ruff check (dev)"
+	@echo "  make lint-fix      - ruff --fix (dev)"
+	@echo ""
+	@echo "RU: make help-ru"
+	@echo ""
+
+help-ru:
+	@echo ""
+	@echo "CRM - доступные команды"
+	@echo ""
+	@echo "DEV"
+	@echo "  make init          - подготовка (создает secrets.yml из secrets.yml.example, если нужно)"
+	@echo "  make up            - поднять dev (docker-compose.yml + secrets.yml если есть)"
+	@echo "  make down          - остановить dev"
+	@echo "  make restart       - пересобрать и перезапустить dev"
+	@echo "  make logs          - логи dev (все сервисы)"
+	@echo "  make logs-api      - логи dev (api)"
+	@echo "  make logs-front    - логи dev (frontend)"
+	@echo "  make ps            - статус контейнеров dev"
+	@echo ""
+	@echo "PROD"
+	@echo "  make up-prod       - поднять prod (docker-compose.prod.yml + secrets.yml если есть)"
+	@echo "  make down-prod     - остановить prod"
+	@echo "  make restart-prod  - пересобрать и перезапустить prod"
+	@echo "  make logs-prod     - логи prod"
+	@echo ""
+	@echo "БД / миграции"
+	@echo "  make migrate       - применить миграции Alembic (dev)"
+	@echo "  make migration m=  - создать миграцию (m='название') (dev)"
+	@echo "  make shell-db      - psql в контейнере db (dev)"
+	@echo "  make shell-api     - sh в контейнере api (dev)"
+	@echo ""
+	@echo "Качество"
+	@echo "  make test          - pytest (dev)"
+	@echo "  make lint          - ruff check (dev)"
+	@echo "  make lint-fix      - ruff --fix (dev)"
 	@echo ""
 
 init:
 	@if [ ! -f "$(SECRETS_FILE)" ]; then \
 		if [ -f "secrets.yml.example" ]; then \
 			cp secrets.yml.example "$(SECRETS_FILE)"; \
-			echo "$(GREEN)✔ Создан $(SECRETS_FILE) из secrets.yml.example$(RESET)"; \
+			echo "[OK] Создан $(SECRETS_FILE) из secrets.yml.example"; \
 		else \
-			echo "$(YELLOW)⚠ secrets.yml.example не найден. Создай $(SECRETS_FILE) вручную.$(RESET)"; \
+			echo "[WARN] secrets.yml.example не найден. Создай $(SECRETS_FILE) вручную."; \
 		fi; \
 	else \
-		echo "$(GREEN)✔ $(SECRETS_FILE) уже существует$(RESET)"; \
+		echo "[OK] $(SECRETS_FILE) уже существует"; \
 	fi
-	@echo "$(CYAN)Примечание: backend/.env используется только для dev (env_file).$(RESET)"
+	@echo "Примечание: docker-compose берет секреты из secrets.yml (если подключен). backend/.env не трогаем."
 
 up:
 	$(COMPOSE_DEV) up -d --build
+
+bootstrap:
+	$(COMPOSE_DEV) run --rm bootstrap
 
 down:
 	$(COMPOSE_DEV) down
@@ -125,7 +156,7 @@ migrate:
 	$(COMPOSE_DEV) exec api alembic upgrade head
 
 migration:
-	@if [ -z "$(m)" ]; then echo "$(YELLOW)⚠ Укажи m='название миграции'$(RESET)"; exit 1; fi
+	@if [ -z "$(m)" ]; then echo "[WARN] Укажи m='название миграции'"; exit 1; fi
 	$(COMPOSE_DEV) exec api alembic revision --autogenerate -m "$(m)"
 
 shell-api:
@@ -150,7 +181,6 @@ clean:
 	docker image prune -f
 
 clean-all:
-	@echo "$(YELLOW)⚠ ВНИМАНИЕ: удаляем volumes (данные БД/MinIO и т.д.)$(RESET)"
-	@echo "$(YELLOW)   Запусти вручную, если уверен: docker compose ... down -v$(RESET)"
+	@echo "[WARN] ВНИМАНИЕ: удаляем volumes (данные БД/MinIO и т.д.)"
+	@echo "[WARN] Запусти вручную, если уверен: docker compose ... down -v"
 	@exit 1
-

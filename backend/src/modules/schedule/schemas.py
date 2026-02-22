@@ -29,7 +29,8 @@ class CreateEventRequest(BaseModel):
     all_day: bool = False
     color: str | None = None
     assigned_to: uuid.UUID | None = None
-    recurrence: str | None = None  # daily|weekly|monthly|yearly
+    # Can be a simple keyword (daily/weekly/...) or an RRULE string (e.g. "RRULE:FREQ=WEEKLY;BYDAY=TU").
+    recurrence: str | None = None
 
 
 class UpdateEventRequest(BaseModel):

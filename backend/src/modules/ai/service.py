@@ -3,6 +3,7 @@
 import json
 import re
 import uuid
+from datetime import datetime, timezone
 from datetime import datetime, timedelta, timezone
 from difflib import SequenceMatcher
 from typing import Any
@@ -14,6 +15,7 @@ from sqlalchemy.orm import selectinload
 from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.models import AIChatMessage, AIChatSession
 from src.modules.knowledge.models import KBPage
+from src.modules.schedule.models import Event
 from src.modules.reports.models import ReportDashboard, ReportWidget
 from src.modules.reports.schemas import WidgetConfig
 from src.modules.reports.service import build_widget_data
@@ -1002,6 +1004,125 @@ async def handle_create_records_action(
     }
 
 
+def _parse_dt(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    # Accept RFC3339 with Z.
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(s)
+    except Exception:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+async def handle_create_schedule_event_action(
+    uow: UnitOfWork,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    action_payload: dict[str, Any],
+    user_message: str | None = None,
+) -> dict[str, Any]:
+    title = str(action_payload.get("title") or action_payload.get("name") or "").strip()[:500]
+    if not title:
+        return {"action": "create_schedule_event", "ok": False, "error": "title_required"}
+
+    start_at = _parse_dt(action_payload.get("start_at"))
+    if start_at is None:
+        return {"action": "create_schedule_event", "ok": False, "error": "start_at_required"}
+
+    end_at = _parse_dt(action_payload.get("end_at"))
+    description = str(action_payload.get("description") or "").strip() or None
+    color = str(action_payload.get("color") or "").strip() or None
+    recurrence = str(action_payload.get("recurrence") or "").strip() or None
+    all_day = bool(action_payload.get("all_day") or False)
+
+    assigned_to_raw = action_payload.get("assigned_to")
+    assigned_to: uuid.UUID | None = None
+    try:
+        if assigned_to_raw:
+            assigned_to = uuid.UUID(str(assigned_to_raw))
+    except Exception:
+        assigned_to = None
+    if assigned_to is None:
+        assigned_to = user_id
+
+    event = Event(
+        org_id=org_id,
+        created_by=user_id,
+        assigned_to=assigned_to,
+        title=title,
+        description=description,
+        start_at=start_at,
+        end_at=end_at,
+        all_day=all_day,
+        color=color,
+        recurrence=recurrence,
+    )
+    uow.session.add(event)
+    await uow.session.flush()
+    return {
+        "action": "create_schedule_event",
+        "ok": True,
+        "event": {
+            "id": str(event.id),
+            "title": event.title,
+            "start_at": event.start_at.isoformat(),
+            "end_at": event.end_at.isoformat() if event.end_at else None,
+            "recurrence": event.recurrence,
+        },
+    }
+
+
+async def handle_create_kb_page_action(
+    uow: UnitOfWork,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    action_payload: dict[str, Any],
+    user_message: str | None = None,
+) -> dict[str, Any]:
+    title = str(action_payload.get("title") or action_payload.get("name") or "").strip()[:500]
+    if not title:
+        return {"action": "create_kb_page", "ok": False, "error": "title_required"}
+
+    content = action_payload.get("content")
+    if content is not None:
+        content = str(content)
+    icon = str(action_payload.get("icon") or "").strip() or None
+
+    parent_id_raw = action_payload.get("parent_id")
+    parent_id: uuid.UUID | None = None
+    try:
+        if parent_id_raw:
+            parent_id = uuid.UUID(str(parent_id_raw))
+    except Exception:
+        parent_id = None
+
+    slug = title.lower().replace(" ", "-")[:200]
+    page = KBPage(
+        org_id=org_id,
+        created_by=user_id,
+        title=title,
+        slug=slug,
+        content=content,
+        parent_id=parent_id,
+        icon=icon,
+    )
+    uow.session.add(page)
+    await uow.session.flush()
+    return {
+        "action": "create_kb_page",
+        "ok": True,
+        "page": {"id": str(page.id), "title": page.title, "slug": page.slug},
+    }
+
+
 def build_messages(
     system_prompt: str,
     org_context: str,
@@ -1016,6 +1137,12 @@ def build_messages(
         {
             "role": "system",
             "content": (
+                "IMPORTANT:\n"
+                "- Only append ONE final ```crm_action``` block at the end of your answer.\n"
+                "- If the user asks for a dashboard/report, do NOT modify tables. Return create_dashboard only.\n"
+                "- Do NOT create columns/records unless the user explicitly asked to change/fill a table.\n"
+                "- Never dump huge JSON in the normal text. Put the action JSON ONLY inside the final ```crm_action``` block.\n"
+                "- Keep payloads small: if user asks for 50/100+ rows, create the table first with empty records, then offer to fill in batches (<= 20 rows per request).\n"
                 "If user asks to create dashboard/report, append final block:\n"
                 "```crm_action\n"
                 '{"action":"create_dashboard","name":"...","description":"...","widgets":[...]}\n'
@@ -1031,6 +1158,14 @@ def build_messages(
                 "\nIf user asks to fill table rows, append final block:\n"
                 "```crm_action\n"
                 '{"action":"create_records","table_name":"...","records":[{"Column":"Value"}]}\n'
+                "```"
+                "\nIf user asks to create a schedule event, append final block:\n"
+                "```crm_action\n"
+                '{"action":"create_schedule_event","title":"...","start_at":"2026-01-01T10:00:00Z","end_at":null,"all_day":false,"recurrence":null}\n'
+                "```"
+                "\nIf user asks to create a knowledge base page, append final block:\n"
+                "```crm_action\n"
+                '{"action":"create_kb_page","title":"...","content":"# Title\\n..."}\n'
                 "```"
             ),
         }
@@ -1058,7 +1193,8 @@ async def call_openai_compatible_api(
         resp = await client.post(
             f"{clean_base}/v1/chat/completions",
             headers={"Authorization": f"Bearer {bearer_token}", "Content-Type": "application/json"},
-            json={"model": model, "messages": messages, "max_tokens": max(256, int(max_tokens)), "temperature": 0.7},
+            # Lower temperature improves determinism for action selection.
+            json={"model": model, "messages": messages, "max_tokens": max(256, int(max_tokens)), "temperature": 0.3},
         )
         resp.raise_for_status()
         return resp.json()

@@ -19,11 +19,24 @@ x-backend-env: &backend_env
   DEBUG: ${DEBUG:-false}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
   ENVIRONMENT: ${ENVIRONMENT:-production}
+
+  ENABLE_AI: ${ENABLE_AI:-true}
+  ENABLE_SENTRY: ${ENABLE_SENTRY:-false}
+  ENABLE_METRICS: ${ENABLE_METRICS:-true}
+  ENABLE_RATE_LIMIT: ${ENABLE_RATE_LIMIT:-true}
+
   OPENAI_BEARER_TOKEN: ${OPENAI_BEARER_TOKEN:-}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1}
   AI_BASE_URL: ${AI_BASE_URL:-https://agent.timeweb.cloud/api/v1/cloud-ai/agents/289156bc-4adc-4be8-94cf-6767a704a80c/v1}
-  AI_MAX_TOKENS: ${AI_MAX_TOKENS:-6000}
+  AI_MAX_TOKENS_PER_REQUEST: ${AI_MAX_TOKENS_PER_REQUEST:-2000}
+  AI_MAX_TOKENS_PER_DAY_PER_ORG: ${AI_MAX_TOKENS_PER_DAY_PER_ORG:-20000}
+  AI_RPM_PER_USER: ${AI_RPM_PER_USER:-30}
+
+  DB_POOL_TIMEOUT_S: ${DB_POOL_TIMEOUT_S:-10}
+  DB_POOL_RECYCLE_S: ${DB_POOL_RECYCLE_S:-1800}
+  DB_HEALTH_TIMEOUT_S: ${DB_HEALTH_TIMEOUT_S:-2}
+  REDIS_HEALTH_TIMEOUT_S: ${REDIS_HEALTH_TIMEOUT_S:-2}
 
 services:
   db:
@@ -89,6 +102,18 @@ services:
       timeout: 10s
       retries: 3
 
+  bootstrap:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: "no"
+    command: python -m src.cli.bootstrap
+    environment:
+      <<: *backend_env
+    depends_on:
+      db:
+        condition: service_healthy
+
   api:
     build:
       context: ./backend
@@ -99,6 +124,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      bootstrap:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       rabbitmq:
@@ -110,8 +137,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 10
-    command: >
-      sh -c "alembic upgrade head && uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4"
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8000 --workers 4
 
   frontend:
     build:

@@ -4,12 +4,14 @@ import uuid
 
 import httpx
 from fastapi import APIRouter, Depends
+from datetime import datetime, timezone
 from sqlalchemy import func, select
 
 from src.common.enums import UserRole
 from src.common.schemas import ApiResponse
 from src.config import settings
 from src.infrastructure.uow import UnitOfWork
+from src.modules.ai.limits import check_ai_limits
 from src.modules.ai.models import AIChatMessage, AIChatSession, AIUsageLog
 from src.modules.ai.schemas import (
     ChatMessageOut,
@@ -30,8 +32,13 @@ from src.modules.ai.service import (
     get_or_create_session,
     handle_create_dashboard_action,
     handle_create_table_action,
+    handle_create_schedule_event_action,
+    handle_create_kb_page_action,
 )
+from src.modules.ai.intent_overrides import apply_ui_intent_overrides
 from src.modules.auth.dependencies import CurrentUser, require_roles
+from src.common.enums import PlanTier
+from src.modules.org.models import Organization
 from src.modules.knowledge.models import KBPage
 from src.modules.schedule.models import Event
 from src.modules.tables.models import Table
@@ -79,6 +86,22 @@ async def _execute_action(
             action_payload,
             user_message=user_message,
         )
+    if action_name == "create_schedule_event":
+        return await handle_create_schedule_event_action(
+            uow,
+            current_user.org_id,
+            current_user.user_id,
+            action_payload,
+            user_message=user_message,
+        )
+    if action_name == "create_kb_page":
+        return await handle_create_kb_page_action(
+            uow,
+            current_user.org_id,
+            current_user.user_id,
+            action_payload,
+            user_message=user_message,
+        )
     return None
 
 
@@ -87,6 +110,9 @@ async def ai_chat(
     body: ChatRequest,
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
 ):
+    if not settings.ENABLE_AI:
+        return ApiResponse(ok=False, data=None, error={"code": "AI_DISABLED", "message": "AI отключен администратором."})
+
     bearer_token = settings.OPENAI_BEARER_TOKEN or settings.OPENAI_API_KEY
     if not bearer_token:
         return ApiResponse(
@@ -96,6 +122,21 @@ async def ai_chat(
         )
 
     system_prompt = body.system_prompt or settings.AI_SYSTEM_PROMPT
+    if body.ui_intent:
+        intent = str(body.ui_intent).strip()
+        params = body.ui_intent_params if isinstance(body.ui_intent_params, dict) else {}
+        widget_type = str(params.get("widget_type") or "").strip()
+        system_prompt = (
+            system_prompt
+            + "\n\n"
+            + "UI_INTENT (подсказка от интерфейса):\n"
+            + f"- intent: {intent}\n"
+            + (f"- widget_type: {widget_type}\n" if widget_type else "")
+            + "\nПравила:\n"
+            + "- Это только подсказка. Выполняй действие ТОЛЬКО если текст пользователя реально просит это сделать.\n"
+            + "- Если пользователь пишет привет/спасибо/вопрос не по теме выбранного действия, просто ответь и НЕ добавляй ```crm_action```.\n"
+            + "- Если действие требует уточнений, задай 1-2 вопроса вместо выполнения.\n"
+        )
     context_options = body.context_options or {}
 
     async with UnitOfWork() as uow:
@@ -117,6 +158,19 @@ async def ai_chat(
     context_meta: dict | None = None
     if body.include_context:
         org_context, context_meta = await build_org_context_for_user(current_user.org_id, current_user.user_id, context_options)
+
+    max_tokens_per_request = int(settings.AI_MAX_TOKENS_PER_REQUEST)
+    estimated_prompt_tokens = estimate_tokens(body.message) + estimate_tokens(org_context) + 280
+    estimated_request_tokens = int(estimated_prompt_tokens + max_tokens_per_request)
+    async with UnitOfWork() as uow:
+        ok, err = await check_ai_limits(
+            uow.session,
+            org_id=current_user.org_id,
+            user_id=current_user.user_id,
+            estimated_request_tokens=estimated_request_tokens,
+        )
+        if not ok:
+            return ApiResponse(ok=False, data=None, error=err)
 
     history_rows = [{"role": m.role, "content": m.content} for m in body.history]
     messages = build_messages(system_prompt, org_context, db_messages, history_rows, body.message)
@@ -167,11 +221,23 @@ async def ai_chat(
             bearer_token,
             settings.OPENAI_MODEL,
             messages,
-            max_tokens=settings.AI_MAX_TOKENS,
+            max_tokens=max_tokens_per_request,
         )
         reply_raw = data["choices"][0]["message"]["content"]
         action_payload, reply = extract_action_payload(reply_raw)
-        usage = data.get("usage", {})
+        action_payload = apply_ui_intent_overrides(action_payload, body.ui_intent, body.ui_intent_params)
+        usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+        # Some providers don't return usage. Use an estimate so stats/limits make sense.
+        if not usage or not int(usage.get("total_tokens", 0) or 0):
+            prompt_text = "\n".join([str(m.get("content") or "") for m in messages])
+            prompt_tokens_est = int(estimate_tokens(prompt_text))
+            completion_tokens_est = int(estimate_tokens(reply_raw))
+            usage = {
+                "prompt_tokens": prompt_tokens_est,
+                "completion_tokens": completion_tokens_est,
+                "total_tokens": prompt_tokens_est + completion_tokens_est,
+                "estimated": True,
+            }
 
         async with UnitOfWork() as uow:
             session = await get_or_create_session(uow, current_user.org_id, current_user.user_id, body.chat_id, body.message)
@@ -231,6 +297,19 @@ async def ai_chat(
             body_text = e.response.text[:300]
         except Exception:
             pass
+        if e.response.status_code in (401, 403):
+            return ApiResponse(
+                ok=False,
+                data=None,
+                error={
+                    "code": "AI_PROVIDER_UNAUTHORIZED",
+                    "message": (
+                        f"AI провайдер вернул {e.response.status_code} (Unauthorized). "
+                        "Проверьте OPENAI_BEARER_TOKEN/OPENAI_API_KEY и AI_BASE_URL (secrets.yml), затем перезапустите backend. "
+                        f"Ответ провайдера: {body_text}"
+                    ),
+                },
+            )
         return ApiResponse(ok=False, data=None, error={"code": "AI_ERROR", "message": f"AI API error {e.response.status_code}: {body_text}"})
     except Exception as e:
         return ApiResponse(ok=False, data=None, error={"code": "AI_ERROR", "message": f"AI error: {str(e)}"})
@@ -241,7 +320,12 @@ async def ai_status(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
 ):
     configured = bool(settings.OPENAI_BEARER_TOKEN or settings.OPENAI_API_KEY)
+    now = datetime.now(timezone.utc)
+    day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
     async with UnitOfWork() as uow:
+        plan_row = (await uow.session.execute(select(Organization.plan).where(Organization.id == current_user.org_id))).scalar_one_or_none()
+        plan = str(plan_row.value if hasattr(plan_row, "value") else plan_row or PlanTier.FREE.value)
+
         row = (
             await uow.session.execute(
                 select(
@@ -252,14 +336,50 @@ async def ai_status(
                 ).where(AIUsageLog.org_id == current_user.org_id)
             )
         ).one()
+        today = (
+            await uow.session.execute(
+                select(
+                    func.count(AIUsageLog.id),
+                    func.coalesce(func.sum(AIUsageLog.total_tokens), 0),
+                    func.coalesce(func.sum(AIUsageLog.prompt_tokens), 0),
+                    func.coalesce(func.sum(AIUsageLog.completion_tokens), 0),
+                ).where(AIUsageLog.org_id == current_user.org_id, AIUsageLog.created_at >= day_start)
+            )
+        ).one()
+
+    daily_limit_by_plan = {
+        PlanTier.FREE.value: int(getattr(settings, "AI_MAX_TOKENS_PER_DAY_FREE", 0) or 0),
+        PlanTier.TEAM.value: int(getattr(settings, "AI_MAX_TOKENS_PER_DAY_TEAM", 0) or 0),
+        PlanTier.BUSINESS.value: int(getattr(settings, "AI_MAX_TOKENS_PER_DAY_BUSINESS", 0) or 0),
+    }
+    rpm_limit_by_plan = {
+        PlanTier.FREE.value: int(getattr(settings, "AI_RPM_PER_USER_FREE", 0) or 0),
+        PlanTier.TEAM.value: int(getattr(settings, "AI_RPM_PER_USER_TEAM", 0) or 0),
+        PlanTier.BUSINESS.value: int(getattr(settings, "AI_RPM_PER_USER_BUSINESS", 0) or 0),
+    }
+    daily_limit = daily_limit_by_plan.get(plan) or int(settings.AI_MAX_TOKENS_PER_DAY_PER_ORG or 0)
+    rpm_limit = rpm_limit_by_plan.get(plan) or int(settings.AI_RPM_PER_USER or 0)
     return ApiResponse(
         data={
+            "enabled": bool(settings.ENABLE_AI),
             "configured": configured,
+            "plan": plan,
             "stats": {
                 "total_requests": row[0],
                 "total_tokens": row[1],
                 "prompt_tokens": row[2],
                 "completion_tokens": row[3],
+            },
+            "today": {
+                "requests": today[0],
+                "total_tokens": today[1],
+                "prompt_tokens": today[2],
+                "completion_tokens": today[3],
+            },
+            "limits": {
+                "daily_tokens": int(daily_limit),
+                "rpm_per_user": int(rpm_limit),
+                "max_tokens_per_request": int(settings.AI_MAX_TOKENS_PER_REQUEST),
             },
         }
     )

@@ -9,6 +9,9 @@ import {
   type AIContextSourceTable,
 } from '@/lib/api'
 import ContextControl from '@/components/ai/ContextControl'
+import CapabilitiesMenu from '@/components/ai/CapabilitiesMenu'
+import { DashboardPreview, KnowledgePreview, SchedulePreview, TablePreview } from '@/components/ai/ActionPreviews'
+import { Progress } from '@/components/ui/progress'
 import {
   Send,
   Bot,
@@ -20,14 +23,14 @@ import {
   Plus,
   History,
   PanelLeftClose,
-  PanelLeftOpen,
   Sparkles,
   MessageSquareDashed,
+  X,
+  Layers,
 } from 'lucide-react'
-import { Link } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell, CartesianGrid } from 'recharts'
+import { isAxiosError } from 'axios'
 
 interface Message {
   id?: string
@@ -38,16 +41,28 @@ interface Message {
 }
 
 interface AIStatus {
+  enabled: boolean
   configured: boolean
+  plan?: string
   stats: {
     total_requests: number
     total_tokens: number
     prompt_tokens: number
     completion_tokens: number
   }
+  today?: {
+    requests: number
+    total_tokens: number
+    prompt_tokens: number
+    completion_tokens: number
+  }
+  limits?: {
+    daily_tokens: number
+    rpm_per_user: number
+    max_tokens_per_request: number
+  }
 }
 
-const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6', '#f97316']
 const EXAMPLES = [
   'Покажи топ 10 клиентов по выручке за месяц',
   'Собери дашборд по продажам с графиком по статусам',
@@ -55,121 +70,20 @@ const EXAMPLES = [
   'Сделай сводку по задачам команды за неделю',
 ]
 
-function getStoredBool(key: string, fallback: boolean): boolean {
-  if (typeof window === 'undefined') return fallback
-  const raw = window.localStorage.getItem(key)
-  if (raw === null) return fallback
-  return raw === '1'
-}
-
-function DashboardPreview({ result }: { result: Record<string, unknown> }) {
-  const dashboard = (result.dashboard || {}) as Record<string, unknown>
-  const items = Array.isArray(result.items) ? (result.items as Array<Record<string, unknown>>) : []
-  if (String(result.action || '') !== 'create_dashboard') return null
-
-  return (
-    <div className="mt-3 rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <p className="text-xs text-muted-foreground">Создан дашборд</p>
-          <p className="text-sm font-semibold">{String(dashboard.name || 'AI дашборд')}</p>
-        </div>
-        <Link to="/reports" className="text-xs rounded-md border border-border px-2 py-1 hover:bg-secondary">
-          Открыть в отчетах
-        </Link>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        {items.map((item, idx) => {
-          const title = String(item.title || `Виджет ${idx + 1}`)
-          const widgetType = String(item.widget_type || '')
-          const data = (item.data || {}) as Record<string, unknown>
-          const type = String(data.type || widgetType)
-
-          if (type === 'metric') {
-            return (
-              <div key={idx} className="rounded-lg border border-border p-3 bg-card">
-                <p className="text-xs text-muted-foreground">{title}</p>
-                <p className="text-2xl font-bold mt-1">{String(data.value ?? '—')}</p>
-              </div>
-            )
-          }
-
-          if (type === 'table') {
-            const header = Array.isArray(data.header) ? (data.header as string[]) : []
-            const rows = Array.isArray(data.rows) ? (data.rows as string[][]) : []
-            return (
-              <div key={idx} className="rounded-lg border border-border overflow-hidden bg-card">
-                <div className="px-3 py-2 border-b border-border text-sm font-medium">{title}</div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-secondary/30">
-                      <tr>{header.map((h) => <th key={h} className="px-2 py-1 text-left">{h}</th>)}</tr>
-                    </thead>
-                    <tbody>
-                      {rows.slice(0, 6).map((r, ridx) => (
-                        <tr key={ridx} className="border-t border-border/40">
-                          {r.map((c, cidx) => <td key={cidx} className="px-2 py-1">{c || '—'}</td>)}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )
-          }
-
-          const points = Array.isArray(data.points) ? (data.points as Array<{ x: string; y: number }>) : []
-          return (
-            <div key={idx} className="rounded-lg border border-border p-3 bg-card">
-              <p className="text-sm font-medium mb-2">{title}</p>
-              <ResponsiveContainer width="100%" height={220}>
-                {type === 'line' ? (
-                  <LineChart data={points}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="x" tick={{ fontSize: 11 }} />
-                    <YAxis tick={{ fontSize: 11 }} />
-                    <Tooltip />
-                    <Line type="monotone" dataKey="y" stroke="#3b82f6" strokeWidth={2} />
-                  </LineChart>
-                ) : type === 'pie' ? (
-                  <PieChart>
-                    <Pie data={points} dataKey="y" nameKey="x" outerRadius={80} labelLine={false}>
-                      {points.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                ) : (
-                  <BarChart data={points}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                    <XAxis dataKey="x" tick={{ fontSize: 11 }} />
-                    <YAxis tick={{ fontSize: 11 }} />
-                    <Tooltip />
-                    <Bar dataKey="y" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                )}
-              </ResponsiveContainer>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
 export default function AIPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [status, setStatus] = useState<AIStatus | null>(null)
   const [loadingStatus, setLoadingStatus] = useState(true)
+  const [statusError, setStatusError] = useState<'auth' | 'network' | 'unknown' | null>(null)
   const [tab, setTab] = useState<'chat' | 'stats'>('chat')
 
   const [chats, setChats] = useState<AIChatSession[]>([])
   const [currentChatId, setCurrentChatId] = useState<string>('')
   const [loadingChats, setLoadingChats] = useState(false)
-  const [historyCollapsed, setHistoryCollapsed] = useState(() => getStoredBool('ai:historyCollapsed', false))
   const [historyMobileOpen, setHistoryMobileOpen] = useState(false)
+  const [contextOpen, setContextOpen] = useState(false)
 
   const [contextSources, setContextSources] = useState<{ kb_pages: AIContextSourcePage[]; tables: AIContextSourceTable[] }>({ kb_pages: [], tables: [] })
   const [includeContext, setIncludeContext] = useState(true)
@@ -187,14 +101,24 @@ export default function AIPage() {
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [uiIntent, setUiIntent] = useState<{ type: string; params?: Record<string, unknown> } | null>(null)
+  const clearUiIntent = useCallback(() => setUiIntent(null), [])
 
   const loadStatus = useCallback(async () => {
     setLoadingStatus(true)
+    setStatusError(null)
     try {
       const r = await aiApi.status()
-      if (r.data.ok && r.data.data) setStatus(r.data.data as AIStatus)
-    } catch {
-      // ignore
+      if (r.data.ok && r.data.data) {
+        setStatus(r.data.data as AIStatus)
+      } else {
+        setStatus(null)
+        setStatusError('unknown')
+      }
+    } catch (e: unknown) {
+      setStatus(null)
+      if (isAxiosError(e) && e.response?.status === 401) setStatusError('auth')
+      else setStatusError('network')
     }
     setLoadingStatus(false)
   }, [])
@@ -272,10 +196,6 @@ export default function AIPage() {
     return () => clearTimeout(t)
   }, [loadContextEstimate])
 
-  useEffect(() => {
-    window.localStorage.setItem('ai:historyCollapsed', historyCollapsed ? '1' : '0')
-  }, [historyCollapsed])
-
   const handleSend = async (preset?: string) => {
     const messageText = (preset ?? input).trim()
     if (!messageText || sending) return
@@ -289,6 +209,8 @@ export default function AIPage() {
         include_context: includeContext,
         chat_id: currentChatId || undefined,
         context_options: contextOptions,
+        ui_intent: uiIntent?.type,
+        ui_intent_params: uiIntent?.params,
       })
       if (r.data.ok && r.data.data) {
         const d = r.data.data
@@ -305,6 +227,8 @@ export default function AIPage() {
         await loadChats()
         loadStatus()
         if (d.context_estimate) setContextEstimate(d.context_estimate)
+        // Сбрасываем режим, если AI реально выполнил действие (чтобы не было случайных повторов).
+        if ((d.action_result as any)?.ok) setUiIntent(null)
       } else {
         const err = (r.data as { error?: { message?: string } }).error
         setMessages((prev) => [...prev, { role: 'assistant', content: `Ошибка: ${err?.message || 'Неизвестная ошибка'}` }])
@@ -355,7 +279,17 @@ export default function AIPage() {
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-bold flex items-center gap-2"><Bot className="h-6 w-6 text-primary" /> AI Агент</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {loadingStatus ? 'Загрузка...' : status?.configured ? 'AI агент подключен' : 'Не настроен — добавьте OPENAI_BEARER_TOKEN в .env'}
+            {loadingStatus
+              ? 'Загрузка...'
+              : statusError === 'auth'
+                ? 'Требуется вход. Обновите страницу или войдите заново.'
+                : statusError
+                  ? 'Не удалось получить статус AI. Проверьте доступ к API.'
+                  : status?.enabled === false
+                    ? 'AI отключен администратором.'
+                    : status?.configured
+                      ? 'AI агент подключен'
+                      : 'AI не настроен на сервере: задайте OPENAI_BEARER_TOKEN (через secrets.yml или переменные окружения) и перезапустите backend.'}
           </p>
         </div>
         <div className="flex items-center gap-1 rounded-lg border border-border p-0.5 bg-secondary/30">
@@ -380,200 +314,97 @@ export default function AIPage() {
 
       {tab === 'stats' && (
         <div className="flex-1 overflow-y-auto space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {status?.limits && (
+            <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold">Лимиты AI</p>
+                  <div className="text-xs text-muted-foreground mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                    <span>Тариф: {(status.plan || 'free').toUpperCase()}</span>
+                    <span>Лимит на запрос: {status.limits.max_tokens_per_request.toLocaleString('ru')}</span>
+                    <span>Скорость: {status.limits.rpm_per_user}/мин</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => { loadStatus(); }}
+                  className="h-9 px-3 rounded-lg border border-border text-sm hover:bg-secondary transition-colors shrink-0 self-start sm:self-auto"
+                  title="Синхронизировать"
+                >
+                  Синхронизация
+                </button>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                  <span>Токены сегодня</span>
+                  <span>
+                    {(status.today?.total_tokens ?? 0).toLocaleString('ru')} / {status.limits.daily_tokens.toLocaleString('ru')}
+                  </span>
+                </div>
+                <Progress
+                  value={
+                    status.limits.daily_tokens > 0
+                      ? Math.min(100, ((status.today?.total_tokens ?? 0) / status.limits.daily_tokens) * 100)
+                      : 0
+                  }
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             {[
-              { label: 'Запросов', value: status?.stats.total_requests ?? 0, icon: BarChart3, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-              { label: 'Токенов всего', value: status?.stats.total_tokens ?? 0, icon: Zap, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-              { label: 'Входящих', value: status?.stats.prompt_tokens ?? 0, icon: User, color: 'text-violet-500', bg: 'bg-violet-500/10' },
-              { label: 'Исходящих', value: status?.stats.completion_tokens ?? 0, icon: Bot, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+              { label: 'Запросов (сегодня)', value: status?.today?.requests ?? 0, icon: BarChart3, color: 'text-blue-500', bg: 'bg-blue-500/10' },
+              { label: 'Токенов (сегодня)', value: status?.today?.total_tokens ?? 0, icon: Zap, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+              { label: 'Входящих (сегодня)', value: status?.today?.prompt_tokens ?? 0, icon: User, color: 'text-violet-500', bg: 'bg-violet-500/10' },
+              { label: 'Исходящих (сегодня)', value: status?.today?.completion_tokens ?? 0, icon: Bot, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
             ].map((card) => (
-              <div key={card.label} className="rounded-xl border border-border bg-card p-4 flex items-center gap-3">
+              <div key={card.label} className="rounded-xl border border-border bg-card p-4 flex items-center gap-3 min-w-0">
                 <div className={`h-10 w-10 rounded-xl ${card.bg} flex items-center justify-center shrink-0`}>
                   <card.icon className={`h-5 w-5 ${card.color}`} />
                 </div>
-                <div>
-                  <p className="text-2xl font-bold">{(card.value as number).toLocaleString('ru')}</p>
-                  <p className="text-xs text-muted-foreground">{card.label}</p>
+                <div className="min-w-0">
+                  <p className="text-xl lg:text-2xl font-bold truncate">{(card.value as number).toLocaleString('ru')}</p>
+                  <p className="text-xs text-muted-foreground leading-snug">{card.label}</p>
                 </div>
               </div>
             ))}
+          </div>
+
+          <div className="rounded-xl border border-border bg-card p-4">
+            <p className="text-sm font-semibold mb-1">Всего (за все время)</p>
+            <p className="text-xs text-muted-foreground">
+              Запросов: {(status?.stats.total_requests ?? 0).toLocaleString('ru')} •
+              Токенов: {(status?.stats.total_tokens ?? 0).toLocaleString('ru')} •
+              Входящих: {(status?.stats.prompt_tokens ?? 0).toLocaleString('ru')} •
+              Исходящих: {(status?.stats.completion_tokens ?? 0).toLocaleString('ru')}
+            </p>
           </div>
         </div>
       )}
 
       {tab === 'chat' && (
         <>
-          <div className="mb-3">
-            <ContextControl
-              includeContext={includeContext}
-              setIncludeContext={setIncludeContext}
-              contextOptions={contextOptions}
-              setContextOptions={(updater) => setContextOptions(updater)}
-              contextEstimate={contextEstimate}
-              contextSources={contextSources}
-            />
-          </div>
-
-          {/* Desktop layout: left history panel (collapsible) + chat */}
-          <div className={`hidden lg:grid flex-1 min-h-0 gap-3 ${historyCollapsed ? 'lg:grid-cols-[56px_1fr]' : 'lg:grid-cols-[300px_1fr]'}`}>
-            {historyCollapsed ? (
-              <div className="rounded-xl border border-border bg-card p-2 flex flex-col items-center gap-2">
-                <button
-                  onClick={() => setHistoryCollapsed(false)}
-                  className="h-9 w-9 rounded-lg border border-border flex items-center justify-center hover:bg-secondary transition-colors"
-                  title="Развернуть историю"
-                >
-                  <PanelLeftOpen className="h-4 w-4" />
-                </button>
-                <button
-                  onClick={handleNewChat}
-                  className="h-9 w-9 rounded-lg border border-border flex items-center justify-center hover:bg-secondary transition-colors"
-                  title="Новый чат"
-                >
-                  <Plus className="h-4 w-4" />
-                </button>
-              </div>
-            ) : (
-              <div className="rounded-xl border border-border bg-card p-3 flex flex-col min-h-0">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-1.5 text-sm font-semibold">
-                    <History className="h-4 w-4" />
-                    <span>История</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={handleNewChat}
-                      className="h-7 w-7 rounded-md border border-border flex items-center justify-center hover:bg-secondary"
-                      title="Новый чат"
-                    >
-                      <Plus className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => setHistoryCollapsed(true)}
-                      className="h-7 w-7 rounded-md border border-border flex items-center justify-center hover:bg-secondary"
-                      title="Свернуть историю"
-                    >
-                      <PanelLeftClose className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-                <div className="flex-1 overflow-y-auto space-y-1">
-                  {loadingChats && <p className="text-xs text-muted-foreground px-2 py-1">Загрузка...</p>}
-                  {chats.map((c) => (
-                    <div key={c.id} className={`group rounded-lg ${currentChatId === c.id ? 'bg-primary text-white' : 'hover:bg-secondary'} transition-colors`}>
-                      <button
-                        onClick={() => setCurrentChatId(c.id)}
-                        className="w-full text-left px-2 py-2 text-sm"
-                      >
-                        <p className="truncate font-medium">{c.title}</p>
-                        <p className={`truncate text-xs ${currentChatId === c.id ? 'text-white/80' : 'text-muted-foreground'}`}>{c.last_message_preview || 'Пустой чат'}</p>
-                      </button>
-                      <div className={`px-2 pb-2 ${currentChatId === c.id ? '' : 'opacity-0 group-hover:opacity-100'} transition-opacity`}>
-                        <button
-                          onClick={() => handleDeleteChat(c.id)}
-                          className={`text-xs inline-flex items-center gap-1 ${currentChatId === c.id ? 'text-white/90 hover:text-white' : 'text-destructive hover:text-destructive/80'}`}
-                        >
-                          <Trash2 className="h-3 w-3" /> Удалить
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  {chats.length === 0 && !loadingChats && <p className="text-xs text-muted-foreground px-2 py-1">Пока нет чатов</p>}
-                </div>
-              </div>
-            )}
-
-            <div className="flex flex-col min-h-0">
-              <div className="flex-1 overflow-y-auto rounded-xl border border-border bg-card flex flex-col min-h-0">
-                {messages.length === 0 ? (
-                  <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-4 p-8 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.12),_transparent_55%)]">
-                    <Bot className="h-16 w-16 opacity-20" />
-                    <p className="text-lg font-medium">Начните диалог с AI</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-2xl">
-                      {EXAMPLES.map((ex) => (
-                        <button
-                          key={ex}
-                          onClick={() => void handleSend(ex)}
-                          className="text-left rounded-lg border border-border bg-secondary/20 px-3 py-2 text-sm hover:bg-secondary/40 transition-colors"
-                        >
-                          <span className="inline-flex items-center gap-1.5 mb-1 text-xs text-primary"><Sparkles className="h-3 w-3" /> Пример</span>
-                          <p>{ex}</p>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {messages.map((msg, i) => (
-                      <div key={`${msg.id || 'm'}-${i}`} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                        <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-primary text-white' : 'bg-secondary'}`}>
-                          {msg.role === 'user' ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
-                        </div>
-                        <div className={`max-w-[88%] rounded-2xl px-4 py-3 text-sm ${msg.role === 'user' ? 'bg-primary text-white rounded-tr-sm' : 'bg-secondary rounded-tl-sm'}`}>
-                          {msg.role === 'user' ? (
-                            <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
-                          ) : (
-                            <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-2 prose-pre:my-2 prose-code:before:content-none prose-code:after:content-none">
-                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-                            </div>
-                          )}
-                          {msg.tokens && <p className={`text-xs mt-2 ${msg.role === 'user' ? 'text-white/60' : 'text-muted-foreground'}`}>{msg.tokens} токенов</p>}
-                          {msg.actionResult && <DashboardPreview result={msg.actionResult} />}
-                        </div>
-                      </div>
-                    ))}
-                    {sending && (
-                      <div className="flex gap-3">
-                        <div className="h-8 w-8 rounded-full bg-secondary flex items-center justify-center shrink-0"><MessageSquareDashed className="h-4 w-4" /></div>
-                        <div className="bg-secondary rounded-2xl rounded-tl-sm px-4 py-3">
-                          <div className="flex gap-1 items-center h-5">
-                            {[0, 1, 2].map((i) => <span key={i} className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />)}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    <div ref={bottomRef} />
-                  </div>
-                )}
-              </div>
-
-              <div className="pt-3 flex gap-2 items-end">
-                <div className="flex-1 flex items-end gap-2 rounded-xl border border-border bg-card px-3 py-2 focus-within:border-primary/50 transition-colors">
-                  <textarea
-                    ref={textareaRef}
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={handleKey}
-                    placeholder={status?.configured ? 'Напишите сообщение... (Enter — отправить, Shift+Enter — новая строка)' : 'AI не настроен'}
-                    disabled={!status?.configured || sending}
-                    rows={1}
-                    className="flex-1 bg-transparent outline-none resize-none text-sm leading-relaxed max-h-32 disabled:opacity-50"
-                    style={{ minHeight: '24px' }}
-                    onInput={(e) => {
-                      const t = e.target as HTMLTextAreaElement
-                      t.style.height = 'auto'
-                      t.style.height = `${Math.min(t.scrollHeight, 128)}px`
-                    }}
-                  />
-                  <button onClick={() => void handleSend()} disabled={!input.trim() || sending || !status?.configured} className="h-8 w-8 rounded-lg bg-primary text-white flex items-center justify-center hover:bg-primary/90 disabled:opacity-40 transition-colors shrink-0">
-                    <Send className="h-4 w-4" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Mobile layout: chat + history drawer */}
-          <div className="lg:hidden flex flex-col flex-1 min-h-0">
+          {/* Chat layout: chat + history drawer */}
+          <div className="flex flex-col flex-1 min-h-0">
             <div className="flex-1 overflow-y-auto rounded-xl border border-border bg-card flex flex-col min-h-0">
               <div className="px-3 py-2 border-b border-border/60 flex items-center justify-between">
-                <button
-                  onClick={() => setHistoryMobileOpen(true)}
-                  className="h-8 w-8 rounded-md border border-border flex items-center justify-center hover:bg-secondary transition-colors"
-                  title="Открыть историю"
-                >
-                  <History className="h-4 w-4" />
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setHistoryMobileOpen(true)}
+                    className="h-8 w-8 rounded-md border border-border flex items-center justify-center hover:bg-secondary transition-colors"
+                    title="Открыть историю"
+                  >
+                    <History className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={() => setContextOpen(true)}
+                    className="h-8 w-8 rounded-md border border-border flex items-center justify-center hover:bg-secondary transition-colors"
+                    title="Контекст"
+                  >
+                    <Layers className="h-4 w-4" />
+                  </button>
+                </div>
                 <button
                   onClick={handleNewChat}
                   className="h-8 w-8 rounded-md border border-border flex items-center justify-center hover:bg-secondary transition-colors"
@@ -606,16 +437,23 @@ export default function AIPage() {
                       <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-primary text-white' : 'bg-secondary'}`}>
                         {msg.role === 'user' ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                       </div>
-                      <div className={`max-w-[88%] rounded-2xl px-4 py-3 text-sm ${msg.role === 'user' ? 'bg-primary text-white rounded-tr-sm' : 'bg-secondary rounded-tl-sm'}`}>
+                      <div className={`ai-message min-w-0 max-w-[88%] rounded-2xl px-4 py-3 text-sm ${msg.role === 'user' ? 'bg-primary text-white rounded-tr-sm' : 'bg-secondary rounded-tl-sm'}`}>
                         {msg.role === 'user' ? (
-                          <p className="whitespace-pre-wrap leading-relaxed">{msg.content}</p>
+                          <p className="whitespace-pre-wrap leading-relaxed [overflow-wrap:anywhere]">{msg.content}</p>
                         ) : (
-                          <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-2 prose-pre:my-2 prose-code:before:content-none prose-code:after:content-none">
+                          <div className="min-w-0 prose prose-sm max-w-none dark:prose-invert prose-p:my-2 prose-p:[overflow-wrap:anywhere] prose-pre:my-2 prose-pre:whitespace-pre-wrap prose-pre:[overflow-wrap:anywhere] prose-code:before:content-none prose-code:after:content-none prose-code:whitespace-pre-wrap prose-code:[overflow-wrap:anywhere] prose-code:break-all">
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                           </div>
                         )}
                         {msg.tokens && <p className={`text-xs mt-2 ${msg.role === 'user' ? 'text-white/60' : 'text-muted-foreground'}`}>{msg.tokens} токенов</p>}
-                        {msg.actionResult && <DashboardPreview result={msg.actionResult} />}
+                        {msg.actionResult && (
+                          <>
+                            <TablePreview result={msg.actionResult} />
+                            <DashboardPreview result={msg.actionResult} />
+                            <SchedulePreview result={msg.actionResult} />
+                            <KnowledgePreview result={msg.actionResult} />
+                          </>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -635,32 +473,73 @@ export default function AIPage() {
             </div>
 
             <div className="pt-3 flex gap-2 items-end">
-              <div className="flex-1 flex items-end gap-2 rounded-xl border border-border bg-card px-3 py-2 focus-within:border-primary/50 transition-colors">
-                <textarea
-                  ref={textareaRef}
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={handleKey}
-                  placeholder={status?.configured ? 'Напишите сообщение... (Enter — отправить, Shift+Enter — новая строка)' : 'AI не настроен'}
-                  disabled={!status?.configured || sending}
-                  rows={1}
-                  className="flex-1 bg-transparent outline-none resize-none text-sm leading-relaxed max-h-32 disabled:opacity-50"
-                  style={{ minHeight: '24px' }}
-                  onInput={(e) => {
-                    const t = e.target as HTMLTextAreaElement
-                    t.style.height = 'auto'
-                    t.style.height = `${Math.min(t.scrollHeight, 128)}px`
-                  }}
-                />
-                <button onClick={() => void handleSend()} disabled={!input.trim() || sending || !status?.configured} className="h-8 w-8 rounded-lg bg-primary text-white flex items-center justify-center hover:bg-primary/90 disabled:opacity-40 transition-colors shrink-0">
-                  <Send className="h-4 w-4" />
-                </button>
+              <div className="flex-1">
+                {uiIntent && (
+                  <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-border bg-card px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted-foreground">Выбран режим</p>
+                      <p className="text-sm font-medium truncate">
+                        {uiIntent.type === 'create_table'
+                          ? 'Создание таблицы'
+                          : uiIntent.type === 'create_dashboard'
+                            ? `Создание дашборда${(uiIntent.params as any)?.widget_type ? ` (${String((uiIntent.params as any).widget_type)})` : ''}`
+                            : uiIntent.type === 'create_schedule_event'
+                              ? 'Создание события в расписании'
+                              : uiIntent.type === 'create_kb_page'
+                                ? 'Создание страницы базы знаний'
+                                : uiIntent.type}
+                      </p>
+                      <p className="text-xs text-muted-foreground truncate">Опишите, что нужно сделать (например: "придумай 10 тестовых товаров").</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={clearUiIntent}
+                      className="h-8 w-8 rounded-lg border border-border flex items-center justify-center hover:bg-secondary shrink-0"
+                      title="Сбросить режим"
+                    >
+                      <X className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex items-end gap-2 rounded-xl border border-border bg-card px-3 py-2 focus-within:border-primary/50 transition-colors">
+                  <textarea
+                    ref={textareaRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={handleKey}
+                    placeholder={status?.configured ? 'Напишите сообщение... (Enter — отправить, Shift+Enter — новая строка)' : statusError === 'auth' ? 'Требуется вход' : 'AI не настроен'}
+                    disabled={sending || statusError === 'auth' || status?.enabled === false || !status?.configured}
+                    rows={1}
+                    className="flex-1 bg-transparent outline-none resize-none text-sm leading-relaxed max-h-32 disabled:opacity-50"
+                    style={{ minHeight: '24px' }}
+                    onInput={(e) => {
+                      const t = e.target as HTMLTextAreaElement
+                      t.style.height = 'auto'
+                      t.style.height = `${Math.min(t.scrollHeight, 128)}px`
+                    }}
+                  />
+                  <CapabilitiesMenu
+                    includeContext={includeContext}
+                    disabled={sending || statusError === 'auth' || status?.enabled === false || !status?.configured}
+                    tables={contextSources.tables}
+                    selectedTableIds={contextOptions.selected_table_ids}
+                    onSelect={(intent) => { setUiIntent(intent); requestAnimationFrame(() => textareaRef.current?.focus()) }}
+                  />
+                  <button
+                    onClick={() => void handleSend()}
+                    disabled={!input.trim() || sending || statusError === 'auth' || status?.enabled === false || !status?.configured}
+                    className="h-8 w-8 rounded-lg bg-primary text-white flex items-center justify-center hover:bg-primary/90 disabled:opacity-40 transition-colors shrink-0"
+                  >
+                    <Send className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
             </div>
           </div>
 
           {historyMobileOpen && (
-            <div className="fixed inset-0 z-50 lg:hidden">
+            <div className="fixed inset-0 z-50">
               <button className="absolute inset-0 bg-black/50" onClick={() => setHistoryMobileOpen(false)} aria-label="Закрыть историю" />
               <div className="absolute left-0 top-0 bottom-0 w-80 max-w-[85vw] bg-card border-r border-border p-3 flex flex-col">
                 <div className="flex items-center justify-between mb-2">
@@ -710,6 +589,18 @@ export default function AIPage() {
               </div>
             </div>
           )}
+
+          <ContextControl
+            showSummary={false}
+            open={contextOpen}
+            onOpenChange={setContextOpen}
+            includeContext={includeContext}
+            setIncludeContext={setIncludeContext}
+            contextOptions={contextOptions}
+            setContextOptions={(updater) => setContextOptions(updater)}
+            contextEstimate={contextEstimate}
+            contextSources={contextSources}
+          />
         </>
       )}
     </div>

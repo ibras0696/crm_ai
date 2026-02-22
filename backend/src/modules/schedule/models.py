@@ -21,5 +21,6 @@ class Event(BaseDBModel):
     all_day: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
     color: Mapped[str | None] = mapped_column(String(20), nullable=True)
     is_done: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
-    recurrence: Mapped[str | None] = mapped_column(String(20), nullable=True)  # daily|weekly|monthly|yearly
+    # Can be a simple keyword (daily/weekly/...) or an RRULE string (e.g. "RRULE:FREQ=WEEKLY;BYDAY=TU").
+    recurrence: Mapped[str | None] = mapped_column(Text, nullable=True)
     meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

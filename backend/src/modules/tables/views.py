@@ -18,6 +18,7 @@ from sqlalchemy import ForeignKey, String, Text
 from src.common.base_model import BaseDBModel
 from src.common.schemas import ApiResponse
 from src.common.enums import UserRole
+from src.common.http_headers import content_disposition_attachment
 from src.modules.auth.dependencies import CurrentUser, require_roles
 from src.modules.tables.models import Table
 from src.modules.tables.repository import TableRepository
@@ -204,7 +205,7 @@ async def export_csv(
         return StreamingResponse(
             iter([output.getvalue()]),
             media_type="text/csv",
-            headers={"Content-Disposition": f'attachment; filename="{table.name}.csv"'},
+            headers={"Content-Disposition": content_disposition_attachment(f"{table.name}.csv")},
         )
 
 
@@ -217,7 +218,7 @@ async def export_xlsx(
         t_repo = TableRepository(uow.session)
         table = await t_repo.get_by_id(table_id, with_columns=True)
         if not table or table.org_id != current_user.org_id:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "РўР°Р±Р»РёС†Р° РЅРµ РЅР°Р№РґРµРЅР°"})
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Таблица не найдена"})
 
         r_repo = RecordRepository(uow.session)
         records = await r_repo.list_by_table(table_id, limit=5000, offset=0)
@@ -237,7 +238,7 @@ async def export_xlsx(
         return StreamingResponse(
             output,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f'attachment; filename="{table.name}.xlsx"'},
+            headers={"Content-Disposition": content_disposition_attachment(f"{table.name}.xlsx")},
         )
 
 

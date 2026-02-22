@@ -137,6 +137,32 @@ async def resolve_org_plan(session, *, org_id) -> PlanTier:
     return PlanTier.FREE
 
 
+async def is_org_ai_enabled(session, *, org_id) -> bool:
+    """Проверить org-level флаг доступности AI.
+
+    Args:
+        session: Async SQLAlchemy session.
+        org_id: ID организации.
+
+    Returns:
+        True, если AI включен для организации, иначе False.
+    """
+    try:
+        ai_enabled = (
+            await session.execute(
+                select(Organization.ai_enabled).where(Organization.id == org_id)
+            )
+        ).scalar_one_or_none()
+        # Для старых данных/временных миграционных состояний по умолчанию считаем включенным.
+        if ai_enabled is None:
+            return True
+        return bool(ai_enabled)
+    except Exception as exc:
+        logger.exception("ai_org_enabled_lookup_failed", exc_info=exc)
+        # Fail-open для чтения статуса: если lookup недоступен, не блокируем трафик.
+        return True
+
+
 async def check_ai_limits(session, *, org_id, user_id, estimated_request_tokens: int) -> tuple[bool, dict | None]:
     """Проверить лимиты использования AI (cost control).
 

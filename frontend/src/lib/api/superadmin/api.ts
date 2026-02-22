@@ -73,7 +73,7 @@ export interface SuperadminPlanLimits {
 }
 
 export interface SuperadminOrgDetail {
-  org: { id: string; name: string; slug: string; plan: string; created_at?: string | null }
+  org: { id: string; name: string; slug: string; plan: string; ai_enabled: boolean; created_at?: string | null }
   subscription?: SuperadminSubscriptionInfo | null
   plan_limits?: SuperadminPlanLimits | null
   usage: { members: number; tables: number; records: number; files: number; storage_bytes: number }
@@ -154,6 +154,12 @@ export const superadminApi = {
   orgMembers: (orgId: string, params: { limit?: number; offset?: number }) =>
     superadminHttp.get<ApiResponse<SuperadminOrgMembersPage>>(`/orgs/${orgId}/members?limit=${params.limit ?? 50}&offset=${params.offset ?? 0}`),
   setPlan: (orgId: string, plan: string) => superadminHttp.patch<ApiResponse<{ org_id: string; plan: string }>>(`/orgs/${orgId}/plan`, { plan }),
+  setOrgAiEnabled: (orgId: string, enabled: boolean) =>
+    superadminHttp.patch<ApiResponse<{ org_id: string; ai_enabled: boolean }>>(`/orgs/${orgId}/ai-enabled`, { enabled }),
+  resetOrgAiUsage: (orgId: string) =>
+    superadminHttp.post<ApiResponse<{ org_id: string; scope: string; removed_requests: number; removed_tokens: number }>>(
+      `/orgs/${orgId}/ai/reset-usage`
+    ),
   users: (params: { q?: string; org_id?: string; is_active?: boolean; limit?: number; offset?: number }) => {
     const q = new URLSearchParams()
     if (params.q) q.set('q', params.q)

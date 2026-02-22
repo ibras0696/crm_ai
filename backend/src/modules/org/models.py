@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, text
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, Text, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -15,6 +15,7 @@ class Organization(BaseDBModel):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
     plan: Mapped[PlanTier] = mapped_column(Enum(PlanTier, values_callable=lambda x: [e.value for e in x]), default=PlanTier.FREE, server_default=text("'free'"))
+    ai_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
 
     memberships: Mapped[list["Membership"]] = relationship(back_populates="organization", lazy="selectin")
     invites: Mapped[list["Invite"]] = relationship(back_populates="organization", lazy="noload")

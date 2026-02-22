@@ -7,14 +7,18 @@ from src.common.http_headers import content_disposition_attachment
 from src.common.schemas import ApiResponse
 from src.modules.superadmin.dependencies import require_superadmin
 from src.modules.superadmin.schemas import (
+    SetOrgAIEnabledRequest,
     SetPlanRequest,
+    SuperadminAIUsageResetResponse,
     SuperadminAuditPage,
     SuperadminDashboardResponse,
     SuperadminLoginRequest,
     SuperadminOrgDetail,
+    SuperadminOrgAIEnabledResponse,
     SuperadminOrgListPage,
     SuperadminOrgMembersPage,
     SuperadminOverviewResponse,
+    SuperadminPlanChangeResponse,
     SuperadminRecordListPage,
     SuperadminTableDetail,
     SuperadminTableListPage,
@@ -127,7 +131,7 @@ async def superadmin_ai_usage():
     return ApiResponse(data=await _service.overview.ai_usage_by_org())
 
 
-@protected.patch("/orgs/{org_id}/plan", response_model=ApiResponse[dict])
+@protected.patch("/orgs/{org_id}/plan", response_model=ApiResponse[SuperadminPlanChangeResponse])
 async def superadmin_set_plan(org_id: str, body: SetPlanRequest):
     try:
         data = await _service.orgs.set_plan(org_id=org_id, plan_name=body.plan)
@@ -137,6 +141,24 @@ async def superadmin_set_plan(org_id: str, body: SetPlanRequest):
             data=None,
             error={"code": "INVALID_PLAN", "message": f"Неверный тариф: {body.plan}"},
         )
+    except LookupError:
+        return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": NOT_FOUND_ORG})
+    return ApiResponse(data=data)
+
+
+@protected.patch("/orgs/{org_id}/ai-enabled", response_model=ApiResponse[SuperadminOrgAIEnabledResponse])
+async def superadmin_set_org_ai_enabled(org_id: str, body: SetOrgAIEnabledRequest):
+    try:
+        data = await _service.orgs.set_org_ai_enabled(org_id=org_id, enabled=body.enabled)
+    except LookupError:
+        return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": NOT_FOUND_ORG})
+    return ApiResponse(data=data)
+
+
+@protected.post("/orgs/{org_id}/ai/reset-usage", response_model=ApiResponse[SuperadminAIUsageResetResponse])
+async def superadmin_reset_org_ai_usage(org_id: str):
+    try:
+        data = await _service.orgs.reset_org_ai_usage_today(org_id=org_id)
     except LookupError:
         return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": NOT_FOUND_ORG})
     return ApiResponse(data=data)

@@ -1,11 +1,9 @@
 import uuid
-
-from sqlalchemy import select
+from datetime import datetime, timezone
 
 from src.common.enums import AuditAction, PlanTier, SubscriptionStatus
 from src.infrastructure.uow import UnitOfWork
 from src.modules.audit.repository import AuditRepository
-from src.modules.org.models import Organization, Subscription
 from src.modules.superadmin.repository import SuperadminRepository
 
 
@@ -73,21 +71,20 @@ class SuperadminOrgsService:
             raise ValueError("INVALID_PLAN") from exc
 
         async with UnitOfWork() as uow:
+            repo = SuperadminRepository(uow.session)
             org_uuid = uuid.UUID(org_id)
-            org = (
-                await uow.session.execute(select(Organization).where(Organization.id == org_uuid))
-            ).scalar_one_or_none()
+            org = await repo.get_org_model(org_id=org_uuid)
             if not org:
                 raise LookupError("NOT_FOUND")
             old_plan = org.plan.value if hasattr(org.plan, "value") else str(org.plan)
 
-            sub = (
-                await uow.session.execute(select(Subscription).where(Subscription.org_id == org_uuid))
-            ).scalar_one_or_none()
+            sub = await repo.get_subscription_by_org(org_id=org_uuid)
             if sub:
                 sub.plan = plan_tier
                 sub.status = SubscriptionStatus.ACTIVE
             else:
+                from src.modules.org.models import Subscription
+
                 sub = Subscription(org_id=org_uuid, plan=plan_tier, status=SubscriptionStatus.ACTIVE)
                 uow.session.add(sub)
 
@@ -104,6 +101,72 @@ class SuperadminOrgsService:
             )
             await uow.commit()
         return {"org_id": org_id, "plan": plan_name}
+
+    async def set_org_ai_enabled(self, *, org_id: str, enabled: bool) -> dict:
+        """Включить или выключить AI на уровне организации."""
+        async with UnitOfWork() as uow:
+            repo = SuperadminRepository(uow.session)
+            org_uuid = uuid.UUID(org_id)
+            org = await repo.get_org_model(org_id=org_uuid)
+            if not org:
+                raise LookupError("NOT_FOUND")
+
+            old_enabled = bool(org.ai_enabled)
+            org.ai_enabled = bool(enabled)
+
+            audit_repo = AuditRepository(uow.session)
+            await audit_repo.log(
+                org_id=org_uuid,
+                actor_id=None,
+                action=AuditAction.UPDATE,
+                entity_type="org_ai_settings",
+                entity_id=str(org_uuid),
+                meta={
+                    "superadmin": True,
+                    "old_ai_enabled": old_enabled,
+                    "new_ai_enabled": bool(enabled),
+                },
+            )
+            await uow.commit()
+            return {"org_id": org_id, "ai_enabled": bool(org.ai_enabled)}
+
+    async def reset_org_ai_usage_today(self, *, org_id: str) -> dict:
+        """Сбросить AI usage за текущий день для организации."""
+        now = datetime.now(timezone.utc)
+        day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+
+        async with UnitOfWork() as uow:
+            repo = SuperadminRepository(uow.session)
+            org_uuid = uuid.UUID(org_id)
+            org = await repo.get_org_model(org_id=org_uuid)
+            if not org:
+                raise LookupError("NOT_FOUND")
+
+            removed_requests, removed_tokens = await repo.reset_ai_usage_today(org_id=org_uuid, day_start=day_start)
+
+            audit_repo = AuditRepository(uow.session)
+            await audit_repo.log(
+                org_id=org_uuid,
+                actor_id=None,
+                action=AuditAction.UPDATE,
+                entity_type="org_ai_usage",
+                entity_id=str(org_uuid),
+                meta={
+                    "superadmin": True,
+                    "operation": "reset_today",
+                    "removed_requests": removed_requests,
+                    "removed_tokens": removed_tokens,
+                    "day_start": day_start.isoformat(),
+                },
+            )
+            await uow.commit()
+
+        return {
+            "org_id": org_id,
+            "scope": "today",
+            "removed_requests": removed_requests,
+            "removed_tokens": removed_tokens,
+        }
 
     async def audit_logs_page(self, *, org_id: str | None, limit: int, offset: int) -> dict:
         async with UnitOfWork() as uow:

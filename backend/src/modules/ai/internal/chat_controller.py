@@ -23,7 +23,7 @@ from src.config import settings
 from src.infrastructure.metrics_custom import AI_LIMIT_REJECTIONS_TOTAL, AI_REQUESTS_TOTAL, AI_TOKENS_TOTAL
 from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.intent_overrides import apply_ui_intent_overrides
-from src.modules.ai.limits import check_ai_limits
+from src.modules.ai.limits import check_ai_limits, is_org_ai_enabled
 from src.modules.ai.models import AIChatMessage, AIUsageLog
 from src.modules.ai.schemas import ChatRequest, ChatResponse
 from src.modules.ai.service import (
@@ -217,6 +217,15 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
     # Этап 1: проверка фичи/конфигурации.
     if not settings.ENABLE_AI:
         return ApiResponse(ok=False, data=None, error={"code": "AI_DISABLED", "message": "AI отключен администратором."})
+
+    async with UnitOfWork() as uow:
+        org_ai_enabled = await is_org_ai_enabled(uow.session, org_id=current_user.org_id)
+    if not org_ai_enabled:
+        return ApiResponse(
+            ok=False,
+            data=None,
+            error={"code": "AI_DISABLED", "message": "AI отключен для вашей организации администратором."},
+        )
 
     bearer_token = settings.OPENAI_BEARER_TOKEN or settings.OPENAI_API_KEY
     if not bearer_token:

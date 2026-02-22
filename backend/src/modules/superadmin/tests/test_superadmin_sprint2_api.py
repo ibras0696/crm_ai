@@ -1,9 +1,12 @@
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 from httpx import AsyncClient
 
 from src.config import settings
+from src.infrastructure.uow import UnitOfWork
+from src.modules.ai.models import AIUsageLog
 
 
 def _h(token: str) -> dict:
@@ -153,3 +156,62 @@ async def test_superadmin_plan_change_writes_audit_and_superadmin_can_list_audit
     assert page["total"] >= 1
     assert any(x["entity_type"] == "org_plan" for x in page["items"])
 
+
+@pytest.mark.asyncio
+async def test_superadmin_ai_quick_actions_reset_usage_and_kill_switch(client: AsyncClient, monkeypatch):
+    sa = await _login_sa(client, monkeypatch)
+    owner_token, org_id = await _register_owner(client, org_name="AI Quick Actions Org")
+
+    # Add a usage row for today.
+    async with UnitOfWork() as uow:
+        uow.session.add(
+            AIUsageLog(
+                org_id=uuid.UUID(org_id),
+                user_id=None,
+                model="test-model",
+                prompt_tokens=100,
+                completion_tokens=50,
+                total_tokens=150,
+                message_preview="quick-actions-test",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        await uow.commit()
+
+    # Reset org AI usage for today.
+    reset = await client.post(f"/api/v1/superadmin/orgs/{org_id}/ai/reset-usage", headers=_h(sa))
+    assert reset.status_code == 200
+    reset_data = reset.json()["data"]
+    assert reset_data["removed_requests"] >= 1
+    assert reset_data["removed_tokens"] >= 150
+
+    detail = await client.get(f"/api/v1/superadmin/orgs/{org_id}", headers=_h(sa))
+    assert detail.status_code == 200
+    assert detail.json()["data"]["ai_usage_today"]["tokens_used"] == 0
+
+    # Disable AI for org and verify /ai/chat is blocked with AI_DISABLED.
+    disable = await client.patch(
+        f"/api/v1/superadmin/orgs/{org_id}/ai-enabled",
+        json={"enabled": False},
+        headers=_h(sa),
+    )
+    assert disable.status_code == 200
+    assert disable.json()["data"]["ai_enabled"] is False
+
+    chat = await client.post(
+        "/api/v1/ai/chat",
+        json={"message": "test", "include_context": False},
+        headers=_h(owner_token),
+    )
+    assert chat.status_code == 200
+    assert chat.json()["ok"] is False
+    assert chat.json()["error"]["code"] == "AI_DISABLED"
+
+    # Re-enable for completeness.
+    enable = await client.patch(
+        f"/api/v1/superadmin/orgs/{org_id}/ai-enabled",
+        json={"enabled": True},
+        headers=_h(sa),
+    )
+    assert enable.status_code == 200
+    assert enable.json()["data"]["ai_enabled"] is True

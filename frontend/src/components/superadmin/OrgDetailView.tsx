@@ -15,6 +15,10 @@ export function OrgDetailView({ orgId }: Props) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [changingPlan, setChangingPlan] = useState(false)
+  const [changingAiFlag, setChangingAiFlag] = useState(false)
+  const [resettingAiUsage, setResettingAiUsage] = useState(false)
+  const [actionError, setActionError] = useState('')
+  const [actionSuccess, setActionSuccess] = useState('')
 
   const load = async () => {
     if (!orgId) return
@@ -51,12 +55,51 @@ export function OrgDetailView({ orgId }: Props) {
 
   const setPlan = async (plan: string) => {
     if (!orgId || !plan) return
+    setActionError('')
+    setActionSuccess('')
     setChangingPlan(true)
     try {
       await superadminApi.setPlan(orgId, plan)
+      setActionSuccess('Тариф обновлен')
       await load()
+    } catch (e: any) {
+      setActionError(e?.response?.data?.error?.message || e?.message || 'Не удалось обновить тариф')
     } finally {
       setChangingPlan(false)
+    }
+  }
+
+  const setOrgAiEnabled = async (enabled: boolean) => {
+    if (!orgId) return
+    setActionError('')
+    setActionSuccess('')
+    setChangingAiFlag(true)
+    try {
+      const r = await superadminApi.setOrgAiEnabled(orgId, enabled)
+      if (!r.data.ok) throw new Error(r.data.error?.message || 'Не удалось изменить статус AI')
+      setActionSuccess(enabled ? 'AI включен для организации' : 'AI выключен для организации')
+      await load()
+    } catch (e: any) {
+      setActionError(e?.response?.data?.error?.message || e?.message || 'Не удалось изменить статус AI')
+    } finally {
+      setChangingAiFlag(false)
+    }
+  }
+
+  const resetOrgAiUsage = async () => {
+    if (!orgId) return
+    setActionError('')
+    setActionSuccess('')
+    setResettingAiUsage(true)
+    try {
+      const r = await superadminApi.resetOrgAiUsage(orgId)
+      if (!r.data.ok || !r.data.data) throw new Error(r.data.error?.message || 'Не удалось сбросить usage')
+      setActionSuccess(`Сброшено: ${r.data.data.removed_requests} запросов, ${r.data.data.removed_tokens} токенов`)
+      await load()
+    } catch (e: any) {
+      setActionError(e?.response?.data?.error?.message || e?.message || 'Не удалось сбросить usage')
+    } finally {
+      setResettingAiUsage(false)
     }
   }
 
@@ -147,6 +190,33 @@ export function OrgDetailView({ orgId }: Props) {
         </div>
       </div>
 
+      <div className="space-y-2">
+        <div className="text-sm font-semibold">AI quick actions</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => void setOrgAiEnabled(!(detail.org?.ai_enabled ?? true))}
+            disabled={changingAiFlag}
+            className="h-9 px-3 rounded-lg border border-border hover:bg-secondary/30 text-sm disabled:opacity-50"
+          >
+            {detail.org?.ai_enabled ? 'Выключить AI' : 'Включить AI'}
+          </button>
+          <button
+            onClick={() => void resetOrgAiUsage()}
+            disabled={resettingAiUsage}
+            className="h-9 px-3 rounded-lg border border-border hover:bg-secondary/30 text-sm disabled:opacity-50"
+          >
+            Сбросить AI usage (сегодня)
+          </button>
+          <div className="text-xs text-muted-foreground">Текущее состояние AI: {detail.org?.ai_enabled ? 'включен' : 'выключен'}</div>
+        </div>
+      </div>
+
+      {(actionError || actionSuccess) && (
+        <div className={`rounded-lg border p-3 text-xs ${actionError ? 'border-destructive/50 text-destructive' : 'border-emerald-500/40 text-emerald-400'}`}>
+          {actionError || actionSuccess}
+        </div>
+      )}
+
       {planLimits?.has_ai && (
         <div className="rounded-lg border border-border bg-background/40 p-3 space-y-2">
           <div className="text-sm font-semibold">AI лимиты</div>
@@ -202,4 +272,3 @@ function MemberRow({ item, zebra }: { item: SuperadminOrgMemberItem; zebra: bool
     </tr>
   )
 }
-

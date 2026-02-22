@@ -17,6 +17,27 @@ class SetPlanRequest(BaseModel):
     plan: str = "free"
 
 
+class SetOrgAIEnabledRequest(BaseModel):
+    enabled: bool
+
+
+class SuperadminPlanChangeResponse(BaseModel):
+    org_id: str
+    plan: str
+
+
+class SuperadminOrgAIEnabledResponse(BaseModel):
+    org_id: str
+    ai_enabled: bool
+
+
+class SuperadminAIUsageResetResponse(BaseModel):
+    org_id: str
+    scope: str
+    removed_requests: int
+    removed_tokens: int
+
+
 class SuperadminDashboardTotals(BaseModel):
     orgs: int
     users: int
@@ -108,12 +129,25 @@ class SuperadminOrgUsage(BaseModel):
     storage_bytes: int
 
 
+class SuperadminOrgInfo(BaseModel):
+    id: str
+    name: str
+    slug: str
+    plan: str
+    ai_enabled: bool
+    created_at: str | None = None
+
+
+class SuperadminAIUsageToday(BaseModel):
+    tokens_used: int
+
+
 class SuperadminOrgDetail(BaseModel):
-    org: dict
+    org: SuperadminOrgInfo
     subscription: SuperadminSubscriptionInfo | None = None
     plan_limits: SuperadminPlanLimits | None = None
     usage: SuperadminOrgUsage
-    ai_usage_today: dict
+    ai_usage_today: SuperadminAIUsageToday
 
 
 class SuperadminOrgMemberUser(BaseModel):

@@ -12,7 +12,7 @@ from typing import Any
 
 from src.config import settings
 from src.infrastructure.uow import UnitOfWork
-from src.modules.ai.limits import resolve_org_plan, resolve_plan_limits
+from src.modules.ai.limits import is_org_ai_enabled, resolve_org_plan, resolve_plan_limits
 from src.modules.ai.models import AIChatMessage
 from src.modules.ai.repository import AIRepository
 from src.modules.ai.service import build_messages, build_org_context_for_user, estimate_tokens
@@ -36,6 +36,7 @@ async def build_ai_status(*, org_id: uuid.UUID) -> dict[str, Any]:
     try:
         async with UnitOfWork() as uow:
             repo = AIRepository(uow.session)
+            org_ai_enabled = await is_org_ai_enabled(uow.session, org_id=org_id)
             plan_tier = await resolve_org_plan(uow.session, org_id=org_id)
             plan = plan_tier.value
             plan_db = await repo.get_active_plan(name=plan)
@@ -49,7 +50,10 @@ async def build_ai_status(*, org_id: uuid.UUID) -> dict[str, Any]:
     limits = resolve_plan_limits(plan_tier, plan_db)
 
     return {
-        "enabled": bool(settings.ENABLE_AI),
+        "enabled": bool(settings.ENABLE_AI and org_ai_enabled),
+        "global_ai_enabled": bool(settings.ENABLE_AI),
+        "org_ai_enabled": bool(org_ai_enabled),
+        "effective_ai_enabled": bool(settings.ENABLE_AI and org_ai_enabled),
         # Сохраняем прежний ключ для обратной совместимости фронта.
         "configured": credentials_present,
         "plan": plan,

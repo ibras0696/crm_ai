@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, and_, func, or_, select
+from sqlalchemy import String, and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.enums import SubscriptionStatus
@@ -72,6 +72,44 @@ class SuperadminRepository:
         offset: int,
     ) -> tuple[list[dict], int]:
         return await list_audit_logs_page(self.session, org_id=org_id, limit=limit, offset=offset)
+
+    async def get_org_model(self, *, org_id: uuid.UUID) -> Organization | None:
+        """Получить ORM-модель организации по ID."""
+        return (await self.session.execute(select(Organization).where(Organization.id == org_id))).scalar_one_or_none()
+
+    async def get_subscription_by_org(self, *, org_id: uuid.UUID) -> Subscription | None:
+        """Получить подписку организации (если есть)."""
+        return (await self.session.execute(select(Subscription).where(Subscription.org_id == org_id))).scalar_one_or_none()
+
+    async def reset_ai_usage_today(self, *, org_id: uuid.UUID, day_start: datetime) -> tuple[int, int]:
+        """Сбросить usage AI за текущий день для организации.
+
+        Returns:
+            (removed_requests, removed_tokens).
+        """
+        usage_before = (
+            await self.session.execute(
+                select(
+                    func.count(AIUsageLog.id),
+                    func.coalesce(func.sum(AIUsageLog.total_tokens), 0),
+                ).where(
+                    AIUsageLog.org_id == org_id,
+                    AIUsageLog.created_at >= day_start,
+                )
+            )
+        ).one()
+        removed_requests = int(usage_before[0] or 0)
+        removed_tokens = int(usage_before[1] or 0)
+
+        if removed_requests > 0:
+            await self.session.execute(
+                delete(AIUsageLog).where(
+                    AIUsageLog.org_id == org_id,
+                    AIUsageLog.created_at >= day_start,
+                )
+            )
+
+        return removed_requests, removed_tokens
 
     async def list_tables_by_org_page(
         self,
@@ -325,6 +363,7 @@ async def get_org_detail(session: AsyncSession, *, org_id: uuid.UUID) -> dict | 
             "name": org.name,
             "slug": org.slug,
             "plan": org.plan.value if hasattr(org.plan, "value") else str(org.plan),
+            "ai_enabled": bool(org.ai_enabled),
             "created_at": org.created_at.isoformat() if org.created_at else None,
         },
         "subscription": (

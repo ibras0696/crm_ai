@@ -33,6 +33,8 @@ class CreateAccessRuleRequest(BaseModel):
     can_write: bool = True
     can_delete: bool = False
 
+    model_config = {"extra": "forbid"}
+
 
 class UpdateAccessRuleRequest(BaseModel):
     """Частичное обновление прав."""
@@ -40,3 +42,5 @@ class UpdateAccessRuleRequest(BaseModel):
     can_read: bool | None = None
     can_write: bool | None = None
     can_delete: bool | None = None
+
+    model_config = {"extra": "forbid"}

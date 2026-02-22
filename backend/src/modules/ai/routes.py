@@ -5,18 +5,19 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from src.common.enums import UserRole
 from src.common.schemas import ApiResponse
-from src.config import settings
 from src.modules.ai.api_service import (
     build_ai_status,
     build_ai_usage_by_user,
     build_chat_messages,
     build_chat_sessions,
+    build_context_estimate,
     build_context_sources,
     create_chat_session,
     delete_chat_session,
@@ -30,10 +31,25 @@ from src.modules.ai.schemas import (
     ContextEstimateRequest,
     CreateChatRequest,
 )
-from src.modules.ai.service import build_messages, build_org_context_for_user, estimate_tokens
 from src.modules.auth.dependencies import CurrentUser, require_roles
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+logger = logging.getLogger(__name__)
+
+
+def _parse_chat_uuid(chat_id: str) -> uuid.UUID | None:
+    """Преобразовать chat_id в UUID.
+
+    Args:
+        chat_id: ID чата в строковом формате.
+
+    Returns:
+        UUID или None, если формат невалиден.
+    """
+    try:
+        return uuid.UUID(chat_id)
+    except ValueError:
+        return None
 
 
 @router.post("/chat", response_model=ApiResponse[ChatResponse])
@@ -50,7 +66,11 @@ async def ai_chat(
     Returns:
         ApiResponse[ChatResponse] с ответом модели и (опционально) результатом действия.
     """
-    return await run_ai_chat(body, current_user)
+    try:
+        return await run_ai_chat(body, current_user)
+    except Exception as exc:
+        logger.exception("ai_chat_route_failed", exc_info=exc)
+        return ApiResponse(ok=False, data=None, error={"code": "AI_INTERNAL_ERROR", "message": "Внутренняя ошибка AI сервиса."})
 
 
 @router.get("/status", response_model=ApiResponse[dict])
@@ -85,17 +105,26 @@ async def ai_usage_detail(
 
 @router.get("/chats", response_model=ApiResponse[list[ChatSessionOut]])
 async def ai_chats(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
 ):
     """Список чат-сессий текущего пользователя.
 
     Args:
+        limit: Лимит количества сессий.
+        offset: Смещение.
         current_user: Текущий пользователь.
 
     Returns:
         ApiResponse со списком ChatSessionOut.
     """
-    rows = await build_chat_sessions(org_id=current_user.org_id, user_id=current_user.user_id)
+    rows = await build_chat_sessions(
+        org_id=current_user.org_id,
+        user_id=current_user.user_id,
+        limit=limit,
+        offset=offset,
+    )
     return ApiResponse(data=[ChatSessionOut(**r) for r in rows])
 
 
@@ -132,9 +161,8 @@ async def ai_delete_chat(
     Returns:
         ApiResponse[None].
     """
-    try:
-        chat_uuid = uuid.UUID(chat_id)
-    except ValueError:
+    chat_uuid = _parse_chat_uuid(chat_id)
+    if chat_uuid is None:
         return ApiResponse(ok=False, data=None, error={"code": "INVALID_ID", "message": "Invalid chat id"})
 
     ok = await delete_chat_session(org_id=current_user.org_id, user_id=current_user.user_id, chat_id=chat_uuid)
@@ -146,23 +174,32 @@ async def ai_delete_chat(
 @router.get("/chats/{chat_id}/messages", response_model=ApiResponse[list[ChatMessageOut]])
 async def ai_chat_messages(
     chat_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
 ):
     """Получить сообщения чат-сессии.
 
     Args:
         chat_id: ID сессии.
+        limit: Лимит количества сообщений.
+        offset: Смещение.
         current_user: Текущий пользователь.
 
     Returns:
         ApiResponse со списком сообщений.
     """
-    try:
-        chat_uuid = uuid.UUID(chat_id)
-    except ValueError:
+    chat_uuid = _parse_chat_uuid(chat_id)
+    if chat_uuid is None:
         return ApiResponse(ok=False, data=None, error={"code": "INVALID_ID", "message": "Invalid chat id"})
 
-    rows = await build_chat_messages(org_id=current_user.org_id, user_id=current_user.user_id, chat_id=chat_uuid)
+    rows = await build_chat_messages(
+        org_id=current_user.org_id,
+        user_id=current_user.user_id,
+        chat_id=chat_uuid,
+        limit=limit,
+        offset=offset,
+    )
     if rows is None:
         return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Chat not found"})
     return ApiResponse(
@@ -194,41 +231,17 @@ async def ai_context_estimate(
     Returns:
         ApiResponse с оценкой: used/estimated tokens и разбиением по источникам.
     """
-    if not body.include_context:
-        return ApiResponse(
-            data={
-                "enabled": False,
-                "sources": {
-                    "kb": {"enabled": False, "chars": 0, "estimated_tokens": 0},
-                    "table_schema": {"enabled": False, "chars": 0, "estimated_tokens": 0},
-                    "table_records": {"enabled": False, "chars": 0, "estimated_tokens": 0},
-                    "schedule": {"enabled": False, "chars": 0, "estimated_tokens": 0},
-                },
-                "selected": {"kb_pages": [], "tables": [], "schedule_events": []},
-                "model_overhead_tokens": 0,
-                "max_context_tokens": 0,
-                "used_context_tokens": 0,
-                "context_truncated": False,
-                "estimated_prompt_tokens": 0,
-                "prompt_message_overhead_tokens": 0,
-                "estimated_total_tokens": 0,
-            }
-        )
-    org_context, meta = await build_org_context_for_user(current_user.org_id, current_user.user_id, body.context_options)
-
-    system_prompt = body.system_prompt or settings.AI_SYSTEM_PROMPT
-    user_message = body.user_message or ""
-    history = [{"role": h.role, "content": h.content} for h in (body.history or [])][-10:]
-
-    prompt_messages = build_messages(system_prompt, org_context, db_messages=[], history=history, user_message=user_message)
-    message_overhead = 4 * len(prompt_messages) + 2
-    content_joined = "\n".join((m.get("content") or "") for m in prompt_messages)
-    estimated_prompt_tokens = estimate_tokens(content_joined) + message_overhead
-
-    meta["prompt_message_overhead_tokens"] = int(message_overhead)
-    meta["estimated_prompt_tokens"] = int(estimated_prompt_tokens)
-    meta["estimated_total_tokens"] = int(estimated_prompt_tokens)
-    return ApiResponse(data=meta)
+    history = [{"role": h.role, "content": h.content} for h in (body.history or [])]
+    data = await build_context_estimate(
+        org_id=current_user.org_id,
+        user_id=current_user.user_id,
+        include_context=bool(body.include_context),
+        context_options=body.context_options,
+        system_prompt=body.system_prompt,
+        history=history,
+        user_message=body.user_message,
+    )
+    return ApiResponse(data=data)
 
 
 @router.get("/context-sources", response_model=ApiResponse[dict])

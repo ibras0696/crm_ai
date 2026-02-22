@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import CheckConstraint, ForeignKey, ForeignKeyConstraint, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,6 +19,11 @@ class AIUsageLog(BaseDBModel):
     """
 
     __tablename__ = "ai_usage_logs"
+    __table_args__ = (
+        CheckConstraint("prompt_tokens >= 0", name="ck_ai_usage_logs_prompt_tokens_non_negative"),
+        CheckConstraint("completion_tokens >= 0", name="ck_ai_usage_logs_completion_tokens_non_negative"),
+        CheckConstraint("total_tokens >= 0", name="ck_ai_usage_logs_total_tokens_non_negative"),
+    )
 
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
@@ -37,6 +42,9 @@ class AIChatSession(BaseDBModel):
     """Сессия чата AI для конкретного пользователя в рамках организации."""
 
     __tablename__ = "ai_chat_sessions"
+    __table_args__ = (
+        UniqueConstraint("id", "org_id", "user_id", name="uq_ai_chat_sessions_id_org_user"),
+    )
 
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
@@ -51,6 +59,16 @@ class AIChatMessage(BaseDBModel):
     """Сообщение внутри AI-сессии (user/assistant/system)."""
 
     __tablename__ = "ai_chat_messages"
+    __table_args__ = (
+        CheckConstraint("role IN ('user', 'assistant', 'system', 'tool')", name="ck_ai_chat_messages_role_valid"),
+        CheckConstraint("token_count IS NULL OR token_count >= 0", name="ck_ai_chat_messages_token_count_non_negative"),
+        ForeignKeyConstraint(
+            ["session_id", "org_id", "user_id"],
+            ["ai_chat_sessions.id", "ai_chat_sessions.org_id", "ai_chat_sessions.user_id"],
+            ondelete="CASCADE",
+            name="fk_ai_chat_messages_session_org_user",
+        ),
+    )
 
     session_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("ai_chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True

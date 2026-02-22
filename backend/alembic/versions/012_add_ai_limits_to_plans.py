@@ -1,7 +1,7 @@
 """Add AI limits to plans.
 
-Revision ID: f1a2b3c4d5e6
-Revises: c2a4e8f1b7d9
+Revision ID: 012
+Revises: 011
 Create Date: 2026-02-22
 
 """
@@ -12,8 +12,8 @@ from alembic import op
 import sqlalchemy as sa
 
 
-revision: str = "f1a2b3c4d5e6"
-down_revision: Union[str, None] = "c2a4e8f1b7d9"
+revision: str = "012"
+down_revision: Union[str, None] = "011"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

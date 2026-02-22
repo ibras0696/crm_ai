@@ -29,7 +29,7 @@ async def test_ai_chat_executes_action_with_mocked_provider(client: AsyncClient,
     token = await _register_owner(client)
 
     from src.config import settings
-    from src.modules.ai import chat_controller as ai_chat_controller
+    from src.modules.ai.internal import chat_controller as ai_chat_controller
 
     old_token = settings.OPENAI_BEARER_TOKEN
     settings.OPENAI_BEARER_TOKEN = "test-token"

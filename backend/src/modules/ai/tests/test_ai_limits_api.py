@@ -1,4 +1,6 @@
 import uuid
+from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 from httpx import AsyncClient
@@ -7,6 +9,19 @@ from sqlalchemy import select
 
 def _headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.mark.asyncio
+async def test_resolve_plan_limits_prefers_db_overrides():
+    from src.common.enums import PlanTier
+    from src.modules.ai.limits import resolve_plan_limits
+
+    plan_db = SimpleNamespace(ai_tokens_per_day=1500, ai_rpm_per_user=19, ai_max_tokens_per_request=777)
+    limits = resolve_plan_limits(PlanTier.FREE, plan_db)
+
+    assert int(limits["daily_tokens"]) == 1500
+    assert int(limits["rpm_per_user"]) == 19
+    assert int(limits["max_tokens_per_request"]) == 777
 
 
 @pytest.mark.asyncio
@@ -137,3 +152,81 @@ async def test_ai_status_uses_active_subscription_plan_over_org_plan(client: Asy
     assert int(data["limits"]["daily_tokens"]) == 4321
     assert int(data["limits"]["rpm_per_user"]) == 23
     assert int(data["limits"]["max_tokens_per_request"]) == 1111
+
+
+@pytest.mark.asyncio
+async def test_check_ai_limits_rejects_projected_daily_overflow(client: AsyncClient):
+    email_owner = f"owner3-{uuid.uuid4().hex[:8]}@example.com"
+    reg = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email_owner,
+            "password": "StrongPass123!",
+            "first_name": "Owner",
+            "last_name": "User",
+            "org_name": f"AI Limits Org {uuid.uuid4().hex[:6]}",
+        },
+    )
+    assert reg.status_code == 201
+
+    from src.infrastructure.uow import UnitOfWork
+    from src.modules.ai.limits import check_ai_limits
+    from src.modules.ai.models import AIUsageLog
+    from src.modules.auth.models import User
+    from src.modules.billing.models import Plan
+    from src.modules.org.models import Membership
+
+    async with UnitOfWork() as uow:
+        user = (await uow.session.execute(select(User).where(User.email == email_owner))).scalars().first()
+        assert user is not None
+        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        assert membership is not None
+        org_id = membership.org_id
+
+        free_plan = (await uow.session.execute(select(Plan).where(Plan.name == "free"))).scalars().first()
+        if not free_plan:
+            free_plan = Plan(
+                name="free",
+                display_name="Free",
+                price_monthly=0,
+                price_yearly=0,
+                max_members=10,
+                max_tables=10,
+                max_records=10000,
+                max_storage_mb=500,
+                has_ai=True,
+                features={"ai": True},
+                is_active=True,
+                ai_tokens_per_day=0,
+                ai_rpm_per_user=0,
+                ai_max_tokens_per_request=0,
+            )
+            uow.session.add(free_plan)
+            await uow.session.flush()
+        free_plan.ai_tokens_per_day = 100
+        free_plan.ai_rpm_per_user = 1000
+
+        uow.session.add(
+            AIUsageLog(
+                org_id=org_id,
+                user_id=user.id,
+                model="test",
+                prompt_tokens=45,
+                completion_tokens=45,
+                total_tokens=90,
+                message_preview="seed",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        await uow.commit()
+
+    async with UnitOfWork() as uow:
+        ok, err = await check_ai_limits(
+            uow.session,
+            org_id=org_id,
+            user_id=user.id,
+            estimated_request_tokens=20,
+        )
+        assert ok is False
+        assert err is not None
+        assert err["code"] == "AI_DAILY_LIMIT"

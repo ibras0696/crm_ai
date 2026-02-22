@@ -1,7 +1,7 @@
 """add_ai_chat_history_tables
 
-Revision ID: f9b1c2d3e4f5
-Revises: e921d7a5c4b1
+Revision ID: 009
+Revises: 008
 Create Date: 2026-02-19 23:40:00.000000
 
 """
@@ -13,8 +13,8 @@ from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
-revision: str = "f9b1c2d3e4f5"
-down_revision: Union[str, None] = "e921d7a5c4b1"
+revision: str = "009"
+down_revision: Union[str, None] = "008"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

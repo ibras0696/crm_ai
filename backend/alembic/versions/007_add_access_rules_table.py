@@ -1,7 +1,7 @@
 """add_access_rules_table
 
-Revision ID: b31f4d2e9c10
-Revises: a7e9b1c2d3f4
+Revision ID: 007
+Revises: 006
 Create Date: 2026-02-19 14:45:00.000000
 
 """
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "b31f4d2e9c10"
-down_revision: Union[str, None] = "a7e9b1c2d3f4"
+revision: str = "007"
+down_revision: Union[str, None] = "006"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

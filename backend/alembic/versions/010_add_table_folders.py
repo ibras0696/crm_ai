@@ -1,7 +1,7 @@
 """add_table_folders
 
-Revision ID: d1e2f3a4b5c6
-Revises: f9b1c2d3e4f5
+Revision ID: 010
+Revises: 009
 Create Date: 2026-02-21 12:00:00.000000
 
 """
@@ -13,8 +13,8 @@ from sqlalchemy.dialects.postgresql import UUID
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'd1e2f3a4b5c6'
-down_revision: Union[str, None] = 'f9b1c2d3e4f5'
+revision: str = "010"
+down_revision: Union[str, None] = "009"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

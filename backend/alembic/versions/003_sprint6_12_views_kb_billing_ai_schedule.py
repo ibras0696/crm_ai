@@ -1,7 +1,7 @@
 """sprint6_12_views_kb_billing_ai_schedule
 
-Revision ID: 5f5e0f74f6b3
-Revises: 68eb724a81c4
+Revision ID: 003
+Revises: 002
 Create Date: 2026-02-18 11:24:21.212332
 
 """
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '5f5e0f74f6b3'
-down_revision: Union[str, None] = '68eb724a81c4'
+revision: str = "003"
+down_revision: Union[str, None] = "002"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

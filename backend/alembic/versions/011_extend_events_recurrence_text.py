@@ -1,7 +1,7 @@
 """extend_events_recurrence_text
 
-Revision ID: c2a4e8f1b7d9
-Revises: d1e2f3a4b5c6
+Revision ID: 011
+Revises: 010
 Create Date: 2026-02-22 00:00:00.000000
 
 """
@@ -13,8 +13,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = "c2a4e8f1b7d9"
-down_revision: Union[str, None] = "d1e2f3a4b5c6"
+revision: str = "011"
+down_revision: Union[str, None] = "010"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

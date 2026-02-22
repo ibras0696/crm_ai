@@ -1,7 +1,7 @@
 ﻿"""add_position_to_table_records
 
-Revision ID: a7e9b1c2d3f4
-Revises: dac9a1aa1a4b
+Revision ID: 006
+Revises: 005
 Create Date: 2026-02-19 11:35:00.000000
 
 """
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'a7e9b1c2d3f4'
-down_revision: Union[str, None] = 'dac9a1aa1a4b'
+revision: str = "006"
+down_revision: Union[str, None] = "005"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

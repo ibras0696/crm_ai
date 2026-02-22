@@ -1,260 +1,44 @@
-import re
+from __future__ import annotations
+
 import uuid
-from datetime import UTC, datetime
 
-from src.common.enums import AuditAction, InviteStatus, PlanTier, SubscriptionStatus, UserRole
-from src.common.exceptions import ConflictError, NotFoundError, UnauthorizedError, ValidationError
-from src.infrastructure.uow import UnitOfWork
-from src.modules.audit.repository import AuditRepository
-from src.modules.auth.models import RefreshToken, User
-from src.modules.auth.repository import RefreshTokenRepository, UserRepository
+from src.modules.auth.models import User
 from src.modules.auth.schemas import RegisterRequest, TokenResponse
-from src.modules.auth.security import (
-    create_access_token,
-    create_refresh_token,
-    hash_password,
-    hash_token,
-    refresh_token_expires_at,
-    verify_password,
-)
-from src.modules.org.models import Membership, Organization, Subscription
-from src.modules.org.repository import InviteRepository, MembershipRepository, OrganizationRepository, SubscriptionRepository
-
-
-def _slugify(name: str) -> str:
-    slug = re.sub(r"[^\w\s-]", "", name.lower().strip())
-    slug = re.sub(r"[\s_]+", "-", slug)
-    slug = re.sub(r"-+", "-", slug).strip("-")
-    return slug or "org"
+from src.modules.auth.services import AuthProfileService, AuthRegistrationService, AuthSessionService
+from src.modules.org.models import Organization
 
 
 class AuthService:
+    """Auth facade to keep stable public API while using split internal services."""
+
+    def __init__(
+        self,
+        *,
+        registration_service: AuthRegistrationService | None = None,
+        session_service: AuthSessionService | None = None,
+        profile_service: AuthProfileService | None = None,
+    ):
+        self._registration = registration_service or AuthRegistrationService()
+        self._session = session_service or AuthSessionService()
+        self._profile = profile_service or AuthProfileService()
+
     async def register(self, data: RegisterRequest, ip_address: str | None = None) -> tuple[User, Organization, TokenResponse]:
-        async with UnitOfWork() as uow:
-            user_repo = UserRepository(uow.session)
-            org_repo = OrganizationRepository(uow.session)
-            member_repo = MembershipRepository(uow.session)
-            token_repo = RefreshTokenRepository(uow.session)
-            sub_repo = SubscriptionRepository(uow.session)
-            audit_repo = AuditRepository(uow.session)
+        return await self._registration.register(data, ip_address=ip_address)
 
-            existing = await user_repo.get_by_email(data.email)
-            if existing:
-                raise ConflictError("User with this email already exists", field="email")
-
-            # Invite-based registration: join existing org and inherit invite role.
-            if getattr(data, "invite_token", None):
-                invite_repo = InviteRepository(uow.session)
-                invite = await invite_repo.get_by_token(data.invite_token)  # type: ignore[arg-type]
-                if not invite:
-                    raise NotFoundError("Invite")
-                if invite.status != InviteStatus.PENDING:
-                    raise ValidationError("Invite is not active")
-                if invite.expires_at and invite.expires_at < datetime.now(UTC):
-                    raise ValidationError("Invite expired")
-                if invite.email.lower() != str(data.email).lower():
-                    raise ValidationError("Invite email does not match registration email", field="email")
-
-                org = await org_repo.get_by_id(invite.org_id)
-                if not org:
-                    raise NotFoundError("Organization")
-
-                user = User(
-                    email=data.email,
-                    hashed_password=hash_password(data.password),
-                    first_name=data.first_name,
-                    last_name=data.last_name,
-                )
-                user = await user_repo.create(user)
-
-                membership = Membership(user_id=user.id, org_id=org.id, role=invite.role)
-                await member_repo.create(membership)
-                await invite_repo.update_status(invite.id, InviteStatus.ACCEPTED)
-
-                raw_refresh, refresh_hash = create_refresh_token()
-                rt = RefreshToken(
-                    user_id=user.id,
-                    token_hash=refresh_hash,
-                    expires_at=refresh_token_expires_at(),
-                    ip_address=ip_address,
-                )
-                await token_repo.create(rt)
-
-                access = create_access_token(user.id, org.id, invite.role.value)
-
-                await audit_repo.log(
-                    org_id=org.id,
-                    actor_id=user.id,
-                    action=AuditAction.INVITE_ACCEPTED,
-                    entity_type="invite",
-                    entity_id=str(invite.id),
-                    ip_address=ip_address,
-                )
-
-                await uow.commit()
-
-                from src.config import settings
-
-                token_resp = TokenResponse(
-                    access_token=access,
-                    refresh_token=raw_refresh,
-                    expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-                )
-                return user, org, token_resp
-
-            user = User(
-                email=data.email,
-                hashed_password=hash_password(data.password),
-                first_name=data.first_name,
-                last_name=data.last_name,
-            )
-            user = await user_repo.create(user)
-
-            base_slug = _slugify(data.org_name)
-            slug = base_slug
-            attempt = 0
-            while await org_repo.get_by_slug(slug):
-                attempt += 1
-                slug = f"{base_slug}-{attempt}"
-
-            org = Organization(name=data.org_name, slug=slug, plan=PlanTier.FREE)
-            org = await org_repo.create(org)
-
-            membership = Membership(user_id=user.id, org_id=org.id, role=UserRole.OWNER)
-            await member_repo.create(membership)
-
-            subscription = Subscription(
-                org_id=org.id,
-                plan=PlanTier.FREE,
-                status=SubscriptionStatus.ACTIVE,
-            )
-            await sub_repo.create(subscription)
-
-            raw_refresh, refresh_hash = create_refresh_token()
-            rt = RefreshToken(
-                user_id=user.id,
-                token_hash=refresh_hash,
-                expires_at=refresh_token_expires_at(),
-                ip_address=ip_address,
-            )
-            await token_repo.create(rt)
-
-            access = create_access_token(user.id, org.id, UserRole.OWNER.value)
-
-            await audit_repo.log(
-                org_id=org.id,
-                actor_id=user.id,
-                action=AuditAction.CREATE,
-                entity_type="organization",
-                entity_id=str(org.id),
-                meta={"org_name": org.name},
-                ip_address=ip_address,
-            )
-
-            await uow.commit()
-
-            from src.config import settings
-
-            token_resp = TokenResponse(
-                access_token=access,
-                refresh_token=raw_refresh,
-                expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            )
-            return user, org, token_resp
-
-    async def login(self, email: str, password: str, ip_address: str | None = None, user_agent: str | None = None) -> tuple[User, TokenResponse]:
-        async with UnitOfWork() as uow:
-            user_repo = UserRepository(uow.session)
-            token_repo = RefreshTokenRepository(uow.session)
-            member_repo = MembershipRepository(uow.session)
-            audit_repo = AuditRepository(uow.session)
-
-            user = await user_repo.get_by_email(email)
-            if not user or not verify_password(password, user.hashed_password):
-                raise UnauthorizedError("Invalid email or password")
-
-            if not user.is_active:
-                raise UnauthorizedError("Account is deactivated")
-
-            memberships = await member_repo.get_user_memberships(user.id)
-            org_id = memberships[0].org_id if memberships else None
-            role = memberships[0].role.value if memberships else None
-
-            raw_refresh, refresh_hash = create_refresh_token()
-            rt = RefreshToken(
-                user_id=user.id,
-                token_hash=refresh_hash,
-                expires_at=refresh_token_expires_at(),
-                ip_address=ip_address,
-                user_agent=user_agent,
-            )
-            await token_repo.create(rt)
-
-            access = create_access_token(user.id, org_id, role)
-
-            if org_id:
-                await audit_repo.log(
-                    org_id=org_id,
-                    actor_id=user.id,
-                    action=AuditAction.LOGIN,
-                    entity_type="user",
-                    entity_id=str(user.id),
-                    ip_address=ip_address,
-                )
-
-            await uow.commit()
-
-            from src.config import settings
-
-            token_resp = TokenResponse(
-                access_token=access,
-                refresh_token=raw_refresh,
-                expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            )
-            return user, token_resp
+    async def login(
+        self,
+        email: str,
+        password: str,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
+    ) -> tuple[User, TokenResponse]:
+        return await self._session.login(email, password, ip_address=ip_address, user_agent=user_agent)
 
     async def refresh(self, raw_refresh: str, ip_address: str | None = None) -> TokenResponse:
-        async with UnitOfWork() as uow:
-            token_repo = RefreshTokenRepository(uow.session)
-            member_repo = MembershipRepository(uow.session)
-
-            token_hash_val = hash_token(raw_refresh)
-            rt = await token_repo.get_by_hash(token_hash_val)
-            if not rt:
-                raise UnauthorizedError("Invalid or expired refresh token")
-
-            await token_repo.revoke(rt.id)
-
-            memberships = await member_repo.get_user_memberships(rt.user_id)
-            org_id = memberships[0].org_id if memberships else None
-            role = memberships[0].role.value if memberships else None
-
-            new_raw, new_hash = create_refresh_token()
-            new_rt = RefreshToken(
-                user_id=rt.user_id,
-                token_hash=new_hash,
-                expires_at=refresh_token_expires_at(),
-                ip_address=ip_address,
-            )
-            await token_repo.create(new_rt)
-
-            access = create_access_token(rt.user_id, org_id, role)
-
-            await uow.commit()
-
-            from src.config import settings
-
-            return TokenResponse(
-                access_token=access,
-                refresh_token=new_raw,
-                expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-            )
+        return await self._session.refresh(raw_refresh, ip_address=ip_address)
 
     async def logout(self, raw_refresh: str) -> None:
-        async with UnitOfWork() as uow:
-            token_repo = RefreshTokenRepository(uow.session)
-            token_hash_val = hash_token(raw_refresh)
-            rt = await token_repo.get_by_hash(token_hash_val)
-            if rt:
-                await token_repo.revoke(rt.id)
-            await uow.commit()
+        await self._session.logout(raw_refresh)
+
+    async def get_user(self, user_id: uuid.UUID) -> User | None:
+        return await self._profile.get_user(user_id)

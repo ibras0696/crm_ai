@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from sqlalchemy import func, select
 
@@ -9,6 +11,8 @@ from src.common.enums import PlanTier, SubscriptionStatus
 from src.modules.ai.models import AIUsageLog
 from src.modules.billing.models import Plan
 from src.modules.org.models import Organization, Subscription
+
+logger = logging.getLogger(__name__)
 
 
 def _utc_day_start(dt: datetime) -> datetime:
@@ -22,6 +26,73 @@ def _utc_day_start(dt: datetime) -> datetime:
     """
     dt = dt.astimezone(timezone.utc)
     return datetime(dt.year, dt.month, dt.day, tzinfo=timezone.utc)
+
+
+def _as_plan_tier(value: Any) -> PlanTier | None:
+    """Безопасно преобразовать произвольное значение в PlanTier.
+
+    Args:
+        value: Значение enum/строки/объекта с `.value`.
+
+    Returns:
+        PlanTier или None, если преобразование невозможно.
+    """
+    if value is None:
+        return None
+    if isinstance(value, PlanTier):
+        return value
+    raw = value.value if hasattr(value, "value") else value
+    try:
+        return PlanTier(str(raw))
+    except Exception:
+        return None
+
+
+def resolve_plan_limits(plan: PlanTier, plan_db: Plan | None = None) -> dict[str, int]:
+    """Рассчитать итоговые лимиты для плана (settings -> optional DB override).
+
+    Источник правды:
+    1. Таблица `plans` (если есть активная запись и значения > 0).
+    2. Иначе fallback на `settings`.
+
+    Значение `0` трактуется как "без ограничения" (unlimited).
+
+    Args:
+        plan: Эффективный тариф организации.
+        plan_db: Запись плана из БД (опционально).
+
+    Returns:
+        Словарь с лимитами:
+        - daily_tokens
+        - rpm_per_user
+        - max_tokens_per_request
+    """
+    daily_limit_by_plan = {
+        PlanTier.FREE: int(getattr(settings, "AI_MAX_TOKENS_PER_DAY_FREE", 0) or 0),
+        PlanTier.TEAM: int(getattr(settings, "AI_MAX_TOKENS_PER_DAY_TEAM", 0) or 0),
+        PlanTier.BUSINESS: int(getattr(settings, "AI_MAX_TOKENS_PER_DAY_BUSINESS", 0) or 0),
+    }
+    rpm_limit_by_plan = {
+        PlanTier.FREE: int(getattr(settings, "AI_RPM_PER_USER_FREE", 0) or 0),
+        PlanTier.TEAM: int(getattr(settings, "AI_RPM_PER_USER_TEAM", 0) or 0),
+        PlanTier.BUSINESS: int(getattr(settings, "AI_RPM_PER_USER_BUSINESS", 0) or 0),
+    }
+
+    limits = {
+        "daily_tokens": int(daily_limit_by_plan.get(plan) or int(settings.AI_MAX_TOKENS_PER_DAY_PER_ORG or 0)),
+        "rpm_per_user": int(rpm_limit_by_plan.get(plan) or int(settings.AI_RPM_PER_USER or 0)),
+        "max_tokens_per_request": int(settings.AI_MAX_TOKENS_PER_REQUEST or 0),
+    }
+
+    if plan_db:
+        if int(getattr(plan_db, "ai_tokens_per_day", 0) or 0) > 0:
+            limits["daily_tokens"] = int(plan_db.ai_tokens_per_day)
+        if int(getattr(plan_db, "ai_rpm_per_user", 0) or 0) > 0:
+            limits["rpm_per_user"] = int(plan_db.ai_rpm_per_user)
+        if int(getattr(plan_db, "ai_max_tokens_per_request", 0) or 0) > 0:
+            limits["max_tokens_per_request"] = int(plan_db.ai_max_tokens_per_request)
+
+    return limits
 
 
 async def resolve_org_plan(session, *, org_id) -> PlanTier:
@@ -45,27 +116,23 @@ async def resolve_org_plan(session, *, org_id) -> PlanTier:
                 select(Subscription.plan).where(
                     Subscription.org_id == org_id,
                     Subscription.status == SubscriptionStatus.ACTIVE,
-                )
+                ).order_by(Subscription.updated_at.desc())
             )
-        ).scalar_one_or_none()
-        if sub_plan is not None:
-            if isinstance(sub_plan, PlanTier):
-                return sub_plan
-            sub_val = sub_plan.value if hasattr(sub_plan, "value") else sub_plan
-            return PlanTier(str(sub_val))
-    except Exception:
-        pass
+        ).scalars().first()
+        tier = _as_plan_tier(sub_plan)
+        if tier is not None:
+            return tier
+    except Exception as exc:
+        logger.exception("ai_resolve_plan_subscription_failed", exc_info=exc)
 
     # 2) Org.plan (legacy).
     try:
         plan_row = (await session.execute(select(Organization.plan).where(Organization.id == org_id))).scalar_one_or_none()
-        if plan_row is not None:
-            if isinstance(plan_row, PlanTier):
-                return plan_row
-            plan_value = plan_row.value if hasattr(plan_row, "value") else plan_row
-            return PlanTier(str(plan_value))
-    except Exception:
-        pass
+        tier = _as_plan_tier(plan_row)
+        if tier is not None:
+            return tier
+    except Exception as exc:
+        logger.exception("ai_resolve_plan_org_failed", exc_info=exc)
 
     return PlanTier.FREE
 
@@ -91,36 +158,25 @@ async def check_ai_limits(session, *, org_id, user_id, estimated_request_tokens:
     """
     plan: PlanTier = await resolve_org_plan(session, org_id=org_id)
 
-    # Limits source of truth: plans table (fallback to settings).
-    daily_limit_by_plan = {
-        PlanTier.FREE: int(getattr(settings, "AI_MAX_TOKENS_PER_DAY_FREE", 0) or 0),
-        PlanTier.TEAM: int(getattr(settings, "AI_MAX_TOKENS_PER_DAY_TEAM", 0) or 0),
-        PlanTier.BUSINESS: int(getattr(settings, "AI_MAX_TOKENS_PER_DAY_BUSINESS", 0) or 0),
-    }
-    rpm_limit_by_plan = {
-        PlanTier.FREE: int(getattr(settings, "AI_RPM_PER_USER_FREE", 0) or 0),
-        PlanTier.TEAM: int(getattr(settings, "AI_RPM_PER_USER_TEAM", 0) or 0),
-        PlanTier.BUSINESS: int(getattr(settings, "AI_RPM_PER_USER_BUSINESS", 0) or 0),
-    }
-    daily_limit = daily_limit_by_plan.get(plan) or int(settings.AI_MAX_TOKENS_PER_DAY_PER_ORG or 0)
-    rpm_limit = rpm_limit_by_plan.get(plan) or int(settings.AI_RPM_PER_USER or 0)
-
+    plan_db = None
     try:
         plan_db = (
             await session.execute(select(Plan).where(Plan.name == plan.value, Plan.is_active.is_(True)))
         ).scalars().first()
-        if plan_db:
-            if int(getattr(plan_db, "ai_tokens_per_day", 0) or 0) > 0:
-                daily_limit = int(plan_db.ai_tokens_per_day)
-            if int(getattr(plan_db, "ai_rpm_per_user", 0) or 0) > 0:
-                rpm_limit = int(plan_db.ai_rpm_per_user)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.exception("ai_limits_plan_db_lookup_failed", exc_info=exc)
+
+    limits = resolve_plan_limits(plan, plan_db)
+    daily_limit = int(limits["daily_tokens"])
+    rpm_limit = int(limits["rpm_per_user"])
 
     # RPM per user
     now = datetime.now(timezone.utc)
     window_start = now - timedelta(seconds=60)
 
+    # Важно: текущая реализация лимитов — soft-limit.
+    # При высокой параллельности возможны небольшие "проскоки", т.к. check и запись
+    # usage выполняются в разных транзакциях.
     if rpm_limit > 0:
         reqs_last_min = (
             await session.execute(

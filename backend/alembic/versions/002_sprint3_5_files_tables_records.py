@@ -1,6 +1,6 @@
 """sprint3_5_files_tables_records
 
-Revision ID: 68eb724a81c4
+Revision ID: 002
 Revises: 001
 Create Date: 2026-02-18 11:09:24.102293
 
@@ -12,8 +12,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision: str = '68eb724a81c4'
-down_revision: Union[str, None] = '001'
+revision: str = "002"
+down_revision: Union[str, None] = "001"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

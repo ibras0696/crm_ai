@@ -15,6 +15,12 @@ AI_TOKENS_TOTAL = Counter(
     ["model"],
 )
 
+AI_LIMIT_REJECTIONS_TOTAL = Counter(
+    "crm_ai_limit_rejections_total",
+    "AI requests rejected by limits",
+    ["code"],
+)
+
 EXPORTS_TOTAL = Counter(
     "crm_table_exports_total",
     "Table export operations",
@@ -26,4 +32,3 @@ IMPORTS_TOTAL = Counter(
     "Table import operations",
     ["format"],
 )
-

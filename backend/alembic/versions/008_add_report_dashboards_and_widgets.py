@@ -1,7 +1,7 @@
 """add_report_dashboards_and_widgets
 
-Revision ID: e921d7a5c4b1
-Revises: b31f4d2e9c10
+Revision ID: 008
+Revises: 007
 Create Date: 2026-02-19 16:20:00.000000
 
 """
@@ -13,8 +13,8 @@ from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
-revision: str = "e921d7a5c4b1"
-down_revision: Union[str, None] = "b31f4d2e9c10"
+revision: str = "008"
+down_revision: Union[str, None] = "007"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

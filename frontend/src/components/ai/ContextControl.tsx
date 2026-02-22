@@ -25,6 +25,7 @@ function TokenSummary({ estimate }: { estimate: AIContextEstimate | null }) {
   const kb = estimate?.sources?.kb?.estimated_tokens ?? 0
   const schema = estimate?.sources?.table_schema?.estimated_tokens ?? 0
   const records = estimate?.sources?.table_records?.estimated_tokens ?? 0
+  const schedule = estimate?.sources?.schedule?.estimated_tokens ?? 0
   const overhead = estimate?.model_overhead_tokens ?? 0
   const usedCtx = estimate?.used_context_tokens ?? 0
   const maxCtx = estimate?.max_context_tokens ?? 0
@@ -35,7 +36,8 @@ function TokenSummary({ estimate }: { estimate: AIContextEstimate | null }) {
       <span>База знаний: {kb}</span>
       <span>Таблицы: {schema}</span>
       <span>Примеры: {records}</span>
-      <span className="text-amber-400">overhead: {overhead}</span>
+      {schedule > 0 && <span>Расписание: {schedule}</span>}
+      <span className="text-amber-400">Системные токены: {overhead}</span>
     </div>
   )
 }
@@ -167,8 +169,8 @@ export default function ContextControl({
           </div>
 
           <div className="px-4 pb-4">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-2">
-              <label className="flex items-center gap-2 text-sm cursor-pointer px-3 py-2 rounded-lg bg-secondary/40">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              <label className="flex items-center gap-2 text-sm cursor-pointer px-3 py-2 rounded-lg bg-secondary/40 col-span-2 md:col-span-1">
                 <input type="checkbox" checked={includeContext} onChange={(e) => setIncludeContext(e.target.checked)} className="rounded" />
                 Контекст
               </label>
@@ -201,6 +203,16 @@ export default function ContextControl({
                   disabled={!includeContext}
                 />
                 Примеры
+              </label>
+              <label className="flex items-center gap-2 text-sm cursor-pointer px-3 py-2 rounded-lg bg-secondary/20">
+                <input
+                  type="checkbox"
+                  checked={!!contextOptions.include_schedule}
+                  onChange={(e) => setContextOptions((p) => ({ ...p, include_schedule: e.target.checked }))}
+                  className="rounded"
+                  disabled={!includeContext}
+                />
+                Расписание
               </label>
             </div>
           </div>

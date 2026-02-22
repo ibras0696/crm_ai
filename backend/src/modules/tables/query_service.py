@@ -12,7 +12,6 @@ from io import BytesIO
 
 from openpyxl import Workbook
 
-from src.common.http_headers import content_disposition_attachment
 from src.infrastructure.metrics_custom import EXPORTS_TOTAL, IMPORTS_TOTAL
 from src.modules.tables.records import Record, RecordRepository
 from src.modules.tables.repository import TableRepository
@@ -207,4 +206,3 @@ class TableQueryService:
             pass
 
         return {"created": created}
-

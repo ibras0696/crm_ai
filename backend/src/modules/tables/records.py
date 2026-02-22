@@ -1,8 +1,7 @@
 """Record model and repository for JSONB-based records storage."""
 import uuid
-from datetime import datetime
 
-from sqlalchemy import ForeignKey, Integer, String, func, select, text
+from sqlalchemy import ForeignKey, Integer, func, select, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Mapped, mapped_column

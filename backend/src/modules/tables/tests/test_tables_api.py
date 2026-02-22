@@ -185,7 +185,6 @@ async def test_folders_views_filter_and_move(client: AsyncClient):
     r1 = await client.post(f"/api/v1/tables/{table_id}/records/", json={"data": {col_id: "New"}}, headers=_headers(token))
     r2 = await client.post(f"/api/v1/tables/{table_id}/records/", json={"data": {col_id: "Won"}}, headers=_headers(token))
     assert r1.status_code == 200 and r2.status_code == 200
-    rec1_id = r1.json()["data"]["id"]
     rec2_id = r2.json()["data"]["id"]
 
     mv = await client.post(

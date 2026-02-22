@@ -1,14 +1,14 @@
+"""HTTP routes for folders, tables and columns."""
+
 import uuid
-from datetime import datetime
 
 from fastapi import APIRouter, Depends
 
-from src.common.schemas import ApiResponse
 from src.common.enums import UserRole
-from src.modules.auth.dependencies import CurrentUser, require_roles
+from src.common.schemas import ApiResponse
+from src.infrastructure.uow import UnitOfWork
 from src.modules.access.dependencies import require_access
-from src.modules.tables.models import Table, Column, TableFolder, FieldType
-from src.modules.tables.repository import TableRepository, ColumnRepository, TableFolderRepository
+from src.modules.auth.dependencies import CurrentUser, require_roles
 from src.modules.tables.schemas import (
     ColumnOut,
     CreateColumnRequest,
@@ -20,12 +20,19 @@ from src.modules.tables.schemas import (
     UpdateFolderRequest,
     UpdateTableRequest,
 )
-from src.infrastructure.uow import UnitOfWork
+from src.modules.tables.service import TableServiceError, TablesService
+
 
 router = APIRouter(prefix="/tables", tags=["tables"])
 
 
-# --- Folder CRUD ---
+def _error_response(error: TableServiceError) -> ApiResponse[None]:
+    return ApiResponse(
+        ok=False,
+        data=None,
+        error={"code": error.code, "message": error.message},
+    )
+
 
 @router.post("/folders/", response_model=ApiResponse[FolderOut])
 async def create_folder(
@@ -34,15 +41,12 @@ async def create_folder(
     _: None = Depends(require_access(resource_type="table", permission="can_write")),
 ):
     async with UnitOfWork() as uow:
-        repo = TableFolderRepository(uow.session)
-        max_pos = await repo.get_max_position(current_user.org_id)
-        folder = TableFolder(
+        service = TablesService(uow.session)
+        folder = await service.create_folder(
             org_id=current_user.org_id,
-            created_by=current_user.user_id,
-            name=body.name,
-            position=max_pos + 1,
+            user_id=current_user.user_id,
+            body=body,
         )
-        folder = await repo.create(folder)
         await uow.commit()
         item = FolderOut.model_validate(folder)
     return ApiResponse(data=item)
@@ -50,13 +54,15 @@ async def create_folder(
 
 @router.get("/folders/", response_model=ApiResponse[list[FolderOut]])
 async def list_folders(
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY),
+    ),
     _: None = Depends(require_access(resource_type="table", permission="can_read")),
 ):
     async with UnitOfWork() as uow:
-        repo = TableFolderRepository(uow.session)
-        folders = await repo.list_by_org(current_user.org_id)
-        items = [FolderOut.model_validate(f) for f in folders]
+        service = TablesService(uow.session)
+        folders = await service.list_folders(org_id=current_user.org_id)
+        items = [FolderOut.model_validate(folder) for folder in folders]
     return ApiResponse(data=items)
 
 
@@ -68,13 +74,11 @@ async def update_folder(
     _: None = Depends(require_access(resource_type="table", permission="can_write")),
 ):
     async with UnitOfWork() as uow:
-        repo = TableFolderRepository(uow.session)
-        folder = await repo.get_by_id(folder_id)
-        if not folder or folder.org_id != current_user.org_id:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Папка не найдена"})
-        for field, value in body.model_dump(exclude_unset=True).items():
-            setattr(folder, field, value)
-        await repo.update(folder)
+        service = TablesService(uow.session)
+        try:
+            folder = await service.update_folder(folder_id=folder_id, org_id=current_user.org_id, body=body)
+        except TableServiceError as error:
+            return _error_response(error)
         await uow.commit()
         item = FolderOut.model_validate(folder)
     return ApiResponse(data=item)
@@ -87,22 +91,14 @@ async def delete_folder(
     _: None = Depends(require_access(resource_type="table", permission="can_delete")),
 ):
     async with UnitOfWork() as uow:
-        folder_repo = TableFolderRepository(uow.session)
-        folder = await folder_repo.get_by_id(folder_id)
-        if not folder or folder.org_id != current_user.org_id:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Папка не найдена"})
-        # Move tables in this folder to root (SET NULL via cascade handles it, but we do explicit reset)
-        table_repo = TableRepository(uow.session)
-        tables = await table_repo.list_by_org(current_user.org_id)
-        for t in tables:
-            if t.folder_id == folder_id:
-                t.folder_id = None
-        await folder_repo.delete(folder)
+        service = TablesService(uow.session)
+        try:
+            await service.delete_folder(folder_id=folder_id, org_id=current_user.org_id)
+        except TableServiceError as error:
+            return _error_response(error)
         await uow.commit()
     return ApiResponse(data=None)
 
-
-# --- Table CRUD ---
 
 @router.post("/", response_model=ApiResponse[TableOut])
 async def create_table(
@@ -111,64 +107,49 @@ async def create_table(
     _: None = Depends(require_access(resource_type="table", permission="can_write")),
 ):
     async with UnitOfWork() as uow:
-        # Validate folder ownership if provided
-        if body.folder_id:
-            folder_repo = TableFolderRepository(uow.session)
-            folder = await folder_repo.get_by_id(body.folder_id)
-            if not folder or folder.org_id != current_user.org_id:
-                return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Папка не найдена"})
-
-        repo = TableRepository(uow.session)
-        table = Table(
-            org_id=current_user.org_id,
-            created_by=current_user.user_id,
-            folder_id=body.folder_id,
-            name=body.name,
-            description=body.description,
-            icon=body.icon,
-            color=body.color,
-        )
-        table = await repo.create(table)
-        # Auto-create a primary "Название" column
-        col_repo = ColumnRepository(uow.session)
-        primary_col = Column(
-            table_id=table.id,
-            name="Название",
-            field_type=FieldType.TEXT,
-            position=0,
-            is_required=True,
-            is_primary=True,
-        )
-        await col_repo.create(primary_col)
+        service = TablesService(uow.session)
+        try:
+            table = await service.create_table(
+                org_id=current_user.org_id,
+                user_id=current_user.user_id,
+                body=body,
+            )
+        except TableServiceError as error:
+            return _error_response(error)
         await uow.commit()
-        table = await repo.get_by_id(table.id)
+        table = await service.get_table(table_id=table.id, org_id=current_user.org_id, with_columns=True)
         item = TableOut.model_validate(table)
     return ApiResponse(data=item)
 
 
 @router.get("/", response_model=ApiResponse[list[TableOut]])
 async def list_tables(
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY),
+    ),
     _: None = Depends(require_access(resource_type="table", permission="can_read")),
 ):
     async with UnitOfWork() as uow:
-        repo = TableRepository(uow.session)
-        tables = await repo.list_by_org(current_user.org_id)
-        items = [TableOut.model_validate(t) for t in tables]
+        service = TablesService(uow.session)
+        tables = await service.list_tables(org_id=current_user.org_id)
+        items = [TableOut.model_validate(table) for table in tables]
     return ApiResponse(data=items)
 
 
 @router.get("/{table_id}", response_model=ApiResponse[TableOut])
 async def get_table(
     table_id: uuid.UUID,
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY),
+    ),
     _: None = Depends(require_access(resource_type="table", permission="can_read", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:
-        repo = TableRepository(uow.session)
-        table = await repo.get_by_id(table_id)
-        if not table or table.org_id != current_user.org_id:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Таблица не найдена"})
+        service = TablesService(uow.session)
+        try:
+            table = await service.get_table(table_id=table_id, org_id=current_user.org_id, with_columns=True)
+        except TableServiceError as error:
+            return _error_response(error)
         item = TableOut.model_validate(table)
     return ApiResponse(data=item)
 
@@ -181,25 +162,16 @@ async def update_table(
     _: None = Depends(require_access(resource_type="table", permission="can_write", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:
-        repo = TableRepository(uow.session)
-        table = await repo.get_by_id(table_id)
-        if not table or table.org_id != current_user.org_id:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Таблица не найдена"})
-
-        updates = body.model_dump(exclude_unset=True)
-
-        # Validate folder if moving to one
-        if "folder_id" in updates and updates["folder_id"] is not None:
-            folder_repo = TableFolderRepository(uow.session)
-            folder = await folder_repo.get_by_id(updates["folder_id"])
-            if not folder or folder.org_id != current_user.org_id:
-                return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Папка не найдена"})
-
-        for field, value in updates.items():
-            setattr(table, field, value)
-        await repo.update(table)
+        service = TablesService(uow.session)
+        try:
+            table = await service.update_table(
+                table_id=table_id,
+                org_id=current_user.org_id,
+                body=body,
+            )
+        except TableServiceError as error:
+            return _error_response(error)
         await uow.commit()
-        table = await repo.get_by_id(table_id)
         item = TableOut.model_validate(table)
     return ApiResponse(data=item)
 
@@ -211,16 +183,14 @@ async def delete_table(
     _: None = Depends(require_access(resource_type="table", permission="can_delete", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:
-        repo = TableRepository(uow.session)
-        table = await repo.get_by_id(table_id)
-        if not table or table.org_id != current_user.org_id:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Таблица не найдена"})
-        await repo.delete(table)
+        service = TablesService(uow.session)
+        try:
+            await service.delete_table(table_id=table_id, org_id=current_user.org_id)
+        except TableServiceError as error:
+            return _error_response(error)
         await uow.commit()
     return ApiResponse(data=None)
 
-
-# --- Column CRUD ---
 
 @router.post("/{table_id}/columns", response_model=ApiResponse[ColumnOut])
 async def create_column(
@@ -229,28 +199,16 @@ async def create_column(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
     _: None = Depends(require_access(resource_type="table", permission="can_write", resource_id_param="table_id")),
 ):
-    if body.field_type not in FieldType.ALL:
-        return ApiResponse(ok=False, data=None, error={"code": "INVALID_FIELD_TYPE", "message": f"Неверный тип поля: {body.field_type}"})
-
     async with UnitOfWork() as uow:
-        table_repo = TableRepository(uow.session)
-        table = await table_repo.get_by_id(table_id, with_columns=False)
-        if not table or table.org_id != current_user.org_id:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Таблица не найдена"})
-
-        col_repo = ColumnRepository(uow.session)
-        max_pos = await col_repo.get_max_position(table_id)
-        column = Column(
-            table_id=table_id,
-            name=body.name,
-            field_type=body.field_type,
-            position=max_pos + 1,
-            is_required=body.is_required,
-            is_primary=body.is_primary,
-            config=body.config,
-            default_value=body.default_value,
-        )
-        column = await col_repo.create(column)
+        service = TablesService(uow.session)
+        try:
+            column = await service.create_column(
+                table_id=table_id,
+                org_id=current_user.org_id,
+                body=body,
+            )
+        except TableServiceError as error:
+            return _error_response(error)
         await uow.commit()
         item = ColumnOut.model_validate(column)
     return ApiResponse(data=item)
@@ -265,21 +223,16 @@ async def update_column(
     _: None = Depends(require_access(resource_type="table", permission="can_write", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:
-        col_repo = ColumnRepository(uow.session)
-        column = await col_repo.get_by_id(column_id)
-        if not column or column.table_id != table_id:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Колонка не найдена"})
-        # Verify org ownership
-        table_repo = TableRepository(uow.session)
-        table = await table_repo.get_by_id(table_id, with_columns=False)
-        if not table or table.org_id != current_user.org_id:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Таблица не найдена"})
-
-        for field, value in body.model_dump(exclude_unset=True).items():
-            if field == "field_type" and value not in FieldType.ALL:
-                return ApiResponse(ok=False, data=None, error={"code": "INVALID_FIELD_TYPE", "message": f"Неверный тип поля: {value}"})
-            setattr(column, field, value)
-        await col_repo.update(column)
+        service = TablesService(uow.session)
+        try:
+            column = await service.update_column(
+                table_id=table_id,
+                column_id=column_id,
+                org_id=current_user.org_id,
+                body=body,
+            )
+        except TableServiceError as error:
+            return _error_response(error)
         await uow.commit()
         item = ColumnOut.model_validate(column)
     return ApiResponse(data=item)
@@ -293,18 +246,10 @@ async def delete_column(
     _: None = Depends(require_access(resource_type="table", permission="can_delete", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:
-        col_repo = ColumnRepository(uow.session)
-        column = await col_repo.get_by_id(column_id)
-        if not column or column.table_id != table_id:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Колонка не найдена"})
-        table_repo = TableRepository(uow.session)
-        table = await table_repo.get_by_id(table_id, with_columns=False)
-        if not table or table.org_id != current_user.org_id:
-            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Таблица не найдена"})
-
-        if column.is_primary:
-            return ApiResponse(ok=False, data=None, error={"code": "CANNOT_DELETE_PRIMARY", "message": "Нельзя удалить первичную колонку"})
-
-        await col_repo.delete(column)
+        service = TablesService(uow.session)
+        try:
+            await service.delete_column(table_id=table_id, column_id=column_id, org_id=current_user.org_id)
+        except TableServiceError as error:
+            return _error_response(error)
         await uow.commit()
     return ApiResponse(data=None)

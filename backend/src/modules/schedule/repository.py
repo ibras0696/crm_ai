@@ -1,7 +1,7 @@
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.modules.schedule.models import Event
@@ -50,6 +50,33 @@ class ScheduleRepository:
         stmt = select(Event).where(Event.id == event_id, Event.org_id == org_id).limit(1)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def count_events_in_day(self, *, org_id: uuid.UUID, day_start: datetime, day_end: datetime, exclude_event_id: uuid.UUID | None = None) -> int:
+        stmt = select(func.count(Event.id)).where(
+            Event.org_id == org_id,
+            Event.start_at >= day_start,
+            Event.start_at < day_end,
+        )
+        if exclude_event_id is not None:
+            stmt = stmt.where(Event.id != exclude_event_id)
+        result = await self.session.execute(stmt)
+        return int(result.scalar() or 0)
+
+    async def list_due_for_reminders(self, *, now: datetime, horizon_minutes: int = 1440) -> list[Event]:
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=UTC)
+        end = now + timedelta(minutes=horizon_minutes)
+        stmt = (
+            select(Event)
+            .where(
+                Event.start_at >= now - timedelta(days=1),
+                Event.start_at <= end,
+                Event.is_done.is_(False),
+            )
+            .order_by(Event.start_at)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
 
     async def delete(self, event: Event) -> None:
         """Delete event row."""

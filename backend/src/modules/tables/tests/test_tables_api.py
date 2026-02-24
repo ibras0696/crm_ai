@@ -2,6 +2,10 @@ import uuid
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+
+from src.infrastructure.uow import UnitOfWork
+from src.modules.billing.models import Plan
 
 
 def _headers(token: str) -> dict:
@@ -239,6 +243,43 @@ async def test_folders_views_filter_and_move(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_folder_depth_limit(client: AsyncClient):
+    token = await _register_owner(client)
+
+    root = await client.post("/api/v1/tables/folders/", json={"name": "L0"}, headers=_headers(token))
+    assert root.status_code == 200
+    assert root.json()["ok"] is True
+    root_id = root.json()["data"]["id"]
+
+    level1 = await client.post(
+        "/api/v1/tables/folders/",
+        json={"name": "L1", "parent_id": root_id},
+        headers=_headers(token),
+    )
+    assert level1.status_code == 200
+    assert level1.json()["ok"] is True
+    level1_id = level1.json()["data"]["id"]
+
+    level2 = await client.post(
+        "/api/v1/tables/folders/",
+        json={"name": "L2", "parent_id": level1_id},
+        headers=_headers(token),
+    )
+    assert level2.status_code == 200
+    assert level2.json()["ok"] is True
+    level2_id = level2.json()["data"]["id"]
+
+    too_deep = await client.post(
+        "/api/v1/tables/folders/",
+        json={"name": "L3", "parent_id": level2_id},
+        headers=_headers(token),
+    )
+    assert too_deep.status_code == 200
+    assert too_deep.json()["ok"] is False
+    assert too_deep.json()["error"]["code"] == "MAX_DEPTH_EXCEEDED"
+
+
+@pytest.mark.asyncio
 async def test_reports_summary(client: AsyncClient):
     token = await _register_owner(client)
     resp = await client.get("/api/v1/reports/summary", headers=_headers(token))
@@ -248,3 +289,93 @@ async def test_reports_summary(client: AsyncClient):
     assert "tables_count" in data["data"]
     assert "records_count" in data["data"]
     assert "columns_count" in data["data"]
+
+
+@pytest.mark.asyncio
+async def test_table_and_record_limits_from_plan(client: AsyncClient):
+    token = await _register_owner(client)
+
+    # Tighten free limits in test DB.
+    async with UnitOfWork() as uow:
+        free_plan = (await uow.session.execute(select(Plan).where(Plan.name == "free"))).scalar_one_or_none()
+        if free_plan is None:
+            from src.modules.billing.seed import upsert_default_plans
+
+            await upsert_default_plans(uow.session)
+            free_plan = (await uow.session.execute(select(Plan).where(Plan.name == "free"))).scalar_one()
+        free_plan.max_tables = 1
+        free_plan.max_records = 2
+        await uow.commit()
+
+    t1 = await client.post("/api/v1/tables/", json={"name": "T1"}, headers=_headers(token))
+    assert t1.status_code == 200
+    assert t1.json()["ok"] is True
+    table_id = t1.json()["data"]["id"]
+
+    # second table should be blocked by tariff limit.
+    t2 = await client.post("/api/v1/tables/", json={"name": "T2"}, headers=_headers(token))
+    assert t2.status_code == 200
+    assert t2.json()["ok"] is False
+    assert t2.json()["error"]["code"] == "TABLE_LIMIT_REACHED"
+
+    r1 = await client.post(f"/api/v1/tables/{table_id}/records/", json={"data": {"a": "1"}}, headers=_headers(token))
+    r2 = await client.post(f"/api/v1/tables/{table_id}/records/", json={"data": {"a": "2"}}, headers=_headers(token))
+    assert r1.status_code == 200 and r1.json()["ok"] is True
+    assert r2.status_code == 200 and r2.json()["ok"] is True
+
+    r3 = await client.post(f"/api/v1/tables/{table_id}/records/", json={"data": {"a": "3"}}, headers=_headers(token))
+    assert r3.status_code == 200
+    assert r3.json()["ok"] is False
+    assert r3.json()["error"]["code"] == "RECORD_LIMIT_REACHED"
+
+
+@pytest.mark.asyncio
+async def test_table_and_folder_name_validation(client: AsyncClient):
+    token = await _register_owner(client)
+
+    too_long = "a" * 121
+    bad_table = await client.post("/api/v1/tables/", json={"name": too_long}, headers=_headers(token))
+    assert bad_table.status_code == 422
+
+    bad_folder = await client.post("/api/v1/tables/folders/", json={"name": too_long}, headers=_headers(token))
+    assert bad_folder.status_code == 422
+
+    blank_table = await client.post("/api/v1/tables/", json={"name": "   "}, headers=_headers(token))
+    assert blank_table.status_code == 422
+
+    blank_folder = await client.post("/api/v1/tables/folders/", json={"name": "   "}, headers=_headers(token))
+    assert blank_folder.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_import_csv_respects_record_limit(client: AsyncClient):
+    token = await _register_owner(client)
+
+    async with UnitOfWork() as uow:
+        free_plan = (await uow.session.execute(select(Plan).where(Plan.name == "free"))).scalar_one_or_none()
+        if free_plan is None:
+            from src.modules.billing.seed import upsert_default_plans
+
+            await upsert_default_plans(uow.session)
+            free_plan = (await uow.session.execute(select(Plan).where(Plan.name == "free"))).scalar_one()
+        free_plan.max_tables = 5
+        free_plan.max_records = 2
+        await uow.commit()
+
+    t = await client.post("/api/v1/tables/", json={"name": "Import limit"}, headers=_headers(token))
+    assert t.status_code == 200 and t.json()["ok"] is True
+    table_id = t.json()["data"]["id"]
+
+    # Already 1 record.
+    created = await client.post(f"/api/v1/tables/{table_id}/records/", json={"data": {"a": "one"}}, headers=_headers(token))
+    assert created.status_code == 200 and created.json()["ok"] is True
+
+    csv_content = "Название\nv2\nv3\n"
+    imp = await client.post(
+        f"/api/v1/tables/{table_id}/import/csv",
+        files={"file": ("data.csv", csv_content.encode("utf-8"), "text/csv")},
+        headers=_headers(token),
+    )
+    assert imp.status_code == 200
+    assert imp.json()["ok"] is False
+    assert imp.json()["error"]["code"] == "RECORD_LIMIT_REACHED"

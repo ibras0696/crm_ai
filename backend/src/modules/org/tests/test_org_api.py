@@ -35,6 +35,20 @@ async def test_get_current_org(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_update_current_org_name(client: AsyncClient):
+    tokens = await _register(client, org_name="Org Before Rename")
+    resp = await client.patch(
+        "/api/v1/orgs/current",
+        json={"name": "Org After Rename"},
+        headers=_headers(tokens["access_token"]),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["data"]["name"] == "Org After Rename"
+
+
+@pytest.mark.asyncio
 async def test_get_my_orgs(client: AsyncClient):
     tokens = await _register(client, org_name="My Orgs Test")
     resp = await client.get("/api/v1/orgs/my", headers=_headers(tokens["access_token"]))
@@ -72,6 +86,7 @@ async def test_create_invite_and_accept(client: AsyncClient):
     assert invite["role"] == "employee"
     assert invite["status"] == "pending"
     assert invite.get("token")
+    assert invite["invitee_exists"] is False
 
     # Accept via dedicated endpoint.
     acc = await client.post(
@@ -91,6 +106,24 @@ async def test_create_invite_and_accept(client: AsyncClient):
     members = await client.get("/api/v1/orgs/members", headers=_headers(owner_tokens["access_token"]))
     assert members.status_code == 200
     assert len(members.json()["data"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_create_invite_marks_registered_user(client: AsyncClient):
+    owner_tokens = await _register(client, org_name="Invite Existing User Org")
+    existing_email = f"existing-{uuid.uuid4().hex[:8]}@example.com"
+    # Create user in another org, so the email exists in system but not in this org.
+    await _register(client, email=existing_email, org_name="Another Org")
+
+    inv_resp = await client.post(
+        "/api/v1/orgs/invites",
+        json={"email": existing_email, "role": "employee"},
+        headers=_headers(owner_tokens["access_token"]),
+    )
+    assert inv_resp.status_code == 201
+    invite = inv_resp.json()["data"]
+    assert invite["email"] == existing_email
+    assert invite["invitee_exists"] is True
 
 
 @pytest.mark.asyncio
@@ -129,4 +162,3 @@ async def test_create_invite_forbidden_for_employee(client: AsyncClient):
         headers=_headers(emp_token),
     )
     assert resp.status_code == 403
-

@@ -118,6 +118,34 @@ async def test_me_without_token(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_update_me_profile(client: AsyncClient):
+    email = f"upd-{uuid.uuid4().hex[:8]}@example.com"
+    reg = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "StrongPass123!",
+            "first_name": "Old",
+            "last_name": "Name",
+            "org_name": "Upd Org",
+        },
+    )
+    token = reg.json()["data"]["access_token"]
+
+    upd = await client.patch(
+        "/api/v1/auth/me",
+        json={"first_name": "New", "last_name": "User", "timezone": "Europe/Moscow"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert upd.status_code == 200
+    body = upd.json()
+    assert body["ok"] is True
+    assert body["data"]["first_name"] == "New"
+    assert body["data"]["last_name"] == "User"
+    assert body["data"]["timezone"] == "Europe/Moscow"
+
+
+@pytest.mark.asyncio
 async def test_refresh_token(client: AsyncClient):
     email = f"refresh-{uuid.uuid4().hex[:8]}@example.com"
     reg = await client.post(

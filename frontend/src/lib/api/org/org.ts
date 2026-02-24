@@ -21,6 +21,18 @@ export interface MemberInfo {
   created_at: string
 }
 
+export interface InviteInfo {
+  id: string
+  org_id: string
+  email: string
+  role: string
+  status: string
+  token?: string | null
+  invitee_exists?: boolean | null
+  expires_at: string
+  created_at: string
+}
+
 export const orgApi = {
   getCurrent: () => api.get<ApiResponse<OrgInfo>>('/orgs/current'),
   deleteCurrent: () => api.delete<ApiResponse<null>>('/orgs/current'),
@@ -28,7 +40,7 @@ export const orgApi = {
   getMyOrgs: () =>
     api.get<ApiResponse<Array<{ org_id: string; org_name: string; org_slug: string; role: string }>>>('/orgs/my'),
   getMembers: () => api.get<ApiResponse<MemberInfo[]>>('/orgs/members'),
-  createInvite: (data: { email: string; role: string }) => api.post<ApiResponse<unknown>>('/orgs/invites', data),
+  createInvite: (data: { email: string; role: string }) => api.post<ApiResponse<InviteInfo>>('/orgs/invites', data),
   acceptInvite: (data: { token: string }) => api.post<ApiResponse<unknown>>('/orgs/invites/accept', data),
   updateMemberRole: (memberId: string, role: string) =>
     api.put<ApiResponse<unknown>>(`/orgs/members/${memberId}/role`, { role }),

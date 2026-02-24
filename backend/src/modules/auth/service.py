@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 
 from src.modules.auth.models import User
-from src.modules.auth.schemas import RegisterRequest, TokenResponse
+from src.modules.auth.schemas import RegisterRequest, TokenResponse, UpdateMeRequest
 from src.modules.auth.services import AuthProfileService, AuthRegistrationService, AuthSessionService
 from src.modules.org.models import Organization
 
@@ -42,3 +42,6 @@ class AuthService:
 
     async def get_user(self, user_id: uuid.UUID) -> User | None:
         return await self._profile.get_user(user_id)
+
+    async def update_user(self, user_id: uuid.UUID, body: UpdateMeRequest) -> User | None:
+        return await self._profile.update_user(user_id, body)

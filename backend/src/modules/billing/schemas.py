@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -31,5 +32,4 @@ class UsageOut(BaseModel):
 
 class CreatePaymentRequest(BaseModel):
     plan_name: str
-    period: str = "monthly"  # monthly | yearly
-
+    period: Literal["monthly"] = "monthly"

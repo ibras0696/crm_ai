@@ -164,6 +164,17 @@ export function SuperadminDashboardView({ dashboard }: Props) {
 
   const registrationsTotal = registrationData.reduce((acc, p) => acc + p.registrations, 0)
   const registrationsPeak = Math.max(...registrationData.map((p) => p.registrations), 0)
+  const totalOrgs = Number(dashboard.totals.orgs || 0)
+  const paidOrgs = Number(revenueDetailed.paid_orgs || 0)
+  const paidSharePct = totalOrgs > 0 ? (paidOrgs / totalOrgs) * 100 : Number(revenueDetailed.paid_share_pct || 0)
+  const activationPct = Number(funnel.activation_rate_pct || 0)
+  const firstRecordPct = Number(funnel.record_conversion_pct || 0)
+  const limitRisk7d = topLimits.filter((o: any) => o.eta_days_to_limit != null && Number(o.eta_days_to_limit) <= 7).length
+  const limitRisk30d = topLimits.filter((o: any) => o.eta_days_to_limit != null && Number(o.eta_days_to_limit) <= 30).length
+  const loginFailedStat = secTop.find((a: any) => String(a.action) === 'login_failed')
+  const forbiddenStat = secTop.find((a: any) => String(a.action) === 'access_denied')
+  const loginFailed24h = Number(loginFailedStat?.last_24h || 0)
+  const forbidden24h = Number(forbiddenStat?.last_24h || 0)
 
   const expensesMonthTotal = expenses.reduce((acc, e) => acc + Number(e.amount || 0), 0)
   const incomeMonth = Number(revenueDetailed.month_total || executive.mrr_proxy || 0)
@@ -275,6 +286,59 @@ export function SuperadminDashboardView({ dashboard }: Props) {
             <div className="rounded-xl border border-sidebar-border bg-sidebar-background/40 p-3">
               <div className="text-xs text-muted-foreground">Активные день/месяц</div>
               <div className="text-xl font-semibold mt-1">{Number(engagement.stickiness_pct || 0).toLocaleString('ru-RU')}%</div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+            <div className="rounded-xl border border-sidebar-border bg-sidebar-background/40 p-4">
+              <div className="text-xs text-muted-foreground">Платящие организации</div>
+              <div className="mt-2 flex items-end justify-between gap-2">
+                <div className="text-2xl font-semibold">{paidOrgs.toLocaleString('ru-RU')}</div>
+                <div className="text-xs text-primary">{paidSharePct.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}% от всех</div>
+              </div>
+              <div className="mt-3 h-2 rounded-full bg-sidebar-accent overflow-hidden">
+                <div className="h-full bg-primary rounded-full" style={{ width: `${Math.min(100, Math.max(0, paidSharePct))}%` }} />
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-sidebar-border bg-sidebar-background/40 p-4">
+              <div className="text-xs text-muted-foreground">Конверсия по пути запуска</div>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                <div className="rounded-lg border border-sidebar-border bg-sidebar-background p-2">
+                  <div className="text-muted-foreground">Активация</div>
+                  <div className="text-base font-semibold mt-1">{activationPct.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%</div>
+                </div>
+                <div className="rounded-lg border border-sidebar-border bg-sidebar-background p-2">
+                  <div className="text-muted-foreground">До 1-й записи</div>
+                  <div className="text-base font-semibold mt-1">{firstRecordPct.toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-sidebar-border bg-sidebar-background/40 p-4">
+              <div className="text-xs text-muted-foreground">Риск упора в лимиты</div>
+              <div className="mt-2 flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">В ближайшие 7 дней</span>
+                <span className="font-semibold">{limitRisk7d.toLocaleString('ru-RU')}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">В ближайшие 30 дней</span>
+                <span className="font-semibold">{limitRisk30d.toLocaleString('ru-RU')}</span>
+              </div>
+              <div className="mt-3 text-xs text-muted-foreground">Показывает, сколько организаций скоро упрется в лимиты тарифа.</div>
+            </div>
+
+            <div className="rounded-xl border border-sidebar-border bg-sidebar-background/40 p-4">
+              <div className="text-xs text-muted-foreground">Сигналы по доступу (24ч)</div>
+              <div className="mt-2 flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Ошибки входа</span>
+                <span className="font-semibold">{loginFailed24h.toLocaleString('ru-RU')}</span>
+              </div>
+              <div className="mt-2 flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Запреты доступа</span>
+                <span className="font-semibold">{forbidden24h.toLocaleString('ru-RU')}</span>
+              </div>
+              <div className="mt-3 text-xs text-muted-foreground">Помогает быстро увидеть всплески подозрительной активности.</div>
             </div>
           </div>
 

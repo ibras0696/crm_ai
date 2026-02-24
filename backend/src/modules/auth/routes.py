@@ -9,6 +9,7 @@ from src.modules.auth.schemas import (
     RefreshRequest,
     RegisterRequest,
     TokenResponse,
+    UpdateMeRequest,
     UserResponse,
 )
 from src.modules.auth.service import AuthService
@@ -95,6 +96,14 @@ async def logout(request: Request, response: Response, body: RefreshRequest | No
 @router.get("/me", response_model=ApiResponse[UserResponse])
 async def me(current_user: CurrentUser = Depends(get_current_user)):
     user = await _auth_service.get_user(current_user.user_id)
+    if not user:
+        raise NotFoundError("User")
+    return ApiResponse(data=UserResponse.model_validate(user))
+
+
+@router.patch("/me", response_model=ApiResponse[UserResponse])
+async def update_me(body: UpdateMeRequest, current_user: CurrentUser = Depends(get_current_user)):
+    user = await _auth_service.update_user(current_user.user_id, body)
     if not user:
         raise NotFoundError("User")
     return ApiResponse(data=UserResponse.model_validate(user))

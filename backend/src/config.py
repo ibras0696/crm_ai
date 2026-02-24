@@ -191,6 +191,9 @@ class Settings(BaseSettings):
     YOOKASSA_SHOP_ID: str = ""
     YOOKASSA_SECRET_KEY: str = ""
     YOOKASSA_RETURN_URL: str = "http://localhost:5173/billing/success"
+    BILLING_GRACE_DAYS: int = 7
+    BILLING_PRE_EXPIRY_NOTICE_HOURS: int = 24
+    BILLING_PURGE_AFTER_END_DAYS: int = 30
 
     # Sentry
     SENTRY_DSN: str = ""

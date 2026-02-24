@@ -12,9 +12,13 @@ import uuid
 from io import BytesIO
 
 from openpyxl import Workbook
+from sqlalchemy import func, select
 
+from src.common.enums import SubscriptionStatus
 from src.config import settings
 from src.infrastructure.metrics_custom import EXPORTS_TOTAL, IMPORTS_TOTAL
+from src.modules.billing.models import Plan
+from src.modules.org.models import Organization, Subscription
 from src.modules.tables.records import Record, RecordRepository
 from src.modules.tables.repository import TableRepository
 
@@ -228,6 +232,7 @@ class TableQueryService:
             created += 1
 
         if to_create:
+            await self._ensure_record_capacity(org_id=org_id, incoming_count=len(to_create))
             await self.r_repo.bulk_create(to_create)
 
         try:
@@ -236,3 +241,33 @@ class TableQueryService:
             pass
 
         return {"created": created}
+
+    async def _ensure_record_capacity(self, *, org_id: uuid.UUID, incoming_count: int) -> None:
+        if incoming_count <= 0:
+            return
+        plan = await self._resolve_effective_plan(org_id=org_id)
+        limit = int(getattr(plan, "max_records", 0) or 0)
+        if limit <= 0:
+            return
+        current = int(
+            (await self.session.execute(select(func.count(Record.id)).where(Record.org_id == org_id))).scalar()
+            or 0
+        )
+        if current + incoming_count > limit:
+            raise ValueError("RECORD_LIMIT_REACHED")
+
+    async def _resolve_effective_plan(self, *, org_id: uuid.UUID) -> Plan | None:
+        sub = (
+            await self.session.execute(select(Subscription).where(Subscription.org_id == org_id).limit(1))
+        ).scalar_one_or_none()
+        plan_name = None
+        if sub and sub.status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE}:
+            plan_name = sub.plan.value
+        if not plan_name:
+            org_plan = (
+                await self.session.execute(select(Organization.plan).where(Organization.id == org_id).limit(1))
+            ).scalar_one_or_none()
+            plan_name = str(getattr(org_plan, "value", org_plan or "free")).lower()
+        return (
+            await self.session.execute(select(Plan).where(Plan.name == plan_name, Plan.is_active.is_(True)))
+        ).scalar_one_or_none()

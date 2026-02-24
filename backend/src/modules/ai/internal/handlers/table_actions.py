@@ -9,6 +9,9 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
+from src.common.enums import SubscriptionStatus
+from src.modules.billing.models import Plan
+from src.modules.org.models import Organization, Subscription
 from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.internal.resolution import normalize_name, resolve_table_by_ref, safe_field_type
 from src.modules.tables.models import Column, FieldType, Table
@@ -46,6 +49,26 @@ def _extract_rows_payload(action_payload: dict[str, Any]) -> list[dict[str, Any]
         if isinstance(item, dict):
             out.append(item)
     return out
+
+
+async def _resolve_plan_limits(uow: UnitOfWork, *, org_id: uuid.UUID) -> tuple[int, int]:
+    sub = (
+        await uow.session.execute(select(Subscription).where(Subscription.org_id == org_id).limit(1))
+    ).scalar_one_or_none()
+    plan_name = None
+    if sub and sub.status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE}:
+        plan_name = sub.plan.value
+    if not plan_name:
+        org_plan = (
+            await uow.session.execute(select(Organization.plan).where(Organization.id == org_id).limit(1))
+        ).scalar_one_or_none()
+        plan_name = str(getattr(org_plan, "value", org_plan or "free")).lower()
+    plan = (
+        await uow.session.execute(select(Plan).where(Plan.name == plan_name, Plan.is_active.is_(True)))
+    ).scalar_one_or_none()
+    max_tables = int(getattr(plan, "max_tables", 0) or 0)
+    max_records = int(getattr(plan, "max_records", 0) or 0)
+    return max_tables, max_records
 
 
 def _infer_rows_from_message(user_message: str | None, columns: list[Column]) -> list[dict[str, Any]]:
@@ -139,6 +162,19 @@ async def _create_records_for_table(
     if not rows_payload:
         return [], [], 0
 
+    _, max_records = await _resolve_plan_limits(uow, org_id=org_id)
+    if max_records > 0:
+        current_records = int(
+            (await uow.session.execute(select(func.count(Record.id)).where(Record.org_id == org_id))).scalar()
+            or 0
+        )
+        remaining = max_records - current_records
+        if remaining <= 0:
+            return [], [], len(rows_payload)
+        if len(rows_payload) > remaining:
+            ignored += len(rows_payload) - remaining
+            rows_payload = rows_payload[:remaining]
+
     await uow.session.execute(select(Table.id).where(Table.id == table_obj.id).with_for_update())
 
     max_rows = 20
@@ -183,9 +219,17 @@ async def handle_create_table_action(
     user_message: str | None = None,
 ) -> dict[str, Any]:
     """Создать таблицу (с колонками и опциональными записями)."""
-    name = str(action_payload.get("name") or action_payload.get("table_name") or "").strip()[:255]
+    name = str(action_payload.get("name") or action_payload.get("table_name") or "").strip()[:120]
     if not name:
         return {"action": "create_table", "ok": False, "error": "table_name_required"}
+    max_tables, _ = await _resolve_plan_limits(uow, org_id=org_id)
+    if max_tables > 0:
+        current_tables = int(
+            (await uow.session.execute(select(func.count(Table.id)).where(Table.org_id == org_id))).scalar()
+            or 0
+        )
+        if current_tables >= max_tables:
+            return {"action": "create_table", "ok": False, "error": "table_limit_reached"}
 
     description = str(action_payload.get("description") or "").strip() or None
     icon = str(action_payload.get("icon") or "").strip() or None
@@ -202,7 +246,7 @@ async def handle_create_table_action(
     for idx, raw in enumerate(columns_payload[:50]):
         if not isinstance(raw, dict):
             continue
-        col_name = str(raw.get("name") or "").strip()[:255]
+        col_name = str(raw.get("name") or "").strip()[:120]
         if not col_name:
             continue
         field_type = safe_field_type(raw.get("field_type"))
@@ -301,7 +345,7 @@ async def handle_create_columns_action(
     for idx, raw in enumerate(columns_payload[:50]):
         if not isinstance(raw, dict):
             continue
-        col_name = str(raw.get("name") or "").strip()[:255]
+        col_name = str(raw.get("name") or "").strip()[:120]
         if not col_name:
             continue
         normalized_name = normalize_name(col_name)
@@ -397,4 +441,3 @@ async def handle_create_records_action(
         "records_ignored": int(ignored),
         "records_preview": records_preview,
     }
-

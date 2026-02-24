@@ -17,6 +17,8 @@ class EventOut(BaseModel):
     is_done: bool
     recurrence: str | None
     assigned_to: uuid.UUID | None
+    participant_ids: list[uuid.UUID]
+    reminder_offsets_minutes: list[int]
     created_at: datetime
     model_config = {"from_attributes": True}
 
@@ -29,6 +31,8 @@ class CreateEventRequest(BaseModel):
     all_day: bool = False
     color: str | None = None
     assigned_to: uuid.UUID | None = None
+    participant_ids: list[uuid.UUID] | None = None
+    reminder_offsets_minutes: list[int] | None = None
     # Can be a simple keyword (daily/weekly/...) or an RRULE string (e.g. "RRULE:FREQ=WEEKLY;BYDAY=TU").
     recurrence: str | None = None
 
@@ -42,4 +46,14 @@ class UpdateEventRequest(BaseModel):
     color: str | None = None
     is_done: bool | None = None
     assigned_to: uuid.UUID | None = None
+    participant_ids: list[uuid.UUID] | None = None
+    reminder_offsets_minutes: list[int] | None = None
     recurrence: str | None = None
+
+
+class DispatchRemindersRequest(BaseModel):
+    now: datetime | None = None
+
+
+class DispatchRemindersOut(BaseModel):
+    created_notifications: int

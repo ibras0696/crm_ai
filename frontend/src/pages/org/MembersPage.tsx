@@ -39,7 +39,18 @@ export default function MembersPage() {
   const [inviteRole, setInviteRole] = useState('employee')
   const [inviteLoading, setInviteLoading] = useState(false)
   const [inviteSuccess, setInviteSuccess] = useState(false)
+  const [inviteSuccessMessage, setInviteSuccessMessage] = useState('Приглашение отправлено!')
   const [inviteError, setInviteError] = useState('')
+
+  const mapInviteError = (err: any): string => {
+    const code = err?.response?.data?.error?.code
+    const message = err?.response?.data?.error?.message
+    if (code === 'CONFLICT') return 'Пользователь уже состоит в организации или приглашение уже отправлено.'
+    if (code === 'VALIDATION_ERROR') return message || 'Проверьте email и попробуйте снова.'
+    if (code === 'RATE_LIMIT' || code === 'RATE_LIMITED') return 'Слишком много приглашений. Попробуйте через минуту.'
+    if (code === 'NOT_FOUND') return 'Пользователь не найден.'
+    return message || 'Не удалось отправить приглашение.'
+  }
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -49,6 +60,12 @@ export default function MembersPage() {
     try {
       const resp = await orgApi.createInvite({ email: inviteEmail, role: inviteRole })
       if (resp.data.ok) {
+        const exists = resp.data.data?.invitee_exists
+        setInviteSuccessMessage(
+          exists
+            ? 'Приглашение отправлено пользователю.'
+            : 'Пользователь еще не зарегистрирован. Ссылка-приглашение отправлена на email.',
+        )
         setInviteSuccess(true)
         setInviteEmail('')
         setTimeout(() => {
@@ -57,10 +74,10 @@ export default function MembersPage() {
         }, 2000)
         await refresh()
       } else {
-        setInviteError(resp.data.error?.message || 'Failed to send invite')
+        setInviteError(resp.data.error?.message || 'Не удалось отправить приглашение.')
       }
     } catch (err: any) {
-      setInviteError(err?.response?.data?.error?.message || 'Failed to send invite')
+      setInviteError(mapInviteError(err))
     } finally {
       setInviteLoading(false)
     }
@@ -135,7 +152,7 @@ export default function MembersPage() {
               <p className="mt-3 text-sm text-red-400">{inviteError}</p>
             )}
             {inviteSuccess && (
-              <p className="mt-3 text-sm text-emerald-400">Приглашение отправлено!</p>
+              <p className="mt-3 text-sm text-emerald-400">{inviteSuccessMessage}</p>
             )}
           </CardContent>
         </Card>

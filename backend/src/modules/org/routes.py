@@ -10,6 +10,7 @@ from src.modules.org.schemas import (
     InviteCreateRequest,
     InviteResponse,
     MemberResponse,
+    OrgUpdateRequest,
     OrgResponse,
     SwitchOrgRequest,
     UpdateMemberRoleRequest,
@@ -24,6 +25,15 @@ _org_service = OrgService()
 @router.get("/current", response_model=ApiResponse[OrgResponse])
 async def get_current_org(current_user: CurrentUser = Depends(require_org)):
     org = await _org_service.get_org(current_user.org_id)
+    return ApiResponse(data=OrgResponse.model_validate(org))
+
+
+@router.patch("/current", response_model=ApiResponse[OrgResponse])
+async def update_current_org(
+    body: OrgUpdateRequest,
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
+):
+    org = await _org_service.update_org(current_user.org_id, body)
     return ApiResponse(data=OrgResponse.model_validate(org))
 
 

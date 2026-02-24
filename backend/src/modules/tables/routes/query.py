@@ -147,6 +147,8 @@ async def import_csv(
                 return ApiResponse(ok=False, data=None, error={"code": "CELL_TOO_LARGE", "message": "В CSV есть слишком длинные значения."})
             if code == "IMPORT_TIMEOUT":
                 return ApiResponse(ok=False, data=None, error={"code": "IMPORT_TIMEOUT", "message": "Импорт прерван по лимиту времени."})
+            if code == "RECORD_LIMIT_REACHED":
+                return ApiResponse(ok=False, data=None, error={"code": "RECORD_LIMIT_REACHED", "message": "Достигнут лимит тарифа по записям."})
             return ApiResponse(ok=False, data=None, error={"code": "BAD_REQUEST", "message": "Некорректный CSV"})
 
         await uow.commit()

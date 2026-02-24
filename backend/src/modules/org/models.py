@@ -59,6 +59,12 @@ class Subscription(BaseDBModel):
     status: Mapped[SubscriptionStatus] = mapped_column(Enum(SubscriptionStatus, values_callable=lambda x: [e.value for e in x]), default=SubscriptionStatus.ACTIVE, nullable=False)
     current_period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    grace_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    data_purge_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pre_expiry_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    post_expiry_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    downgraded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    data_purged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     external_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     organization: Mapped["Organization"] = relationship(back_populates="subscription")

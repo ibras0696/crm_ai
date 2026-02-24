@@ -3,14 +3,20 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.common.enums import PlanTier, SubscriptionStatus
+from src.common.enums import PlanTier, SubscriptionStatus, UserRole
+from src.modules.ai.models import AIChatMessage, AIChatSession, AIUsageLog
+from src.modules.audit.models import AuditLog
 from src.modules.billing.models import Plan
 from src.modules.files.models import File
+from src.modules.knowledge.models import KBPage
+from src.modules.notifications.models import Notification
 from src.modules.org.models import Membership, Organization, Subscription
-from src.modules.tables.models import Table
+from src.modules.reports.models import ReportDashboard
+from src.modules.schedule.models import Event
+from src.modules.tables.models import Table, TableFolder
 from src.modules.tables.records import Record
 
 
@@ -63,9 +69,30 @@ class BillingRepository:
         stmt = select(Subscription).where(Subscription.org_id == org_id)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def list_subscriptions(self) -> list[Subscription]:
+        stmt = select(Subscription)
+        return list((await self.session.execute(stmt)).scalars().all())
+
     async def get_org(self, *, org_id: uuid.UUID) -> Organization | None:
         stmt = select(Organization).where(Organization.id == org_id)
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def list_org_member_user_ids(self, *, org_id: uuid.UUID) -> list[uuid.UUID]:
+        stmt = select(Membership.user_id).where(Membership.org_id == org_id)
+        rows = (await self.session.execute(stmt)).all()
+        return [row[0] for row in rows]
+
+    async def list_org_owner_admin_user_ids(self, *, org_id: uuid.UUID) -> list[uuid.UUID]:
+        stmt = select(Membership.user_id).where(
+            Membership.org_id == org_id,
+            Membership.role.in_([UserRole.OWNER, UserRole.ADMIN]),
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [row[0] for row in rows]
+
+    async def list_files_for_org(self, *, org_id: uuid.UUID) -> list[File]:
+        stmt = select(File).where(File.org_id == org_id)
+        return list((await self.session.execute(stmt)).scalars().all())
 
     async def upsert_subscription(
         self,
@@ -98,3 +125,17 @@ class BillingRepository:
         await self.session.flush()
         return sub
 
+    async def delete_org_business_data(self, *, org_id: uuid.UUID) -> None:
+        await self.session.execute(delete(AIChatMessage).where(AIChatMessage.org_id == org_id))
+        await self.session.execute(delete(AIChatSession).where(AIChatSession.org_id == org_id))
+        await self.session.execute(delete(AIUsageLog).where(AIUsageLog.org_id == org_id))
+        await self.session.execute(delete(Notification).where(Notification.org_id == org_id))
+        await self.session.execute(delete(AuditLog).where(AuditLog.org_id == org_id))
+        await self.session.execute(delete(Event).where(Event.org_id == org_id))
+        await self.session.execute(delete(KBPage).where(KBPage.org_id == org_id))
+        await self.session.execute(delete(Record).where(Record.org_id == org_id))
+        await self.session.execute(delete(Table).where(Table.org_id == org_id))
+        await self.session.execute(delete(TableFolder).where(TableFolder.org_id == org_id))
+        await self.session.execute(delete(ReportDashboard).where(ReportDashboard.org_id == org_id))
+        await self.session.execute(delete(File).where(File.org_id == org_id))
+        await self.session.flush()

@@ -42,11 +42,14 @@ async def create_folder(
 ):
     async with UnitOfWork() as uow:
         service = TablesService(uow.session)
-        folder = await service.create_folder(
-            org_id=current_user.org_id,
-            user_id=current_user.user_id,
-            body=body,
-        )
+        try:
+            folder = await service.create_folder(
+                org_id=current_user.org_id,
+                user_id=current_user.user_id,
+                body=body,
+            )
+        except TableServiceError as error:
+            return _error_response(error)
         await uow.commit()
         item = FolderOut.model_validate(folder)
     return ApiResponse(data=item)

@@ -7,7 +7,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.common.enums import UserRole
 from src.common.exceptions import ForbiddenError, UnauthorizedError
-from src.modules.auth.security import decode_access_token
+from src.modules.auth.security import decode_user_access_token
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -26,7 +26,7 @@ async def get_current_user(
         raise UnauthorizedError("Missing authorization header")
 
     try:
-        payload = decode_access_token(credentials.credentials)
+        payload = decode_user_access_token(credentials.credentials)
     except jwt.ExpiredSignatureError:
         raise UnauthorizedError("Token expired")
     except jwt.InvalidTokenError:

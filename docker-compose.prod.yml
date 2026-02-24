@@ -13,6 +13,11 @@ x-backend-env: &backend_env
   S3_SECRET_KEY: ${S3_SECRET_KEY:?set in secrets}
   S3_BUCKET: ${S3_BUCKET:-crm-files}
   SECRET_KEY: ${SECRET_KEY:?set in secrets}
+  JWT_USER_SECRET_KEY: ${JWT_USER_SECRET_KEY:?set in secrets}
+  JWT_SUPERADMIN_SECRET_KEY: ${JWT_SUPERADMIN_SECRET_KEY:?set in secrets}
+  JWT_ISSUER: ${JWT_ISSUER:-crm-platform}
+  JWT_AUDIENCE_USER: ${JWT_AUDIENCE_USER:-crm-api-users}
+  JWT_AUDIENCE_SUPERADMIN: ${JWT_AUDIENCE_SUPERADMIN:-crm-api-superadmin}
   DOMAIN: ${DOMAIN:?set in secrets}
   FRONTEND_URL: ${FRONTEND_URL:?set in secrets}
   CORS_ORIGINS: ${CORS_ORIGINS:?set in secrets}
@@ -37,6 +42,8 @@ x-backend-env: &backend_env
   DB_POOL_RECYCLE_S: ${DB_POOL_RECYCLE_S:-1800}
   DB_HEALTH_TIMEOUT_S: ${DB_HEALTH_TIMEOUT_S:-2}
   REDIS_HEALTH_TIMEOUT_S: ${REDIS_HEALTH_TIMEOUT_S:-2}
+  SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-}
+  SUPERADMIN_PASSWORD_HASH: ${SUPERADMIN_PASSWORD_HASH:-}
 
 services:
   db:

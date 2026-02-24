@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # Auth / JWT
     SECRET_KEY: str = "super-secret-change-in-prod"
     JWT_ALGORITHM: str = "HS256"
+    JWT_USER_SECRET_KEY: str = ""
+    JWT_SUPERADMIN_SECRET_KEY: str = ""
+    JWT_ISSUER: str = "crm-platform"
+    JWT_AUDIENCE_USER: str = "crm-api-users"
+    JWT_AUDIENCE_SUPERADMIN: str = "crm-api-superadmin"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
@@ -137,6 +142,11 @@ class Settings(BaseSettings):
     # Superadmin (created from env, not tied to any org)
     SUPERADMIN_EMAIL: str = ""
     SUPERADMIN_PASSWORD: str = ""
+    SUPERADMIN_PASSWORD_HASH: str = ""
+    SUPERADMIN_LOGIN_MAX_ATTEMPTS: int = 5
+    SUPERADMIN_LOGIN_WINDOW_S: int = 900
+    SUPERADMIN_LOCK_BASE_S: int = 30
+    SUPERADMIN_LOCK_MAX_S: int = 1800
 
     # AI (Timeweb Agent / OpenAI-compatible)
     OPENAI_API_KEY: str = ""
@@ -181,6 +191,13 @@ class Settings(BaseSettings):
             defaults=("super-secret-change-in-prod", "super-secret-dev-key-change-in-prod"),
         ):
             errors.append("SECRET_KEY")
+        if len((self.JWT_USER_SECRET_KEY or "").strip()) < 32 or _is_unsafe(self.JWT_USER_SECRET_KEY):
+            errors.append("JWT_USER_SECRET_KEY")
+        if len((self.JWT_SUPERADMIN_SECRET_KEY or "").strip()) < 32 or _is_unsafe(self.JWT_SUPERADMIN_SECRET_KEY):
+            errors.append("JWT_SUPERADMIN_SECRET_KEY")
+        if self.JWT_USER_SECRET_KEY.strip() and self.JWT_SUPERADMIN_SECRET_KEY.strip():
+            if self.JWT_USER_SECRET_KEY.strip() == self.JWT_SUPERADMIN_SECRET_KEY.strip():
+                errors.append("JWT_USER_SECRET_KEY/JWT_SUPERADMIN_SECRET_KEY")
 
         if _is_unsafe(
             self.DATABASE_URL,
@@ -211,8 +228,10 @@ class Settings(BaseSettings):
 
         if self.ENABLE_AI and not (self.OPENAI_BEARER_TOKEN.strip() or self.OPENAI_API_KEY.strip()):
             errors.append("OPENAI_BEARER_TOKEN/OPENAI_API_KEY")
-        if bool(self.SUPERADMIN_EMAIL.strip()) ^ bool(self.SUPERADMIN_PASSWORD.strip()):
-            errors.append("SUPERADMIN_EMAIL/SUPERADMIN_PASSWORD")
+        if bool(self.SUPERADMIN_EMAIL.strip()) ^ bool(self.SUPERADMIN_PASSWORD_HASH.strip()):
+            errors.append("SUPERADMIN_EMAIL/SUPERADMIN_PASSWORD_HASH")
+        if self.SUPERADMIN_PASSWORD.strip():
+            errors.append("SUPERADMIN_PASSWORD")
 
         if errors:
             raise ValueError(

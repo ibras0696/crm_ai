@@ -6,6 +6,7 @@ from httpx import AsyncClient
 
 from src.config import settings
 from src.infrastructure.uow import UnitOfWork
+from src.modules.auth.security import hash_password
 from src.modules.ai.models import AIUsageLog
 
 
@@ -37,7 +38,7 @@ async def _register_owner(client: AsyncClient, *, org_name: str) -> tuple[str, s
 
 async def _login_sa(client: AsyncClient, monkeypatch) -> str:
     monkeypatch.setattr(settings, "SUPERADMIN_EMAIL", "admin")
-    monkeypatch.setattr(settings, "SUPERADMIN_PASSWORD", "12345678")
+    monkeypatch.setattr(settings, "SUPERADMIN_PASSWORD_HASH", hash_password("12345678"))
     r = await client.post("/api/v1/superadmin/login", json={"email": "admin", "password": "12345678"})
     assert r.status_code == 200
     return r.json()["data"]["access_token"]

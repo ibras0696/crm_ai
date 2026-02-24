@@ -1,6 +1,7 @@
 import pytest
 
 from src.config import settings
+from src.modules.auth.security import hash_password
 
 
 @pytest.mark.asyncio
@@ -34,7 +35,7 @@ async def test_superadmin_forbids_non_superadmin_token(client, random_email):
 @pytest.mark.asyncio
 async def test_superadmin_login_and_overview(client, monkeypatch, random_email):
     monkeypatch.setattr(settings, "SUPERADMIN_EMAIL", "admin")
-    monkeypatch.setattr(settings, "SUPERADMIN_PASSWORD", "12345678")
+    monkeypatch.setattr(settings, "SUPERADMIN_PASSWORD_HASH", hash_password("12345678"))
 
     # Create some data.
     reg = await client.post(
@@ -63,4 +64,3 @@ async def test_superadmin_login_and_overview(client, monkeypatch, random_email):
     assert data["dashboard"]["totals"]["orgs"] >= 1
     assert data["dashboard"]["totals"]["users"] >= 1
     assert isinstance(data["orgs"], list)
-

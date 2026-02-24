@@ -5,7 +5,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.common.enums import UserRole
 from src.common.exceptions import ForbiddenError, UnauthorizedError
-from src.modules.auth.security import decode_access_token
+from src.modules.auth.security import decode_superadmin_access_token
 
 bearer = HTTPBearer(auto_error=False)
 
@@ -16,7 +16,7 @@ async def require_superadmin(
     if not credentials:
         raise UnauthorizedError("Missing authorization header")
     try:
-        payload = decode_access_token(credentials.credentials)
+        payload = decode_superadmin_access_token(credentials.credentials)
     except Exception as exc:
         raise UnauthorizedError("Invalid token") from exc
     if payload.get("role") != UserRole.SUPERADMIN.value:

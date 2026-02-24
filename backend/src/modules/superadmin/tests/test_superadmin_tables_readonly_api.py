@@ -4,6 +4,7 @@ import pytest
 from httpx import AsyncClient
 
 from src.config import settings
+from src.modules.auth.security import hash_password
 
 
 def _h(token: str) -> dict:
@@ -12,7 +13,7 @@ def _h(token: str) -> dict:
 
 async def _login_sa(client: AsyncClient, monkeypatch) -> str:
     monkeypatch.setattr(settings, "SUPERADMIN_EMAIL", "admin")
-    monkeypatch.setattr(settings, "SUPERADMIN_PASSWORD", "12345678")
+    monkeypatch.setattr(settings, "SUPERADMIN_PASSWORD_HASH", hash_password("12345678"))
     r = await client.post("/api/v1/superadmin/login", json={"email": "admin", "password": "12345678"})
     assert r.status_code == 200
     return r.json()["data"]["access_token"]
@@ -98,4 +99,3 @@ async def test_superadmin_table_records_and_export(client: AsyncClient, monkeypa
     xlsx = await client.get(f"/api/v1/superadmin/orgs/{org_id}/tables/{table_id}/export/xlsx", headers=_h(sa))
     assert xlsx.status_code == 200
     assert "application/vnd.openxmlformats" in xlsx.headers.get("content-type", "")
-

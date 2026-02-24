@@ -24,8 +24,11 @@ make gen-prod-secrets domain=your-domain.com > .env.prod.generated
 - `RABBITMQ_*`, `RABBITMQ_URL`
 - `S3_ACCESS_KEY`, `S3_SECRET_KEY`
 - `SECRET_KEY` (длина 32+)
+- `JWT_USER_SECRET_KEY`, `JWT_SUPERADMIN_SECRET_KEY` (разные, длина 32+)
+- `JWT_ISSUER`, `JWT_AUDIENCE_USER`, `JWT_AUDIENCE_SUPERADMIN`
 - `DOMAIN`, `FRONTEND_URL`, `CORS_ORIGINS`
 - `GRAFANA_USER`, `GRAFANA_PASSWORD`
+- `SUPERADMIN_EMAIL`, `SUPERADMIN_PASSWORD_HASH` (если нужен superadmin вход)
 
 4. Перезапустить production:
 

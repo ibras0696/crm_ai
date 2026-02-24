@@ -1,6 +1,6 @@
 """Superadmin endpoints."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 
 from src.common.http_headers import content_disposition_attachment
@@ -26,6 +26,7 @@ from src.modules.superadmin.schemas import (
     SuperadminUserListPage,
 )
 from src.modules.superadmin.service import SuperadminService
+from src.modules.superadmin.services.auth import SuperadminRateLimitedError
 
 router = APIRouter(prefix="/superadmin", tags=["superadmin"])
 protected = APIRouter(dependencies=[Depends(require_superadmin)])
@@ -39,9 +40,10 @@ _service = SuperadminService()
 
 
 @router.post("/login", response_model=ApiResponse[SuperadminTokenResponse])
-async def superadmin_login(body: SuperadminLoginRequest):
+async def superadmin_login(body: SuperadminLoginRequest, request: Request):
+    ip = request.client.host if request.client else None
     try:
-        token = _service.auth.authenticate_superadmin(body.email, body.password)
+        token = await _service.auth.authenticate_superadmin(body.email, body.password, ip_address=ip)
     except RuntimeError:
         return ApiResponse(
             ok=False,
@@ -49,9 +51,18 @@ async def superadmin_login(body: SuperadminLoginRequest):
             error={
                 "code": "SUPERADMIN_NOT_CONFIGURED",
                 "message": (
-                    "Суперадмин не настроен. Задайте SUPERADMIN_EMAIL и SUPERADMIN_PASSWORD "
+                    "Суперадмин не настроен. Задайте SUPERADMIN_EMAIL и SUPERADMIN_PASSWORD_HASH "
                     "(через secrets.yml или переменные окружения) и перезапустите backend."
                 ),
+            },
+        )
+    except SuperadminRateLimitedError as exc:
+        return ApiResponse(
+            ok=False,
+            data=None,
+            error={
+                "code": "RATE_LIMIT",
+                "message": f"Too many failed login attempts. Retry after {exc.retry_after_s}s.",
             },
         )
     except ValueError:

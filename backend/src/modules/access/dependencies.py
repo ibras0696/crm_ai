@@ -5,8 +5,10 @@ import uuid
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.common.enums import AuditAction
 from src.common.exceptions import ForbiddenError
 from src.infrastructure.database import get_async_session
+from src.modules.audit.repository import AuditRepository
 from src.modules.auth.dependencies import CurrentUser, require_org
 from src.modules.access.service import check_access
 
@@ -46,7 +48,17 @@ def require_access(
             enforce_if_rules_exist=enforce_if_rules_exist,
         )
         if not allowed:
+            audit_repo = AuditRepository(session)
+            await audit_repo.log(
+                org_id=current_user.org_id,  # type: ignore[arg-type]
+                actor_id=current_user.user_id,
+                action=AuditAction.ACCESS_DENIED,
+                entity_type=resource_type,
+                entity_id=str(resource_id) if resource_id is not None else None,
+                meta={"permission": permission},
+                ip_address=request.client.host if request.client else None,
+            )
+            await session.commit()
             raise ForbiddenError("Недостаточно прав.")
 
     return _dep
-

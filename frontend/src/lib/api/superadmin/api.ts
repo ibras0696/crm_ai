@@ -14,6 +14,7 @@ export interface SuperadminDashboard {
   }
   registrations_timeline: { date: string; count: number }[]
   orgs_by_plan: { plan: string; count: number }[]
+  analytics?: Record<string, any>
 }
 
 export interface SuperadminOrgOption {

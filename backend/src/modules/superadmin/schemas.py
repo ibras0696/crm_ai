@@ -63,6 +63,7 @@ class SuperadminDashboardResponse(BaseModel):
     totals: SuperadminDashboardTotals
     registrations_timeline: list[SuperadminRegistrationPoint]
     orgs_by_plan: list[SuperadminOrgsByPlanPoint]
+    analytics: dict = Field(default_factory=dict)
 
 
 class SuperadminOrgOption(BaseModel):

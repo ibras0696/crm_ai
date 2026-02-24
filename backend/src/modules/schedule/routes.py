@@ -10,12 +10,26 @@ from src.common.schemas import ApiResponse
 from src.infrastructure.uow import UnitOfWork
 from src.modules.access.dependencies import require_access
 from src.modules.auth.dependencies import CurrentUser, require_roles
-from src.modules.schedule.schemas import CreateEventRequest, EventOut, UpdateEventRequest
-from src.modules.schedule.service import ScheduleService
+from src.modules.schedule.schemas import (
+    CreateEventRequest,
+    DispatchRemindersOut,
+    DispatchRemindersRequest,
+    EventOut,
+    UpdateEventRequest,
+)
+from src.modules.schedule.service import ScheduleService, ScheduleServiceError
 
 router = APIRouter(prefix="/schedule", tags=["schedule"])
 
 EVENT_NOT_FOUND_MESSAGE = "Событие не найдено"
+
+
+def _service_error(error: ScheduleServiceError) -> ApiResponse[None]:
+    return ApiResponse(
+        ok=False,
+        data=None,
+        error={"code": error.code, "message": error.message},
+    )
 
 
 @router.post("/events", response_model=ApiResponse[EventOut])
@@ -28,11 +42,14 @@ async def create_event(
 ):
     async with UnitOfWork() as uow:
         service = ScheduleService(uow.session)
-        event = await service.create_event(
-            org_id=current_user.org_id,
-            user_id=current_user.user_id,
-            body=body,
-        )
+        try:
+            event = await service.create_event(
+                org_id=current_user.org_id,
+                user_id=current_user.user_id,
+                body=body,
+            )
+        except ScheduleServiceError as error:
+            return _service_error(error)
         await uow.commit()
         item = EventOut.model_validate(event)
     return ApiResponse(data=item)
@@ -85,7 +102,10 @@ async def update_event(
         event = await service.get_event_by_id(event_id=event_id, org_id=current_user.org_id)
         if event is None:
             return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": EVENT_NOT_FOUND_MESSAGE})
-        updated = await service.update_event(event=event, body=body)
+        try:
+            updated = await service.update_event(event=event, body=body)
+        except ScheduleServiceError as error:
+            return _service_error(error)
         await uow.commit()
         item = EventOut.model_validate(updated)
     return ApiResponse(data=item)
@@ -105,3 +125,16 @@ async def delete_event(
         await service.delete_event(event=event)
         await uow.commit()
     return ApiResponse(data=None)
+
+
+@router.post("/events/dispatch-reminders", response_model=ApiResponse[DispatchRemindersOut])
+async def dispatch_reminders(
+    body: DispatchRemindersRequest,
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="schedule", permission="can_write")),
+):
+    async with UnitOfWork() as uow:
+        service = ScheduleService(uow.session)
+        created = await service.dispatch_due_reminders(now=body.now)
+        await uow.commit()
+    return ApiResponse(data=DispatchRemindersOut(created_notifications=created))

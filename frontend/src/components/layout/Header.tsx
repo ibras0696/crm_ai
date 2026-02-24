@@ -1,16 +1,24 @@
-﻿import { useState, useRef, useEffect } from 'react'
+﻿import { useState, useRef, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LogOut, Bell, Search, Sun, Moon, Menu, BellOff, CheckCheck } from 'lucide-react'
+import { LogOut, Bell, Search, Sun, Moon, Menu, BellOff, CheckCheck, Loader2, Database, Users, BookOpen, FileText } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useTheme } from '@/contexts/ThemeContext'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { notificationsApi, NotificationInfo } from '@/lib/api'
+import { knowledgeApi, notificationsApi, NotificationInfo, orgApi, recordsApi, tablesApi } from '@/lib/api'
 
 interface HeaderProps {
   onMenuToggle?: () => void
+}
+
+type GlobalSearchResult = {
+  id: string
+  kind: 'table' | 'record' | 'member' | 'knowledge'
+  title: string
+  subtitle: string
+  route: string
 }
 
 export default function Header({ onMenuToggle }: HeaderProps) {
@@ -21,6 +29,11 @@ export default function Header({ onMenuToggle }: HeaderProps) {
   const notifRef = useRef<HTMLDivElement>(null)
   const [notifications, setNotifications] = useState<NotificationInfo[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
+  const [searchText, setSearchText] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchResults, setSearchResults] = useState<GlobalSearchResult[]>([])
+  const searchRef = useRef<HTMLDivElement>(null)
 
   const handleLogout = () => {
     logout()
@@ -73,6 +86,9 @@ export default function Header({ onMenuToggle }: HeaderProps) {
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setSearchOpen(false)
+      }
       if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
         setNotifOpen(false)
       }
@@ -80,6 +96,117 @@ export default function Header({ onMenuToggle }: HeaderProps) {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
+
+  useEffect(() => {
+    const q = searchText.trim()
+    if (q.length < 2) {
+      setSearchResults([])
+      setSearchLoading(false)
+      return
+    }
+
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      setSearchLoading(true)
+      try {
+        const [tablesResp, membersResp, pagesResp] = await Promise.all([
+          tablesApi.list(),
+          orgApi.getMembers(),
+          knowledgeApi.list(),
+        ])
+
+        const tables = tablesResp.data.ok && tablesResp.data.data ? tablesResp.data.data : []
+        const members = membersResp.data.ok && membersResp.data.data ? membersResp.data.data : []
+        const pages = pagesResp.data.ok && pagesResp.data.data ? pagesResp.data.data : []
+        const query = q.toLowerCase()
+
+        const tableResults: GlobalSearchResult[] = tables
+          .filter((t) => (t.name || '').toLowerCase().includes(query))
+          .slice(0, 5)
+          .map((t) => ({
+            id: `table-${t.id}`,
+            kind: 'table',
+            title: t.name,
+            subtitle: 'Таблица',
+            route: `/tables/${t.id}`,
+          }))
+
+        const memberResults: GlobalSearchResult[] = members
+          .filter((m) => {
+            const fullName = `${m.user_first_name || ''} ${m.user_last_name || ''}`.toLowerCase()
+            return fullName.includes(query) || (m.user_email || '').toLowerCase().includes(query)
+          })
+          .slice(0, 5)
+          .map((m) => ({
+            id: `member-${m.id}`,
+            kind: 'member',
+            title: `${m.user_first_name || ''} ${m.user_last_name || ''}`.trim() || (m.user_email || 'Участник'),
+            subtitle: `Участник · ${m.user_email || 'без email'}`,
+            route: '/members',
+          }))
+
+        const pageResults: GlobalSearchResult[] = pages
+          .filter((p) => (p.title || '').toLowerCase().includes(query) || (p.content || '').toLowerCase().includes(query))
+          .slice(0, 5)
+          .map((p) => ({
+            id: `kb-${p.id}`,
+            kind: 'knowledge',
+            title: p.title,
+            subtitle: 'Страница базы знаний',
+            route: '/knowledge',
+          }))
+
+        const tableCandidates = tables.slice(0, 6)
+        const recordBatches = await Promise.all(
+          tableCandidates.map(async (t) => {
+            try {
+              const r = await recordsApi.list(t.id, 40, 0)
+              if (!r.data.ok || !r.data.data) return []
+              return r.data.data.records
+                .filter((rec) => JSON.stringify(rec.data || {}).toLowerCase().includes(query))
+                .slice(0, 2)
+                .map((rec) => {
+                  const firstValue = Object.values(rec.data || {})[0]
+                  const valuePreview = firstValue == null ? 'Запись' : String(firstValue)
+                  return {
+                    id: `record-${rec.id}`,
+                    kind: 'record' as const,
+                    title: valuePreview,
+                    subtitle: `Запись в таблице "${t.name}"`,
+                    route: `/tables/${t.id}`,
+                  }
+                })
+            } catch {
+              return []
+            }
+          }),
+        )
+        const recordResults = recordBatches.flat().slice(0, 6)
+
+        if (!cancelled) {
+          const merged = [...tableResults, ...recordResults, ...memberResults, ...pageResults].slice(0, 20)
+          setSearchResults(merged)
+          setSearchOpen(true)
+        }
+      } finally {
+        if (!cancelled) setSearchLoading(false)
+      }
+    }, 250)
+
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [searchText])
+
+  const groupedResults = useMemo(() => {
+    return {
+      tables: searchResults.filter((r) => r.kind === 'table'),
+      records: searchResults.filter((r) => r.kind === 'record'),
+      members: searchResults.filter((r) => r.kind === 'member'),
+      knowledge: searchResults.filter((r) => r.kind === 'knowledge'),
+    }
+  }, [searchResults])
 
   const handleMarkAllRead = async () => {
     try {
@@ -111,9 +238,71 @@ export default function Header({ onMenuToggle }: HeaderProps) {
         <Menu className="h-5 w-5" />
       </Button>
 
-      <div className="relative flex-1 max-w-md hidden sm:block">
+      <div className="relative flex-1 max-w-md hidden sm:block" ref={searchRef}>
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input placeholder="Поиск..." className="pl-9 bg-secondary/50 border-none h-9 focus-visible:ring-1" />
+        <Input
+          placeholder="Глобальный поиск: таблицы, записи, участники, страницы..."
+          className="pl-9 pr-9 bg-secondary/50 border-none h-9 focus-visible:ring-1"
+          value={searchText}
+          onChange={(e) => setSearchText(e.target.value)}
+          onFocus={() => {
+            if (searchText.trim().length >= 2) setSearchOpen(true)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && searchResults.length > 0) {
+              const first = searchResults[0]
+              if (first) navigate(first.route)
+              setSearchOpen(false)
+            }
+          }}
+        />
+        {searchLoading && <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground animate-spin" />}
+
+        {searchOpen && (
+          <div className="absolute top-full mt-2 left-0 right-0 rounded-xl border border-border bg-popover shadow-xl z-50 max-h-[420px] overflow-y-auto">
+            {searchText.trim().length < 2 ? (
+              <div className="px-4 py-3 text-sm text-muted-foreground">Введи минимум 2 символа.</div>
+            ) : searchLoading ? (
+              <div className="px-4 py-3 text-sm text-muted-foreground">Ищем...</div>
+            ) : searchResults.length === 0 ? (
+              <div className="px-4 py-3 text-sm text-muted-foreground">Ничего не найдено.</div>
+            ) : (
+              <div className="p-2 space-y-2">
+                {[
+                  { key: 'tables', title: 'Таблицы', icon: Database, items: groupedResults.tables },
+                  { key: 'records', title: 'Записи', icon: FileText, items: groupedResults.records },
+                  { key: 'members', title: 'Участники', icon: Users, items: groupedResults.members },
+                  { key: 'knowledge', title: 'База знаний', icon: BookOpen, items: groupedResults.knowledge },
+                ].map((group) => {
+                  if (group.items.length === 0) return null
+                  return (
+                    <div key={group.key} className="rounded-lg border border-border/60 bg-background/40">
+                      <div className="px-3 py-2 text-xs text-muted-foreground border-b border-border/60 flex items-center gap-2">
+                        <group.icon className="h-3.5 w-3.5" />
+                        {group.title}
+                      </div>
+                      <div className="py-1">
+                        {group.items.map((item) => (
+                          <button
+                            key={item.id}
+                            onClick={() => {
+                              navigate(item.route)
+                              setSearchOpen(false)
+                            }}
+                            className="w-full text-left px-3 py-2 hover:bg-secondary/50 transition-colors"
+                          >
+                            <div className="text-sm">{item.title}</div>
+                            <div className="text-xs text-muted-foreground">{item.subtitle}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex-1" />

@@ -61,11 +61,15 @@ DEFAULT_PLANS: list[dict] = [
 
 
 async def upsert_default_plans(session: AsyncSession) -> None:
+    names = [str(data["name"]) for data in DEFAULT_PLANS]
+    existing_rows = (
+        await session.execute(select(Plan).where(Plan.name.in_(names)))
+    ).scalars().all()
+    existing_by_name = {plan.name: plan for plan in existing_rows}
+
     for data in DEFAULT_PLANS:
         name = data["name"]
-        plan = (
-            await session.execute(select(Plan).where(Plan.name == name))
-        ).scalars().first()
+        plan = existing_by_name.get(name)
 
         if plan is None:
             session.add(Plan(**data))

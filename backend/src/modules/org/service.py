@@ -4,6 +4,7 @@ from src.common.enums import UserRole
 from src.modules.auth.models import User
 from src.modules.org.models import Invite, Membership, Organization
 from src.modules.org.services import OrgInviteService, OrgMembersService, OrgProfileService
+from src.modules.org.schemas import OrgUpdateRequest
 
 
 class OrgService:
@@ -111,3 +112,6 @@ class OrgService:
 
     async def delete_org(self, org_id: uuid.UUID) -> None:
         await self._profile.delete_org(org_id)
+
+    async def update_org(self, org_id: uuid.UUID, body: OrgUpdateRequest) -> Organization:
+        return await self._profile.update_org(org_id, body)

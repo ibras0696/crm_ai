@@ -19,6 +19,7 @@ async def test_knowledge_pages_crud_flow(client: AsyncClient):
             "first_name": "KB",
             "last_name": "Owner",
             "org_name": "Knowledge Org",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201

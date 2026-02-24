@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -13,15 +14,23 @@ class RegisterRequest(BaseModel):
     # If present, registration will attach the user to an existing organization
     # with the role from the invite. org_name is ignored in that case.
     invite_token: str | None = None
+    # Legal requirement: explicit consent is mandatory.
+    accepted_privacy_policy: Literal[True]
 
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=8, max_length=128)
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: str | None = None
+
+
+class UpdateMeRequest(BaseModel):
+    first_name: str | None = Field(default=None, min_length=1, max_length=100)
+    last_name: str | None = Field(default=None, min_length=1, max_length=100)
+    timezone: str | None = Field(default=None, min_length=1, max_length=50)
 
 
 class TokenResponse(BaseModel):

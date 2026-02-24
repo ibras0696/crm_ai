@@ -29,11 +29,14 @@ def create_app() -> FastAPI:
         finally:
             await app.state.redis.close()
 
+    is_prod = str(settings.ENVIRONMENT).lower() == "production"
+    docs_enabled = (not is_prod) or bool(settings.EXPOSE_API_DOCS_IN_PROD)
+
     application = FastAPI(
         title=settings.APP_NAME,
         version=settings.APP_VERSION,
-        docs_url="/api/docs",
-        openapi_url="/api/openapi.json",
+        docs_url="/api/docs" if docs_enabled else None,
+        openapi_url="/api/openapi.json" if docs_enabled else None,
         lifespan=lifespan,
     )
 
@@ -74,7 +77,11 @@ def create_app() -> FastAPI:
     if settings.ENABLE_RATE_LIMIT:
         from src.middleware.rate_limit import RateLimitMiddleware
 
-        application.add_middleware(RateLimitMiddleware, requests_per_minute=120)
+        rpm = int(settings.RATE_LIMIT_REQUESTS_PER_MINUTE or 120)
+        # Dev UX: avoid false-positive 429 under local proxy/HMR noise.
+        if str(settings.ENVIRONMENT).lower() != "production":
+            rpm = max(rpm, 600)
+        application.add_middleware(RateLimitMiddleware, requests_per_minute=rpm)
 
     # Error handlers
     application.add_exception_handler(AppError, app_error_handler)

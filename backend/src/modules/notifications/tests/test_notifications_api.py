@@ -25,6 +25,7 @@ async def test_notifications_read_flow(client: AsyncClient, db_session: AsyncSes
             "first_name": "Notif",
             "last_name": "Owner",
             "org_name": "Notifications Org",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201

@@ -28,7 +28,23 @@ async def upload_file(
 ):
     async with UnitOfWork() as uow:
         service = FilesService(uow.session)
-        db_file = await service.upload(org_id=current_user.org_id, user_id=current_user.user_id, file=file)
+        try:
+            db_file = await service.upload(org_id=current_user.org_id, user_id=current_user.user_id, file=file)
+        except ValueError as exc:
+            code = str(exc)
+            if code == "UNSUPPORTED_MIME":
+                return ApiResponse(ok=False, data=None, error={"code": "UNSUPPORTED_MIME", "message": "Недопустимый тип файла."})
+            if code == "FILE_TOO_LARGE":
+                return ApiResponse(ok=False, data=None, error={"code": "FILE_TOO_LARGE", "message": "Файл превышает допустимый размер."})
+            if code == "EMPTY_FILE":
+                return ApiResponse(ok=False, data=None, error={"code": "EMPTY_FILE", "message": "Файл пустой."})
+            if code == "CONTENT_MISMATCH":
+                return ApiResponse(
+                    ok=False,
+                    data=None,
+                    error={"code": "CONTENT_MISMATCH", "message": "Содержимое файла не соответствует заявленному типу."},
+                )
+            return ApiResponse(ok=False, data=None, error={"code": "BAD_REQUEST", "message": "Некорректный файл."})
         await uow.commit()
         item = FileItem.model_validate(db_file)
     return ApiResponse(data=item)

@@ -17,9 +17,37 @@ class Settings(BaseSettings):
     ENABLE_SENTRY: bool = False
     ENABLE_METRICS: bool = True
     ENABLE_RATE_LIMIT: bool = True
+    RATE_LIMIT_REQUESTS_PER_MINUTE: int = 120
+    EXPOSE_API_DOCS_IN_PROD: bool = False
 
     # Security / hardening
     MAX_REQUEST_BODY_MB: int = 50
+    RATE_LIMIT_REDIS_PREFIX: str = "rate_limit"
+    FILE_MAX_UPLOAD_MB: int = 25
+    FILE_UPLOAD_CHUNK_SIZE_KB: int = 256
+    FILE_ALLOWED_MIME_TYPES: list[str] = [
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "application/pdf",
+        "text/plain",
+        "text/csv",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+    ]
+    TABLE_EXPORT_MAX_ROWS: int = 5000
+    TABLE_EXPORT_MAX_COLUMNS: int = 200
+    TABLE_IMPORT_MAX_BYTES: int = 5 * 1024 * 1024
+    TABLE_IMPORT_MAX_ROWS: int = 5000
+    TABLE_IMPORT_MAX_COLUMNS: int = 200
+    TABLE_IMPORT_MAX_CELL_CHARS: int = 4000
+    TABLE_IMPORT_MAX_PROCESSING_S: float = 8.0
+    AUTH_ACCESS_COOKIE_NAME: str = "access_token"
+    AUTH_REFRESH_COOKIE_NAME: str = "refresh_token"
+    AUTH_COOKIE_SECURE: bool = False
+    AUTH_COOKIE_SAMESITE: str = "lax"
+    AUTH_COOKIE_DOMAIN: str = ""
+    AUTH_COOKIE_PATH: str = "/"
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://crm_user:crm_pass@localhost:5432/crm_db"
@@ -38,6 +66,11 @@ class Settings(BaseSettings):
     # Auth / JWT
     SECRET_KEY: str = "super-secret-change-in-prod"
     JWT_ALGORITHM: str = "HS256"
+    JWT_USER_SECRET_KEY: str = ""
+    JWT_SUPERADMIN_SECRET_KEY: str = ""
+    JWT_ISSUER: str = "crm-platform"
+    JWT_AUDIENCE_USER: str = "crm-api-users"
+    JWT_AUDIENCE_SUPERADMIN: str = "crm-api-superadmin"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
@@ -102,6 +135,35 @@ class Settings(BaseSettings):
             return [p for p in parts if p]
         return [str(v).strip()]
 
+    @field_validator("FILE_ALLOWED_MIME_TYPES", mode="before")
+    @classmethod
+    def _parse_file_allowed_mime_types(cls, v: Any) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return [str(x).strip().lower() for x in v if str(x).strip()]
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return []
+            if s.startswith("["):
+                try:
+                    parsed = json.loads(s)
+                    if isinstance(parsed, list):
+                        return [str(x).strip().lower() for x in parsed if str(x).strip()]
+                except Exception:
+                    pass
+            return [p.strip().lower() for p in s.split(",") if p.strip()]
+        return [str(v).strip().lower()]
+
+    @field_validator("AUTH_COOKIE_SAMESITE", mode="before")
+    @classmethod
+    def _validate_auth_cookie_samesite(cls, v: Any) -> str:
+        s = str(v or "lax").strip().lower()
+        if s not in {"lax", "strict", "none"}:
+            return "lax"
+        return s
+
     # SMTP / Email
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
@@ -129,6 +191,9 @@ class Settings(BaseSettings):
     YOOKASSA_SHOP_ID: str = ""
     YOOKASSA_SECRET_KEY: str = ""
     YOOKASSA_RETURN_URL: str = "http://localhost:5173/billing/success"
+    BILLING_GRACE_DAYS: int = 7
+    BILLING_PRE_EXPIRY_NOTICE_HOURS: int = 24
+    BILLING_PURGE_AFTER_END_DAYS: int = 30
 
     # Sentry
     SENTRY_DSN: str = ""
@@ -136,6 +201,12 @@ class Settings(BaseSettings):
     # Superadmin (created from env, not tied to any org)
     SUPERADMIN_EMAIL: str = ""
     SUPERADMIN_PASSWORD: str = ""
+    SUPERADMIN_PASSWORD_HASH: str = ""
+    SUPERADMIN_ACCESS_COOKIE_NAME: str = "sa_access_token"
+    SUPERADMIN_LOGIN_MAX_ATTEMPTS: int = 5
+    SUPERADMIN_LOGIN_WINDOW_S: int = 900
+    SUPERADMIN_LOCK_BASE_S: int = 30
+    SUPERADMIN_LOCK_MAX_S: int = 1800
 
     # AI (Timeweb Agent / OpenAI-compatible)
     OPENAI_API_KEY: str = ""
@@ -162,28 +233,69 @@ class Settings(BaseSettings):
         if str(self.ENVIRONMENT).lower() != "production":
             return self
 
-        def _bad_default(value: str, default: str) -> bool:
-            return (value or "").strip() == default
+        def _is_unsafe(value: str, *, defaults: tuple[str, ...] = ()) -> bool:
+            v = (value or "").strip()
+            if not v:
+                return True
+            vl = v.lower()
+            if vl.startswith("change_me"):
+                return True
+            if vl in {"example.com", "localhost"}:
+                return True
+            return v in defaults
 
         errors: list[str] = []
 
-        if not self.SECRET_KEY or len(self.SECRET_KEY.strip()) < 32 or _bad_default(
-            self.SECRET_KEY, "super-secret-change-in-prod"
+        if len((self.SECRET_KEY or "").strip()) < 32 or _is_unsafe(
+            self.SECRET_KEY,
+            defaults=("super-secret-change-in-prod", "super-secret-dev-key-change-in-prod"),
         ):
             errors.append("SECRET_KEY")
+        if len((self.JWT_USER_SECRET_KEY or "").strip()) < 32 or _is_unsafe(self.JWT_USER_SECRET_KEY):
+            errors.append("JWT_USER_SECRET_KEY")
+        if len((self.JWT_SUPERADMIN_SECRET_KEY or "").strip()) < 32 or _is_unsafe(self.JWT_SUPERADMIN_SECRET_KEY):
+            errors.append("JWT_SUPERADMIN_SECRET_KEY")
+        if self.JWT_USER_SECRET_KEY.strip() and self.JWT_SUPERADMIN_SECRET_KEY.strip():
+            if self.JWT_USER_SECRET_KEY.strip() == self.JWT_SUPERADMIN_SECRET_KEY.strip():
+                errors.append("JWT_USER_SECRET_KEY/JWT_SUPERADMIN_SECRET_KEY")
 
-        if not self.DATABASE_URL or _bad_default(
-            self.DATABASE_URL, "postgresql+asyncpg://crm_user:crm_pass@localhost:5432/crm_db"
+        if _is_unsafe(
+            self.DATABASE_URL,
+            defaults=("postgresql+asyncpg://crm_user:crm_pass@localhost:5432/crm_db",),
         ):
             errors.append("DATABASE_URL")
+        if _is_unsafe(
+            self.DATABASE_URL_SYNC,
+            defaults=("postgresql+psycopg2://crm_user:crm_pass@localhost:5432/crm_db",),
+        ):
+            errors.append("DATABASE_URL_SYNC")
 
-        if not self.S3_ACCESS_KEY or _bad_default(self.S3_ACCESS_KEY, "minioadmin"):
+        if _is_unsafe(self.S3_ACCESS_KEY, defaults=("minioadmin",)):
             errors.append("S3_ACCESS_KEY")
-        if not self.S3_SECRET_KEY or _bad_default(self.S3_SECRET_KEY, "minioadmin"):
+        if _is_unsafe(self.S3_SECRET_KEY, defaults=("minioadmin",)):
             errors.append("S3_SECRET_KEY")
+        if _is_unsafe(
+            self.RABBITMQ_URL,
+            defaults=("amqp://guest:guest@localhost:5672/", "amqp://guest:guest@rabbitmq:5672/"),
+        ):
+            errors.append("RABBITMQ_URL")
+        if _is_unsafe(self.DOMAIN):
+            errors.append("DOMAIN")
+        if _is_unsafe(self.FRONTEND_URL):
+            errors.append("FRONTEND_URL")
+        if any("localhost" in (o or "").lower() for o in (self.CORS_ORIGINS or [])):
+            errors.append("CORS_ORIGINS")
 
         if self.ENABLE_AI and not (self.OPENAI_BEARER_TOKEN.strip() or self.OPENAI_API_KEY.strip()):
             errors.append("OPENAI_BEARER_TOKEN/OPENAI_API_KEY")
+        if bool(self.SUPERADMIN_EMAIL.strip()) ^ bool(self.SUPERADMIN_PASSWORD_HASH.strip()):
+            errors.append("SUPERADMIN_EMAIL/SUPERADMIN_PASSWORD_HASH")
+        if self.SUPERADMIN_PASSWORD.strip():
+            errors.append("SUPERADMIN_PASSWORD")
+        if not bool(self.AUTH_COOKIE_SECURE):
+            errors.append("AUTH_COOKIE_SECURE")
+        if self.AUTH_COOKIE_SAMESITE == "none" and not bool(self.AUTH_COOKIE_SECURE):
+            errors.append("AUTH_COOKIE_SECURE (required when AUTH_COOKIE_SAMESITE=none)")
 
         if errors:
             raise ValueError(

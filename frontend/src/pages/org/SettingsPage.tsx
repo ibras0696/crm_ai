@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+﻿import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
@@ -24,6 +24,24 @@ export default function SettingsPage() {
   const [orgLoading, setOrgLoading] = useState(false)
   const [orgSaved, setOrgSaved] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
+
+  const timezoneOptions = useMemo(() => {
+    const base = [
+      { value: 'Europe/Moscow', label: 'Москва (MSK, UTC+3)' },
+      { value: 'Europe/Berlin', label: 'Европа: Берлин (CET/CEST)' },
+      { value: 'Europe/London', label: 'Европа: Лондон (GMT/BST)' },
+      { value: 'Asia/Yekaterinburg', label: 'Екатеринбург (UTC+5)' },
+      { value: 'Asia/Novosibirsk', label: 'Новосибирск (UTC+7)' },
+      { value: 'Asia/Vladivostok', label: 'Владивосток (UTC+10)' },
+      { value: 'Asia/Almaty', label: 'Алматы (UTC+5)' },
+      { value: 'UTC', label: 'UTC (универсальное время)' },
+    ]
+    const current = (profileForm.timezone || '').trim()
+    if (current && !base.some((tz) => tz.value === current)) {
+      return [{ value: current, label: `Текущий: ${current}` }, ...base]
+    }
+    return base
+  }, [profileForm.timezone])
 
   const saveProfile = async () => {
     setProfileLoading(true)
@@ -115,11 +133,18 @@ export default function SettingsPage() {
           </div>
           <div className="space-y-2">
             <Label>Часовой пояс</Label>
-            <Input
+            <select
               value={profileForm.timezone}
               onChange={(e) => setProfileForm((p) => ({ ...p, timezone: e.target.value }))}
-              className="bg-secondary/50"
-            />
+              className="flex h-10 w-full rounded-md border border-input bg-secondary/50 px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {timezoneOptions.map((tz) => (
+                <option key={tz.value} value={tz.value}>
+                  {tz.label}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground">Рекомендуем для России: Москва (MSK, UTC+3)</p>
           </div>
           <Button className="gradient-primary border-0 text-white" onClick={saveProfile} disabled={profileLoading}>
             {profileLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : profileSaved ? <Check className="h-4 w-4 mr-2" /> : null}
@@ -193,9 +218,17 @@ export default function SettingsPage() {
                 <span>Базовый RBAC</span>
               </div>
             </div>
-            <Button variant="outline" className="w-full" disabled>
-              Перейти на Team - скоро
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                className="gradient-primary border-0 text-white flex-1"
+                onClick={() => navigate('/billing')}
+              >
+                Открыть биллинг
+              </Button>
+              <Badge variant="secondary" className="text-xs">
+                Team скоро
+              </Badge>
+            </div>
           </div>
         </CardContent>
       </Card>

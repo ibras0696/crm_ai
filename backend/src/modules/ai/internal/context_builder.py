@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from src.infrastructure.uow import UnitOfWork
@@ -142,6 +142,35 @@ async def _build_org_context_internal(
                 parts.append("\n=== TABLES ===")
                 schema_lines: list[str] = []
                 sample_lines: list[str] = []
+                records_by_table: dict[uuid.UUID, list[dict]] = {}
+                if flags["include_table_records"]:
+                    table_ids = [t.id for t in tables]
+                    if table_ids:
+                        ranked_recs = (
+                            select(
+                                Record.table_id.label("table_id"),
+                                Record.data.label("data"),
+                                func.row_number().over(
+                                    partition_by=Record.table_id,
+                                    order_by=Record.created_at.desc(),
+                                ).label("rn"),
+                            )
+                            .where(Record.table_id.in_(table_ids))
+                            .subquery()
+                        )
+                        rec_rows = (
+                            await uow.session.execute(
+                                select(ranked_recs.c.table_id, ranked_recs.c.data)
+                                .where(ranked_recs.c.rn <= flags["records_per_table"])
+                                .order_by(ranked_recs.c.table_id, ranked_recs.c.rn),
+                            )
+                        ).all()
+                        for row in rec_rows:
+                            table_id = row.table_id
+                            if table_id not in records_by_table:
+                                records_by_table[table_id] = []
+                            records_by_table[table_id].append(row.data or {})
+
                 for table_obj in tables:
                     if flags["include_table_schema"]:
                         col_parts = ", ".join(
@@ -150,15 +179,11 @@ async def _build_org_context_internal(
                         )
                         schema_lines.append(f"Table: {table_obj.name}(table_id={table_obj.id}) | Columns: {col_parts}")
                     if flags["include_table_records"]:
-                        recs = (
-                            await uow.session.execute(
-                                select(Record).where(Record.table_id == table_obj.id).limit(flags["records_per_table"])
-                            )
-                        ).scalars().all()
+                        recs = records_by_table.get(table_obj.id, [])
                         if recs:
                             cmap = {str(c.id): c.name for c in table_obj.columns}
                             for rec in recs:
-                                pairs = [f"{cmap.get(cid, cid[:8])}={val}" for cid, val in (rec.data or {}).items()]
+                                pairs = [f"{cmap.get(cid, cid[:8])}={val}" for cid, val in (rec or {}).items()]
                                 sample_lines.append(f"[{table_obj.name}] {', '.join(pairs[:10])}")
                 if schema_lines:
                     schema_block = "\n".join(schema_lines)
@@ -235,4 +260,3 @@ async def build_org_context_for_user(
 ) -> tuple[str, dict[str, Any]]:
     """Собрать контекст организации для конкретного пользователя."""
     return await _build_org_context_internal(org_id=org_id, user_id=user_id, options=options)
-

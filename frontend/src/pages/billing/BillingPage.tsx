@@ -5,6 +5,8 @@ import { CreditCard, Zap, Users, Database, HardDrive, FileText, Check, Crown, Sp
 interface SubInfo {
   plan: string; status: string
   current_period_start: string | null; current_period_end: string | null
+  grace_period_end?: string | null
+  data_purge_at?: string | null
 }
 
 const PLAN_COLORS: Record<string, { bg: string; border: string; text: string; badge: string }> = {
@@ -19,7 +21,6 @@ export default function BillingPage() {
   const [usage, setUsage] = useState<UsageInfo | null>(null)
   const [sub, setSub] = useState<SubInfo | null>(null)
   const [loading, setLoading] = useState(true)
-  const [period, setPeriod] = useState<'monthly' | 'yearly'>('monthly')
   const [paying, setPaying] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const [cancelConfirm, setCancelConfirm] = useState(false)
@@ -56,7 +57,7 @@ export default function BillingPage() {
   const handleUpgrade = async (planName: string) => {
     setPaying(true)
     try {
-      const r = await billingApi.createPayment(planName, period)
+      const r = await billingApi.createPayment(planName, 'monthly')
       if (r.data.ok && r.data.data) {
         const url = (r.data.data as any).confirmation_url
         if (url) window.location.href = url
@@ -99,6 +100,8 @@ export default function BillingPage() {
               <p className="text-xs text-muted-foreground">
                 Статус: <span className={sub.status === 'active' ? 'text-emerald-500' : 'text-amber-500'}>{sub.status === 'active' ? 'Активен' : sub.status}</span>
                 {sub.current_period_end && <> · до {new Date(sub.current_period_end).toLocaleDateString('ru')}</>}
+                {sub.grace_period_end && <> · льготный период до {new Date(sub.grace_period_end).toLocaleDateString('ru')}</>}
+                {sub.data_purge_at && <> · удаление данных после {new Date(sub.data_purge_at).toLocaleDateString('ru')}</>}
               </p>
             </div>
           </div>
@@ -128,23 +131,14 @@ export default function BillingPage() {
         </div>
       )}
 
-      {/* Period toggle */}
-      <div className="flex items-center gap-2 justify-center">
-        <button onClick={() => setPeriod('monthly')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${period === 'monthly' ? 'bg-primary text-white' : 'bg-secondary/50 text-muted-foreground hover:text-foreground'}`}>
-          Ежемесячно
-        </button>
-        <button onClick={() => setPeriod('yearly')} className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors flex items-center gap-1.5 ${period === 'yearly' ? 'bg-primary text-white' : 'bg-secondary/50 text-muted-foreground hover:text-foreground'}`}>
-          Ежегодно <span className="text-[10px] bg-emerald-500/20 text-emerald-600 px-1.5 py-0.5 rounded-full font-bold">−20%</span>
-        </button>
-      </div>
-
       {/* Plans */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {plans.map(plan => {
           const planKey = plan.name ?? 'free'
           const colors = PLAN_COLORS[planKey] ?? PLAN_COLORS.free ?? DEFAULT_PLAN_COLORS
-          const price = period === 'yearly' ? plan.price_yearly : plan.price_monthly
+          const price = plan.price_monthly
           const isCurrent = sub?.plan === plan.name
+          const storageGb = plan.max_storage_mb >= 999999 ? null : (plan.max_storage_mb / 1024)
           return (
             <div key={plan.id} className={`rounded-2xl border-2 ${isCurrent ? 'border-primary' : colors.border} ${colors.bg} p-5 flex flex-col relative`}>
               {isCurrent && (
@@ -157,13 +151,13 @@ export default function BillingPage() {
                 {plan.has_ai && <Sparkles className="h-3.5 w-3.5 text-amber-500" />}
               </div>
               <p className="text-3xl font-bold mb-1">{formatPrice(price)}</p>
-              <p className="text-xs text-muted-foreground mb-4">{period === 'yearly' ? 'в год' : 'в месяц'}</p>
+              <p className="text-xs text-muted-foreground mb-4">в месяц</p>
               <div className="space-y-2 flex-1 mb-4">
                 {[
                   plan.max_members >= 999999 ? 'Участников: без ограничений' : `${plan.max_members} участников`,
                   plan.max_tables >= 999999 ? 'Таблиц: без ограничений' : `${plan.max_tables} таблиц`,
                   plan.max_records >= 999999 ? 'Записей: без ограничений' : `${plan.max_records.toLocaleString('ru')} записей`,
-                  plan.max_storage_mb >= 999999 ? 'Хранилище: без ограничений' : `${plan.max_storage_mb} МБ хранилище`,
+                  plan.max_storage_mb >= 999999 ? 'Хранилище: без ограничений' : `${storageGb?.toLocaleString('ru', { maximumFractionDigits: 2 })} ГБ хранилище`,
                   plan.has_ai ? 'AI Агент' : null,
                 ].filter(Boolean).map((feat, i) => (
                   <div key={i} className="flex items-center gap-2 text-sm">
@@ -207,8 +201,8 @@ export default function BillingPage() {
             Опасная зона
           </h3>
           <p className="text-sm text-muted-foreground">
-            Отмена подписки переведёт организацию на бесплатный тариф в конце текущего расчётного периода.
-            Все данные сохранятся, но доступ к функциям тарифа «Команда» будет ограничен.
+            Отмена или неоплата переводит организацию на бесплатный тариф после льготного периода.
+            Через 30 дней после окончания подписки данные будут автоматически очищены.
           </p>
           {!cancelConfirm ? (
             <button

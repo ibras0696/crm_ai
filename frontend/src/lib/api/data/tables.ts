@@ -28,6 +28,7 @@ export interface TableInfo {
 export interface FolderInfo {
   id: string
   org_id: string
+  parent_id: string | null
   name: string
   position: number
   created_at: string
@@ -50,8 +51,8 @@ export const tablesApi = {
 
   // Folder endpoints
   listFolders: () => api.get<ApiResponse<FolderInfo[]>>('/tables/folders/'),
-  createFolder: (data: { name: string }) => api.post<ApiResponse<FolderInfo>>('/tables/folders/', data),
-  updateFolder: (folderId: string, data: { name?: string; position?: number }) =>
+  createFolder: (data: { name: string; parent_id?: string | null }) => api.post<ApiResponse<FolderInfo>>('/tables/folders/', data),
+  updateFolder: (folderId: string, data: { name?: string; position?: number; parent_id?: string | null }) =>
     api.patch<ApiResponse<FolderInfo>>(`/tables/folders/${folderId}`, data),
   deleteFolder: (folderId: string) => api.delete<ApiResponse<null>>(`/tables/folders/${folderId}`),
 }

@@ -18,6 +18,7 @@ async def _register_owner(client: AsyncClient) -> str:
             "first_name": "Owner",
             "last_name": "User",
             "org_name": f"Org-{uuid.uuid4().hex[:6]}",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
@@ -95,3 +96,124 @@ async def test_reports_dashboard_crud_and_data(client: AsyncClient):
 
     dd = await client.delete(f"/api/v1/reports/dashboards/{dash_id}", headers=_headers(token))
     assert dd.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_reports_not_found_and_validation(client: AsyncClient):
+    token = await _register_owner(client)
+
+    # Invalid dashboard name (blank after trim) must be rejected.
+    bad_dashboard = await client.post(
+        "/api/v1/reports/dashboards",
+        json={"name": "   ", "description": "bad"},
+        headers=_headers(token),
+    )
+    assert bad_dashboard.status_code == 422
+
+    # Missing dashboard for widget create should return domain NOT_FOUND response.
+    missing_dash_id = str(uuid.uuid4())
+    missing_widget = await client.post(
+        f"/api/v1/reports/dashboards/{missing_dash_id}/widgets",
+        json={"title": "W", "widget_type": "metric", "config": {"aggregation": "count"}},
+        headers=_headers(token),
+    )
+    assert missing_widget.status_code == 200
+    assert missing_widget.json()["ok"] is False
+    assert missing_widget.json()["error"]["code"] == "NOT_FOUND"
+
+    # Invalid widget type / config validation.
+    d = await client.post("/api/v1/reports/dashboards", json={"name": "V"}, headers=_headers(token))
+    assert d.status_code == 200 and d.json()["ok"] is True
+    dash_id = d.json()["data"]["id"]
+
+    bad_widget_type = await client.post(
+        f"/api/v1/reports/dashboards/{dash_id}/widgets",
+        json={"title": "W", "widget_type": "invalid_widget"},
+        headers=_headers(token),
+    )
+    assert bad_widget_type.status_code == 422
+
+    bad_aggregation = await client.post(
+        f"/api/v1/reports/dashboards/{dash_id}/widgets",
+        json={
+            "title": "W2",
+            "widget_type": "metric",
+            "config": {"aggregation": "median"},
+        },
+        headers=_headers(token),
+    )
+    assert bad_aggregation.status_code == 422
+
+    bad_limit = await client.post(
+        f"/api/v1/reports/dashboards/{dash_id}/widgets",
+        json={
+            "title": "W3",
+            "widget_type": "table",
+            "config": {"limit": 999},
+        },
+        headers=_headers(token),
+    )
+    assert bad_limit.status_code == 422
+
+    # table analytics for unknown table id -> NOT_FOUND payload.
+    unknown_table = await client.post(
+        "/api/v1/reports/table-analytics",
+        json={"table_id": str(uuid.uuid4()), "column_ids": []},
+        headers=_headers(token),
+    )
+    assert unknown_table.status_code == 200
+    assert unknown_table.json()["ok"] is False
+    assert unknown_table.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_reports_employee_read_only_access(client: AsyncClient):
+    owner_token = await _register_owner(client)
+    invite_email = f"emp-{uuid.uuid4().hex[:8]}@example.com"
+
+    inv = await client.post(
+        "/api/v1/orgs/invites",
+        json={"email": invite_email, "role": "employee"},
+        headers=_headers(owner_token),
+    )
+    assert inv.status_code == 201
+    invite_token = inv.json()["data"]["token"]
+
+    acc = await client.post(
+        "/api/v1/orgs/invites/accept",
+        json={
+            "token": invite_token,
+            "password": "StrongPass123!",
+            "first_name": "Emp",
+            "last_name": "User",
+        },
+    )
+    assert acc.status_code == 200
+    employee_token = acc.json()["data"]["access_token"]
+
+    # Owner creates dashboard.
+    d = await client.post(
+        "/api/v1/reports/dashboards",
+        json={"name": "Owner dashboard", "description": "for read"},
+        headers=_headers(owner_token),
+    )
+    assert d.status_code == 200 and d.json()["ok"] is True
+    dash_id = d.json()["data"]["id"]
+
+    # Employee can read dashboards list and dashboard data.
+    list_resp = await client.get("/api/v1/reports/dashboards", headers=_headers(employee_token))
+    assert list_resp.status_code == 200
+    assert list_resp.json()["ok"] is True
+    assert any(item["id"] == dash_id for item in list_resp.json()["data"])
+
+    data_resp = await client.get(f"/api/v1/reports/dashboards/{dash_id}/data", headers=_headers(employee_token))
+    assert data_resp.status_code == 200
+    assert data_resp.json()["ok"] is True
+
+    # Employee cannot create dashboards.
+    create_forbidden = await client.post(
+        "/api/v1/reports/dashboards",
+        json={"name": "Forbidden"},
+        headers=_headers(employee_token),
+    )
+    assert create_forbidden.status_code == 403

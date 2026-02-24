@@ -20,6 +20,7 @@ async def test_access_rules_enforce_table_write_for_employee(client: AsyncClient
             "first_name": "Owner",
             "last_name": "User",
             "org_name": "Access Rules Org",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
@@ -85,6 +86,7 @@ async def test_access_rules_crud_owner(client: AsyncClient):
             "first_name": "Owner",
             "last_name": "User",
             "org_name": "Access Rules CRUD Org",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
@@ -140,6 +142,7 @@ async def test_access_rules_create_validation_errors_are_api_response(client: As
             "first_name": "Owner",
             "last_name": "User",
             "org_name": "Access Rules Validation Org",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
@@ -199,6 +202,7 @@ async def test_access_rules_default_deny_when_rules_exist_but_no_match(client: A
             "first_name": "Owner",
             "last_name": "User",
             "org_name": "Access Rules Default Deny Org",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
@@ -250,6 +254,7 @@ async def test_access_rules_duplicate_scope_subject_rejected(client: AsyncClient
             "first_name": "Owner",
             "last_name": "User",
             "org_name": "Access Rules Unique Org",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
@@ -282,6 +287,7 @@ async def test_access_rules_list_includes_global_for_specific_resource(client: A
             "first_name": "Owner",
             "last_name": "User",
             "org_name": "Access Rules List Scope Org",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
@@ -339,6 +345,7 @@ async def test_access_rules_list_pagination(client: AsyncClient):
             "first_name": "Owner",
             "last_name": "User",
             "org_name": "Access Rules Pagination Org",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
@@ -381,6 +388,7 @@ async def test_access_rules_update_empty_payload_rejected(client: AsyncClient):
             "first_name": "Owner",
             "last_name": "User",
             "org_name": "Access Rules Update Empty Org",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201

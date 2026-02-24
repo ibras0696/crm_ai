@@ -19,6 +19,7 @@ async def test_files_upload_list_download_delete(client: AsyncClient, monkeypatc
             "first_name": "Owner",
             "last_name": "User",
             "org_name": "Files API Org",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
@@ -26,12 +27,20 @@ async def test_files_upload_list_download_delete(client: AsyncClient, monkeypatc
 
     mem_storage: dict[tuple[str, str], tuple[bytes, str]] = {}
 
-    def _fake_upload(data: bytes, content_type: str, org_id: uuid.UUID, original_name: str) -> tuple[str, str]:
+    def _store_payload(payload: bytes, content_type: str, org_id: uuid.UUID, original_name: str) -> tuple[str, str]:
         ext = original_name.rsplit(".", 1)[-1] if "." in original_name else "bin"
         key = f"{org_id}/{uuid.uuid4().hex}.{ext}"
         bucket = "test-bucket"
-        mem_storage[(bucket, key)] = (data, content_type)
+        mem_storage[(bucket, key)] = (payload, content_type)
         return key, bucket
+
+    def _fake_upload(data: bytes, content_type: str, org_id: uuid.UUID, original_name: str) -> tuple[str, str]:
+        return _store_payload(data, content_type, org_id, original_name)
+
+    def _fake_upload_fileobj(fileobj, content_type: str, org_id: uuid.UUID, original_name: str) -> tuple[str, str]:
+        fileobj.seek(0)
+        payload = fileobj.read()
+        return _store_payload(payload, content_type, org_id, original_name)
 
     def _fake_download(s3_key: str, bucket: str) -> tuple[bytes, str]:
         return mem_storage[(bucket, s3_key)]
@@ -40,6 +49,7 @@ async def test_files_upload_list_download_delete(client: AsyncClient, monkeypatc
         mem_storage.pop((bucket, s3_key), None)
 
     monkeypatch.setattr("src.modules.files.service.storage.upload_file", _fake_upload)
+    monkeypatch.setattr("src.modules.files.service.storage.upload_fileobj", _fake_upload_fileobj)
     monkeypatch.setattr("src.modules.files.service.storage.download_file", _fake_download)
     monkeypatch.setattr("src.modules.files.service.storage.delete_file", _fake_delete)
 
@@ -70,4 +80,3 @@ async def test_files_upload_list_download_delete(client: AsyncClient, monkeypatc
     assert missing.status_code == 200
     assert missing.json()["ok"] is False
     assert missing.json()["error"]["code"] == "NOT_FOUND"
-

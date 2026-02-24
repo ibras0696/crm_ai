@@ -41,6 +41,9 @@ class AuditAction(str, enum.Enum):
     ROLE_CHANGED = "role_changed"
     EXPORT = "export"
     AI_QUERY = "ai_query"
+    LOGIN_FAILED = "login_failed"
+    ACCESS_DENIED = "access_denied"
+    TOKEN_ANOMALY = "token_anomaly"
 
 
 class NotificationType(str, enum.Enum):

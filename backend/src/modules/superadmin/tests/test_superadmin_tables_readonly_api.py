@@ -3,19 +3,16 @@ import uuid
 import pytest
 from httpx import AsyncClient
 
-from src.config import settings
-
-
 def _h(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
-async def _login_sa(client: AsyncClient, monkeypatch) -> str:
-    monkeypatch.setattr(settings, "SUPERADMIN_EMAIL", "admin")
-    monkeypatch.setattr(settings, "SUPERADMIN_PASSWORD", "12345678")
-    r = await client.post("/api/v1/superadmin/login", json={"email": "admin", "password": "12345678"})
+async def _login_sa(client: AsyncClient) -> str:
+    r = await client.post("/api/v1/superadmin/login", json={"email": "admin@test.local", "password": "12345678"})
     assert r.status_code == 200
-    return r.json()["data"]["access_token"]
+    body = r.json()
+    assert body["ok"] is True, body
+    return body["data"]["access_token"]
 
 
 async def _register_owner(client: AsyncClient, *, org_name: str) -> tuple[str, str]:
@@ -28,6 +25,7 @@ async def _register_owner(client: AsyncClient, *, org_name: str) -> tuple[str, s
             "first_name": "Owner",
             "last_name": "User",
             "org_name": org_name,
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
@@ -54,8 +52,8 @@ async def _create_table_with_data(client: AsyncClient, token: str, *, name: str)
 
 
 @pytest.mark.asyncio
-async def test_superadmin_tables_readonly_scoped_to_org(client: AsyncClient, monkeypatch):
-    sa = await _login_sa(client, monkeypatch)
+async def test_superadmin_tables_readonly_scoped_to_org(client: AsyncClient):
+    sa = await _login_sa(client)
 
     tok1, org1 = await _register_owner(client, org_name="Org One")
     tok2, org2 = await _register_owner(client, org_name="Org Two")
@@ -77,8 +75,8 @@ async def test_superadmin_tables_readonly_scoped_to_org(client: AsyncClient, mon
 
 
 @pytest.mark.asyncio
-async def test_superadmin_table_records_and_export(client: AsyncClient, monkeypatch):
-    sa = await _login_sa(client, monkeypatch)
+async def test_superadmin_table_records_and_export(client: AsyncClient):
+    sa = await _login_sa(client)
     tok, org_id = await _register_owner(client, org_name="Org Export")
     table_id, _ = await _create_table_with_data(client, tok, name="Exportable")
 
@@ -98,4 +96,3 @@ async def test_superadmin_table_records_and_export(client: AsyncClient, monkeypa
     xlsx = await client.get(f"/api/v1/superadmin/orgs/{org_id}/tables/{table_id}/export/xlsx", headers=_h(sa))
     assert xlsx.status_code == 200
     assert "application/vnd.openxmlformats" in xlsx.headers.get("content-type", "")
-

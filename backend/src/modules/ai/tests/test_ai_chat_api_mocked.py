@@ -1,5 +1,6 @@
 import uuid
 
+import httpx
 import pytest
 from httpx import AsyncClient
 
@@ -18,6 +19,7 @@ async def _register_owner(client: AsyncClient) -> str:
             "first_name": "Owner",
             "last_name": "User",
             "org_name": f"Org-{uuid.uuid4().hex[:6]}",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
@@ -90,3 +92,138 @@ async def test_ai_chat_executes_action_with_mocked_provider(client: AsyncClient,
     assert d.status_code == 200
 
     settings.OPENAI_BEARER_TOKEN = old_token
+
+
+@pytest.mark.asyncio
+async def test_ai_chat_rejects_when_ai_disabled(client: AsyncClient):
+    token = await _register_owner(client)
+    from src.config import settings
+
+    old_enabled = settings.ENABLE_AI
+    settings.ENABLE_AI = False
+    try:
+        resp = await client.post(
+            "/api/v1/ai/chat",
+            json={"message": "hello", "include_context": False},
+            headers=_headers(token),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is False
+        assert body["error"]["code"] == "AI_DISABLED"
+    finally:
+        settings.ENABLE_AI = old_enabled
+
+
+@pytest.mark.asyncio
+async def test_ai_chat_rejects_when_provider_token_missing(client: AsyncClient):
+    token = await _register_owner(client)
+    from src.config import settings
+
+    old_bearer = settings.OPENAI_BEARER_TOKEN
+    old_api_key = settings.OPENAI_API_KEY
+    settings.OPENAI_BEARER_TOKEN = ""
+    settings.OPENAI_API_KEY = ""
+    try:
+        resp = await client.post(
+            "/api/v1/ai/chat",
+            json={"message": "hello", "include_context": False},
+            headers=_headers(token),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is False
+        assert body["error"]["code"] == "AI_NOT_CONFIGURED"
+    finally:
+        settings.OPENAI_BEARER_TOKEN = old_bearer
+        settings.OPENAI_API_KEY = old_api_key
+
+
+@pytest.mark.asyncio
+async def test_ai_chat_handles_provider_error_variants(client: AsyncClient, monkeypatch):
+    token = await _register_owner(client)
+    from src.config import settings
+    from src.modules.ai.internal import chat_controller as ai_chat_controller
+
+    old_token = settings.OPENAI_BEARER_TOKEN
+    settings.OPENAI_BEARER_TOKEN = "test-token"
+    try:
+        async def _bad_payload(*args, **kwargs):
+            return {"choices": []}
+
+        monkeypatch.setattr(ai_chat_controller, "call_openai_compatible_api", _bad_payload)
+        bad_payload_resp = await client.post(
+            "/api/v1/ai/chat",
+            json={"message": "hello", "include_context": False},
+            headers=_headers(token),
+        )
+        assert bad_payload_resp.status_code == 200
+        bad_payload_body = bad_payload_resp.json()
+        assert bad_payload_body["ok"] is False
+        assert bad_payload_body["error"]["code"] == "AI_BAD_PROVIDER_RESPONSE"
+
+        async def _unauthorized(*args, **kwargs):
+            request = httpx.Request("POST", "https://provider.local/chat")
+            response = httpx.Response(status_code=401, request=request)
+            raise httpx.HTTPStatusError("unauthorized", request=request, response=response)
+
+        monkeypatch.setattr(ai_chat_controller, "call_openai_compatible_api", _unauthorized)
+        unauthorized_resp = await client.post(
+            "/api/v1/ai/chat",
+            json={"message": "hello", "include_context": False},
+            headers=_headers(token),
+        )
+        assert unauthorized_resp.status_code == 200
+        unauthorized_body = unauthorized_resp.json()
+        assert unauthorized_body["ok"] is False
+        assert unauthorized_body["error"]["code"] == "AI_PROVIDER_UNAUTHORIZED"
+
+        async def _provider_error(*args, **kwargs):
+            request = httpx.Request("POST", "https://provider.local/chat")
+            response = httpx.Response(status_code=500, request=request)
+            raise httpx.HTTPStatusError("server error", request=request, response=response)
+
+        monkeypatch.setattr(ai_chat_controller, "call_openai_compatible_api", _provider_error)
+        provider_error_resp = await client.post(
+            "/api/v1/ai/chat",
+            json={"message": "hello", "include_context": False},
+            headers=_headers(token),
+        )
+        assert provider_error_resp.status_code == 200
+        provider_error_body = provider_error_resp.json()
+        assert provider_error_body["ok"] is False
+        assert provider_error_body["error"]["code"] == "AI_ERROR"
+        assert "500" not in provider_error_body["error"]["message"]
+    finally:
+        settings.OPENAI_BEARER_TOKEN = old_token
+
+
+@pytest.mark.asyncio
+async def test_ai_chat_rejects_on_limit_before_provider_call(client: AsyncClient, monkeypatch):
+    token = await _register_owner(client)
+    from src.config import settings
+    from src.modules.ai.internal import chat_controller as ai_chat_controller
+
+    old_token = settings.OPENAI_BEARER_TOKEN
+    settings.OPENAI_BEARER_TOKEN = "test-token"
+    try:
+        async def _deny_limit(*args, **kwargs):
+            return False, {"code": "AI_DAILY_LIMIT", "message": "limit reached"}
+
+        async def _provider_should_not_be_called(*args, **kwargs):
+            raise AssertionError("provider should not be called when limits reject request")
+
+        monkeypatch.setattr(ai_chat_controller, "check_ai_limits", _deny_limit)
+        monkeypatch.setattr(ai_chat_controller, "call_openai_compatible_api", _provider_should_not_be_called)
+
+        resp = await client.post(
+            "/api/v1/ai/chat",
+            json={"message": "hello", "include_context": False},
+            headers=_headers(token),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is False
+        assert body["error"]["code"] == "AI_DAILY_LIMIT"
+    finally:
+        settings.OPENAI_BEARER_TOKEN = old_token

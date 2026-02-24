@@ -10,6 +10,7 @@ class NotificationItem(BaseModel):
     id: uuid.UUID
     title: str
     body: str | None
+    meta: dict | None
     is_read: bool
     created_at: datetime
 

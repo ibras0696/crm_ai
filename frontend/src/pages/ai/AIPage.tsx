@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   aiApi,
+  tablesApi,
   type AIChatMessage,
   type AIChatSession,
   type AIContextOptions,
   type AIContextEstimate,
   type AIContextSourcePage,
   type AIContextSourceTable,
+  type FolderInfo,
+  type TableInfo,
 } from '@/lib/api'
 import ContextControl from '@/components/ai/ContextControl'
 import CapabilitiesMenu from '@/components/ai/CapabilitiesMenu'
@@ -83,6 +86,8 @@ export default function AIPage() {
   const [contextOpen, setContextOpen] = useState(false)
 
   const [contextSources, setContextSources] = useState<{ kb_pages: AIContextSourcePage[]; tables: AIContextSourceTable[] }>({ kb_pages: [], tables: [] })
+  const [contextTableFolders, setContextTableFolders] = useState<FolderInfo[]>([])
+  const [contextTableFolderById, setContextTableFolderById] = useState<Record<string, string | null>>({})
   const [includeContext, setIncludeContext] = useState(true)
   const [contextOptions, setContextOptions] = useState<AIContextOptions>({
     include_kb: true,
@@ -136,8 +141,20 @@ export default function AIPage() {
 
   const loadContextSources = useCallback(async () => {
     try {
-      const r = await aiApi.contextSources()
-      if (r.data.ok && r.data.data) setContextSources(r.data.data)
+      const [ctxResp, foldersResp, tablesResp] = await Promise.all([
+        aiApi.contextSources(),
+        tablesApi.listFolders(),
+        tablesApi.list(),
+      ])
+      if (ctxResp.data.ok && ctxResp.data.data) setContextSources(ctxResp.data.data)
+      if (foldersResp.data.ok && foldersResp.data.data) setContextTableFolders(foldersResp.data.data)
+      if (tablesResp.data.ok && tablesResp.data.data) {
+        const map: Record<string, string | null> = {}
+        for (const t of tablesResp.data.data as TableInfo[]) {
+          map[t.id] = t.folder_id ?? null
+        }
+        setContextTableFolderById(map)
+      }
     } catch {
       // ignore
     }
@@ -490,6 +507,8 @@ export default function AIPage() {
             setContextOptions={(updater) => setContextOptions(updater)}
             contextEstimate={contextEstimate}
             contextSources={contextSources}
+            tableFolders={contextTableFolders}
+            tableFolderById={contextTableFolderById}
           />
         </>
       )}

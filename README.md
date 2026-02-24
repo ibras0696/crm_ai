@@ -174,6 +174,10 @@ docker compose -f docker-compose.prod.yml -f secrets.yml up -d --build
 - Prometheus скрейпит:
   - `api:8000/metrics` (метрики приложения + HTTP)
   - `node-exporter:9100/metrics` (CPU/RAM/диск/сеть; в Docker Desktop это “взгляд контейнера”)
+- Загружает alert rules из `monitoring/alerts/*.yml`
+- Ключевые метрики уведомлений:
+  - `crm_notification_email_send_total{kind,status}` — отправка email (sent/failed/disabled)
+  - `crm_invite_email_validation_total{result}` — результаты предвалидации инвайтов
 
 ### Grafana
 - Datasource уже provisioned: Prometheus (`monitoring/grafana/provisioning/datasources/prometheus.yml`)

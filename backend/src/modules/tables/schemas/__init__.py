@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
 class ColumnOut(BaseModel):
@@ -40,6 +40,7 @@ class TableOut(BaseModel):
 class FolderOut(BaseModel):
     id: uuid.UUID
     org_id: uuid.UUID
+    parent_id: uuid.UUID | None
     name: str
     position: int
     created_at: datetime
@@ -48,29 +49,67 @@ class FolderOut(BaseModel):
 
 
 class CreateTableRequest(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=120)
     description: str | None = None
     icon: str | None = None
     color: str | None = None
     folder_id: uuid.UUID | None = None
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def _normalize_name(cls, value: str) -> str:
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("Название не может быть пустым")
+        return normalized
+
 
 class UpdateTableRequest(BaseModel):
-    name: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=120)
     description: str | None = None
     icon: str | None = None
     color: str | None = None
     is_archived: bool | None = None
     folder_id: uuid.UUID | None = None
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def _normalize_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("Название не может быть пустым")
+        return normalized
+
 
 class CreateFolderRequest(BaseModel):
-    name: str
+    name: str = Field(min_length=1, max_length=120)
+    parent_id: uuid.UUID | None = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _normalize_name(cls, value: str) -> str:
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("Название не может быть пустым")
+        return normalized
 
 
 class UpdateFolderRequest(BaseModel):
-    name: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=120)
     position: int | None = None
+    parent_id: uuid.UUID | None = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _normalize_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("Название не может быть пустым")
+        return normalized
 
 
 class CreateColumnRequest(BaseModel):
@@ -146,4 +185,3 @@ class FilterRequest(BaseModel):
     filters: dict | None = None
     # [{col_id: str, dir: "asc"|"desc"}]
     sorts: list[dict] | None = None
-

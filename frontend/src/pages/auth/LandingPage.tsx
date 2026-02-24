@@ -226,7 +226,17 @@ export default function LandingPage() {
             </div>
             <span className="text-sm font-semibold">CRM Платформа</span>
           </div>
-          <p className="text-xs text-muted-foreground">&copy; 2026 CRM Платформа. Все права защищены.</p>
+          <div className="flex flex-col items-center gap-2 sm:items-end">
+            <div className="flex items-center gap-3 text-xs">
+              <Link to="/privacy-policy" className="text-muted-foreground hover:text-foreground hover:underline">
+                Политика конфиденциальности
+              </Link>
+              <Link to="/personal-data-consent" className="text-muted-foreground hover:text-foreground hover:underline">
+                Согласие на обработку ПДн
+              </Link>
+            </div>
+            <p className="text-xs text-muted-foreground">&copy; 2026 CRM Платформа. Все права защищены.</p>
+          </div>
         </div>
       </footer>
     </div>

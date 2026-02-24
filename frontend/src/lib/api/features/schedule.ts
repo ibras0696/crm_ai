@@ -12,6 +12,8 @@ export interface EventInfo {
   is_done: boolean
   recurrence: string | null
   assigned_to: string | null
+  participant_ids: string[]
+  reminder_offsets_minutes: number[]
   created_at: string
 }
 
@@ -23,9 +25,34 @@ export const scheduleApi = {
     return api.get<ApiResponse<EventInfo[]>>(`/schedule/events?${params}`)
   },
   get: (id: string) => api.get<ApiResponse<EventInfo>>(`/schedule/events/${id}`),
-  create: (data: { title: string; start_at: string; end_at?: string; description?: string; all_day?: boolean; color?: string; assigned_to?: string; recurrence?: string }) =>
+  create: (data: {
+    title: string
+    start_at: string
+    end_at?: string
+    description?: string
+    all_day?: boolean
+    color?: string
+    assigned_to?: string
+    participant_ids?: string[]
+    reminder_offsets_minutes?: number[]
+    recurrence?: string
+  }) =>
     api.post<ApiResponse<EventInfo>>('/schedule/events', data),
-  update: (id: string, data: { title?: string; start_at?: string; end_at?: string; description?: string; all_day?: boolean; color?: string; is_done?: boolean; recurrence?: string }) =>
+  update: (id: string, data: {
+    title?: string
+    start_at?: string
+    end_at?: string
+    description?: string
+    all_day?: boolean
+    color?: string
+    is_done?: boolean
+    assigned_to?: string
+    participant_ids?: string[]
+    reminder_offsets_minutes?: number[]
+    recurrence?: string
+  }) =>
     api.patch<ApiResponse<EventInfo>>(`/schedule/events/${id}`, data),
   delete: (id: string) => api.delete<ApiResponse<null>>(`/schedule/events/${id}`),
+  dispatchReminders: (now?: string) =>
+    api.post<ApiResponse<{ created_notifications: number }>>('/schedule/events/dispatch-reminders', { now }),
 }

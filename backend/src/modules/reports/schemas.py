@@ -3,7 +3,12 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+ALLOWED_WIDGET_TYPES = {"metric", "bar", "line", "area", "pie", "donut", "table"}
+ALLOWED_AGGREGATIONS = {"count", "sum", "avg", "min", "max"}
+ALLOWED_TIME_GRANULARITY = {"day", "week", "month"}
+ALLOWED_FILTER_OPS = {"eq", "neq", "contains", "gt", "lt", "gte", "lte"}
 
 
 class TableSummary(BaseModel):
@@ -61,16 +66,42 @@ class DashboardCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def _normalize_name(cls, value: str) -> str:
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("Название не может быть пустым")
+        return normalized
+
 
 class DashboardUpdateRequest(BaseModel):
     name: str | None = Field(default=None, max_length=255)
     description: str | None = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _normalize_name(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("Название не может быть пустым")
+        return normalized
 
 
 class WidgetFilter(BaseModel):
     column_id: str
     op: str = "eq"  # eq|neq|contains|gt|lt|gte|lte
     value: str | float | int | bool
+
+    @field_validator("op", mode="before")
+    @classmethod
+    def _normalize_op(cls, value: str) -> str:
+        normalized = str(value).strip().lower()
+        if normalized not in ALLOWED_FILTER_OPS:
+            raise ValueError(f"Некорректная операция фильтра: {normalized}")
+        return normalized
 
 
 class WidgetConfig(BaseModel):
@@ -82,6 +113,30 @@ class WidgetConfig(BaseModel):
     filters: list[WidgetFilter] = Field(default_factory=list)
     limit: int = 10
     selected_column_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("aggregation", mode="before")
+    @classmethod
+    def _normalize_aggregation(cls, value: str) -> str:
+        normalized = str(value).strip().lower()
+        if normalized not in ALLOWED_AGGREGATIONS:
+            raise ValueError(f"Некорректная агрегация: {normalized}")
+        return normalized
+
+    @field_validator("time_granularity", mode="before")
+    @classmethod
+    def _normalize_granularity(cls, value: str) -> str:
+        normalized = str(value).strip().lower()
+        if normalized not in ALLOWED_TIME_GRANULARITY:
+            raise ValueError(f"Некорректная гранулярность: {normalized}")
+        return normalized
+
+    @field_validator("limit", mode="before")
+    @classmethod
+    def _normalize_limit(cls, value: int) -> int:
+        parsed = int(value)
+        if parsed < 1 or parsed > 200:
+            raise ValueError("limit должен быть в диапазоне 1..200")
+        return parsed
 
 
 class WidgetOut(BaseModel):
@@ -101,6 +156,22 @@ class WidgetCreateRequest(BaseModel):
     config: WidgetConfig = Field(default_factory=WidgetConfig)
     position: int = 0
 
+    @field_validator("title", mode="before")
+    @classmethod
+    def _normalize_title(cls, value: str) -> str:
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("Заголовок не может быть пустым")
+        return normalized
+
+    @field_validator("widget_type", mode="before")
+    @classmethod
+    def _normalize_widget_type(cls, value: str) -> str:
+        normalized = str(value).strip().lower()
+        if normalized not in ALLOWED_WIDGET_TYPES:
+            raise ValueError(f"Некорректный тип виджета: {normalized}")
+        return normalized
+
 
 class WidgetUpdateRequest(BaseModel):
     title: str | None = Field(default=None, max_length=255)
@@ -108,6 +179,26 @@ class WidgetUpdateRequest(BaseModel):
     table_id: str | None = None
     config: WidgetConfig | None = None
     position: int | None = None
+
+    @field_validator("title", mode="before")
+    @classmethod
+    def _normalize_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip()
+        if not normalized:
+            raise ValueError("Заголовок не может быть пустым")
+        return normalized
+
+    @field_validator("widget_type", mode="before")
+    @classmethod
+    def _normalize_widget_type(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip().lower()
+        if normalized not in ALLOWED_WIDGET_TYPES:
+            raise ValueError(f"Некорректный тип виджета: {normalized}")
+        return normalized
 
 
 class DashboardDetailOut(BaseModel):

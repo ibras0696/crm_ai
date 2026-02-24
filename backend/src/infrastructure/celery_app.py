@@ -1,4 +1,5 @@
 from celery import Celery
+from celery.schedules import crontab
 
 from src.config import settings
 
@@ -17,7 +18,16 @@ celery.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
-    beat_schedule={},
+    beat_schedule={
+        "dispatch-schedule-reminders-every-minute": {
+            "task": "dispatch_schedule_reminders",
+            "schedule": crontab(minute="*"),
+        },
+        "billing-lifecycle-every-hour": {
+            "task": "process_billing_lifecycle",
+            "schedule": crontab(minute=0),
+        },
+    },
 )
 
-celery.autodiscover_tasks(["src.modules.notifications.tasks"])
+celery.autodiscover_tasks(["src.modules.notifications", "src.modules.schedule", "src.modules.billing"])

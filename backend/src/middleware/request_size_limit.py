@@ -1,33 +1,64 @@
 from __future__ import annotations
 
-from fastapi import Request
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 
-class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
-    """
-    Enforce max request size using Content-Length when available.
-    This avoids reading the body (important for file uploads / streaming).
-    """
+class PayloadTooLargeError(Exception):
+    pass
 
-    def __init__(self, app, *, max_bytes: int):
-        super().__init__(app)
+
+class RequestSizeLimitMiddleware:
+    """Enforce request body size for both Content-Length and chunked streams."""
+
+    def __init__(self, app: ASGIApp, *, max_bytes: int):
+        self.app = app
         self.max_bytes = int(max(0, max_bytes))
 
-    async def dispatch(self, request: Request, call_next) -> Response:
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
         if self.max_bytes <= 0:
-            return await call_next(request)
-        cl = request.headers.get("content-length")
+            await self.app(scope, receive, send)
+            return
+
+        headers = {k.decode().lower(): v.decode() for k, v in (scope.get("headers") or [])}
+        cl = headers.get("content-length")
         if cl:
             try:
-                n = int(cl)
-                if n > self.max_bytes:
-                    return JSONResponse(
-                        {"ok": False, "data": None, "error": {"code": "REQUEST_TOO_LARGE", "message": "Request too large"}},
-                        status_code=413,
-                    )
+                if int(cl) > self.max_bytes:
+                    await self._send_413(send)
+                    return
             except Exception:
                 pass
-        return await call_next(request)
 
+        total = 0
+        response_started = False
+
+        async def limited_receive() -> Message:
+            nonlocal total
+            message = await receive()
+            if message["type"] == "http.request":
+                chunk = message.get("body", b"")
+                total += len(chunk)
+                if total > self.max_bytes:
+                    raise PayloadTooLargeError
+            return message
+
+        async def tracked_send(message: Message) -> None:
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, tracked_send)
+        except PayloadTooLargeError:
+            if not response_started:
+                await self._send_413(send)
+
+    @staticmethod
+    async def _send_413(send: Send) -> None:
+        payload = b'{"ok":false,"data":null,"error":{"code":"REQUEST_TOO_LARGE","message":"Request too large"}}'
+        await send({"type": "http.response.start", "status": 413, "headers": [(b"content-type", b"application/json")]})
+        await send({"type": "http.response.body", "body": payload, "more_body": False})

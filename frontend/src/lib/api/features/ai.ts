@@ -45,6 +45,7 @@ export interface AIChatMessage {
 export interface AIContextSourcePage {
   id: string
   title: string
+  parent_id?: string | null
 }
 
 export interface AIContextSourceTable {

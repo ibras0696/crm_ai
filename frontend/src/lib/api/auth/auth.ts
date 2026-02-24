@@ -7,6 +7,7 @@ export interface RegisterPayload {
   first_name: string
   last_name: string
   org_name: string
+  accepted_privacy_policy: true
 }
 
 export interface LoginPayload {
@@ -34,6 +35,7 @@ export interface UserInfo {
 export const authApi = {
   register: (data: RegisterPayload) => api.post<ApiResponse<TokenResponse>>('/auth/register', data),
   login: (data: LoginPayload) => api.post<ApiResponse<TokenResponse>>('/auth/login', data),
+  refresh: () => api.post<ApiResponse<TokenResponse>>('/auth/refresh', {}),
   me: () => api.get<ApiResponse<UserInfo>>('/auth/me'),
-  logout: (refresh_token: string) => api.post<ApiResponse<null>>('/auth/logout', { refresh_token }),
+  logout: () => api.post<ApiResponse<null>>('/auth/logout', {}),
 }

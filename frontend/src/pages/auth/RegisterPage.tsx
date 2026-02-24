@@ -10,6 +10,9 @@ import { Loader2, ArrowRight, Building2 } from 'lucide-react'
 const AUTH_ERRORS_RU: Record<string, string> = {
   CONFLICT: 'Аккаунт с таким email уже существует',
   VALIDATION_ERROR: 'Ошибка валидации данных',
+  RATE_LIMITED: 'Слишком много попыток. Подождите минуту и попробуйте снова.',
+  NETWORK_ERROR: 'Нет соединения с сервером. Проверьте сеть.',
+  SERVER_ERROR: 'Сервис временно недоступен. Попробуйте позже.',
 }
 
 type FormFields = { email: string; password: string; first_name: string; last_name: string; org_name: string }
@@ -21,6 +24,7 @@ export default function RegisterPage() {
   const [form, setForm] = useState<FormFields>({ email: '', password: '', first_name: '', last_name: '', org_name: '' })
   const [error, setError] = useState('')
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
+  const [acceptedPolicy, setAcceptedPolicy] = useState(false)
   const [loading, setLoading] = useState(false)
 
   if (isAuthenticated) return <Navigate to="/dashboard" replace />
@@ -45,6 +49,10 @@ export default function RegisterPage() {
     } else if (form.password.length < 8) {
       errs.password = 'Пароль должен быть не менее 8 символов'
     }
+    if (!acceptedPolicy) {
+      setError('Нужно принять политику конфиденциальности и согласие на обработку данных')
+      return false
+    }
     setFieldErrors(errs)
     return Object.keys(errs).length === 0
   }
@@ -55,7 +63,7 @@ export default function RegisterPage() {
     if (!validate()) return
     setLoading(true)
     try {
-      await register(form)
+      await register({ ...form, accepted_privacy_policy: true })
       navigate('/dashboard')
     } catch (err: unknown) {
       if (err instanceof AuthError) {
@@ -165,6 +173,25 @@ export default function RegisterPage() {
               {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <ArrowRight className="h-4 w-4 mr-2" />}
               {loading ? 'Создание...' : 'Создать аккаунт'}
             </Button>
+            <label className="flex items-start gap-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={acceptedPolicy}
+                onChange={(e) => setAcceptedPolicy(e.target.checked)}
+              />
+              <span>
+                Я принимаю{' '}
+                <Link to="/privacy-policy" className="text-primary hover:underline">
+                  политику конфиденциальности
+                </Link>{' '}
+                и даю{' '}
+                <Link to="/personal-data-consent" className="text-primary hover:underline">
+                  согласие на обработку персональных данных
+                </Link>
+                .
+              </span>
+            </label>
           </form>
 
           <div className="text-center text-sm text-muted-foreground">

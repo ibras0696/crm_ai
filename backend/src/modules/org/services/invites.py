@@ -91,6 +91,8 @@ class OrgInviteService:
                 send_invite_email.delay(email, org_name, token, None)
             except Exception:
                 logger.exception("Failed to enqueue invite email task")
+            # UI uses this to show clear handling for unregistered users.
+            invite.invitee_exists = existing_user is not None  # type: ignore[attr-defined]
             return invite
 
     async def resend_invite(

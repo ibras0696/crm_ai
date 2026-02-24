@@ -43,6 +43,8 @@ class InviteResponse(BaseModel):
     # Token is returned only to OWNER/ADMIN endpoints (invite creation/resend),
     # so they can copy/share an invite link if needed.
     token: str | None = None
+    # True when invited email already belongs to registered user.
+    invitee_exists: bool | None = None
     expires_at: datetime
     created_at: datetime
 

@@ -14,6 +14,18 @@ export interface SuperadminDashboard {
   }
   registrations_timeline: { date: string; count: number }[]
   orgs_by_plan: { plan: string; count: number }[]
+  analytics?: {
+    revenue_detailed?: {
+      month_total: number
+      year_total: number
+      paid_orgs: number
+      free_orgs: number
+      paid_share_pct: number
+      avg_revenue_per_org: number
+      by_plan: Array<{ plan: string; orgs: number; price_monthly: number; month_revenue: number }>
+    }
+    [key: string]: any
+  }
 }
 
 export interface SuperadminOrgOption {
@@ -140,6 +152,7 @@ export interface SuperadminAuditPage {
 export const superadminApi = {
   login: (email: string, password: string) =>
     superadminHttp.post<ApiResponse<{ access_token: string; token_type: string }>>('/login', { email, password }),
+  logout: () => superadminHttp.post<ApiResponse<null>>('/logout', {}),
   overview: (org_limit = 200) => superadminHttp.get<ApiResponse<SuperadminOverview>>(`/overview?org_limit=${org_limit}`),
   orgs: (params: { q?: string; plan?: string; sub_status?: string; limit?: number; offset?: number }) => {
     const q = new URLSearchParams()

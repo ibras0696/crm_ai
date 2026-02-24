@@ -6,6 +6,7 @@ from src.infrastructure.uow import UnitOfWork
 from src.modules.auth.security import create_access_token
 from src.modules.org.models import Membership, Organization
 from src.modules.org.repository import MembershipRepository, OrganizationRepository
+from src.modules.org.schemas import OrgUpdateRequest
 
 
 class OrgProfileService:
@@ -62,3 +63,17 @@ class OrgProfileService:
                 raise NotFoundError("Organization")
             await org_repo.delete(org)
             await uow.commit()
+
+    async def update_org(self, org_id: uuid.UUID, body: OrgUpdateRequest) -> Organization:
+        async with UnitOfWork() as uow:
+            org_repo = OrganizationRepository(uow.session)
+            org = await org_repo.get_by_id(org_id)
+            if not org:
+                raise NotFoundError("Organization")
+
+            updates = body.model_dump(exclude_unset=True)
+            if "name" in updates and updates["name"] is not None:
+                org.name = str(updates["name"]).strip()
+
+            await uow.commit()
+            return org

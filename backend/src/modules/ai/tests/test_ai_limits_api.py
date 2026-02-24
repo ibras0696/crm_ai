@@ -36,6 +36,7 @@ async def test_ai_status_uses_plan_limits_from_db(client: AsyncClient):
             "first_name": "Owner",
             "last_name": "User",
             "org_name": "AI Limits Org",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
@@ -91,6 +92,7 @@ async def test_ai_status_uses_active_subscription_plan_over_org_plan(client: Asy
             "first_name": "Owner",
             "last_name": "User",
             "org_name": f"AI Limits Org {uuid.uuid4().hex[:6]}",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
@@ -165,6 +167,7 @@ async def test_check_ai_limits_rejects_projected_daily_overflow(client: AsyncCli
             "first_name": "Owner",
             "last_name": "User",
             "org_name": f"AI Limits Org {uuid.uuid4().hex[:6]}",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201

@@ -1,4 +1,6 @@
+import { useEffect, useState } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import { billingApi } from '@/lib/api'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -15,6 +17,38 @@ import {
 
 export default function DashboardPage() {
   const { user, org, members } = useAuth()
+  const [billingNote, setBillingNote] = useState('Тариф активен')
+
+  useEffect(() => {
+    let active = true
+    ;(async () => {
+      try {
+        const resp = await billingApi.subscription()
+        if (!active || !resp.data.ok || !resp.data.data) return
+        const sub = resp.data.data
+        if (sub.status === 'past_due') {
+          setBillingNote(
+            sub.grace_period_end
+              ? `Льготный период до ${new Date(sub.grace_period_end).toLocaleDateString('ru')}`
+              : 'Подписка просрочена',
+          )
+          return
+        }
+        if (sub.status === 'cancelled') {
+          setBillingNote(
+            sub.data_purge_at
+              ? `Данные будут очищены после ${new Date(sub.data_purge_at).toLocaleDateString('ru')}`
+              : 'Тариф отменен',
+          )
+          return
+        }
+        setBillingNote('Тариф активен')
+      } catch {
+        // ignore
+      }
+    })()
+    return () => { active = false }
+  }, [])
 
   const stats = [
     {
@@ -28,7 +62,7 @@ export default function DashboardPage() {
     {
       title: 'Тариф',
       value: org?.plan?.toUpperCase() ?? 'FREE',
-      change: 'Текущий план',
+      change: billingNote,
       icon: Building2,
       color: 'text-purple-400',
       bg: 'bg-purple-500/10',

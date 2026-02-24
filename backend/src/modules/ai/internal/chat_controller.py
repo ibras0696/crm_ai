@@ -422,13 +422,12 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
         )
     except ValueError as exc:
         _record_metric("bad_provider_response")
-        return ApiResponse(ok=False, data=None, error={"code": "AI_BAD_PROVIDER_RESPONSE", "message": str(exc)})
+        return ApiResponse(
+            ok=False,
+            data=None,
+            error={"code": "AI_BAD_PROVIDER_RESPONSE", "message": "AI provider returned an invalid response format."},
+        )
     except httpx.HTTPStatusError as e:
-        body_text = ""
-        try:
-            body_text = e.response.text[:300]
-        except Exception:
-            pass
         if e.response.status_code in (401, 403):
             _record_metric("unauthorized")
             return ApiResponse(
@@ -436,15 +435,19 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 data=None,
                 error={
                     "code": "AI_PROVIDER_UNAUTHORIZED",
-                    "message": (
-                        f"AI провайдер вернул {e.response.status_code} (Unauthorized). "
-                        "Проверьте OPENAI_BEARER_TOKEN/OPENAI_API_KEY и AI_BASE_URL (secrets.yml), затем перезапустите backend. "
-                        f"Ответ провайдера: {body_text}"
-                    ),
+                    "message": "AI provider authentication failed. Check provider credentials in server configuration.",
                 },
             )
         _record_metric("error")
-        return ApiResponse(ok=False, data=None, error={"code": "AI_ERROR", "message": f"AI API error {e.response.status_code}: {body_text}"})
-    except Exception as e:
+        return ApiResponse(
+            ok=False,
+            data=None,
+            error={"code": "AI_ERROR", "message": "AI provider error. Please try again later."},
+        )
+    except Exception:
         _record_metric("error")
-        return ApiResponse(ok=False, data=None, error={"code": "AI_ERROR", "message": f"AI error: {str(e)}"})
+        return ApiResponse(
+            ok=False,
+            data=None,
+            error={"code": "AI_ERROR", "message": "AI service internal error. Please try again later."},
+        )

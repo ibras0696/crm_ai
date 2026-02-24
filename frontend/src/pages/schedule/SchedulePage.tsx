@@ -1,5 +1,7 @@
-﻿import { useState, useEffect, useCallback, useMemo } from 'react'
+﻿import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { scheduleApi } from '@/lib/api'
+import { useAuth } from '@/contexts/AuthContext'
+import { isAxiosError } from 'axios'
 import { Plus, ChevronLeft, ChevronRight, Check, Trash2, X, Repeat, Clock, Edit3 } from 'lucide-react'
 import { expandRecurringEvents, type ExpandedEvent } from '@/lib/schedule-utils'
 
@@ -13,6 +15,9 @@ interface Event {
   color: string
   is_done: boolean
   recurrence?: string | null
+  assigned_to?: string | null
+  participant_ids?: string[]
+  reminder_offsets_minutes?: number[]
 }
 
 const COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316']
@@ -27,23 +32,165 @@ const MONTHS_RU = ['Январь','Февраль','Март','Апрель','М
 const DAYS_RU = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс']
 const VIEWS = ['day','month','year'] as const
 type View = typeof VIEWS[number]
+const REMINDER_OPTIONS = [
+  { value: 60, label: 'За 1 час' },
+  { value: 120, label: 'За 2 часа' },
+  { value: 1440, label: 'За 1 день' },
+]
+const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'))
+const MINUTE_OPTIONS = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0'))
+
+function extractApiError(e: unknown, fallback: string): string {
+  if (!isAxiosError(e)) return fallback
+  const apiError = (e.response?.data as { error?: { message?: string } } | undefined)?.error
+  if (apiError?.message) return apiError.message
+  if (e.response?.status === 429) return 'Слишком много запросов. Попробуйте позже.'
+  return fallback
+}
 
 function isSameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 }
 
+function splitDateTime(value: string) {
+  if (!value) return { date: '', time: '09:00' }
+  const [datePart, timePart] = value.split('T')
+  return {
+    date: datePart || '',
+    time: (timePart || '09:00').slice(0, 5),
+  }
+}
+
+function joinDateTime(date: string, time: string) {
+  if (!date || !time) return ''
+  return `${date}T${time}`
+}
+
+function withDate(datetimeValue: string, nextDate: string) {
+  const { time } = splitDateTime(datetimeValue)
+  return joinDateTime(nextDate, time)
+}
+
+function withTime(datetimeValue: string, nextTime: string) {
+  const { date } = splitDateTime(datetimeValue)
+  return joinDateTime(date, nextTime)
+}
+
+function TimeWheelField({
+  label,
+  value,
+  onChange,
+  disabled = false,
+}: {
+  label: string
+  value: string
+  onChange: (next: string) => void
+  disabled?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement | null>(null)
+  const [hour, minute] = (value || '09:00').split(':')
+
+  useEffect(() => {
+    const onDocClick = (e: MouseEvent) => {
+      if (!wrapRef.current) return
+      if (!wrapRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [])
+
+  return (
+    <div className="relative" ref={wrapRef}>
+      <label className="text-xs text-muted-foreground block mb-1">{label}</label>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => !disabled && setOpen((p) => !p)}
+        className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary flex items-center justify-between disabled:opacity-60"
+      >
+        <span>{value || '09:00'}</span>
+        <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+      </button>
+      {open && !disabled && (
+        <div className="absolute z-20 mt-1 w-full rounded-xl border border-border bg-card shadow-xl p-2">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="rounded-lg border border-border/70 bg-background/40 p-1">
+              <div className="text-[11px] text-muted-foreground px-1 pb-1">Часы</div>
+              <div className="max-h-36 overflow-y-auto pr-1 space-y-1">
+                {HOUR_OPTIONS.map((h) => (
+                  <button
+                    key={h}
+                    type="button"
+                    onClick={() => onChange(`${h}:${minute || '00'}`)}
+                    className={`w-full h-8 rounded-md text-sm transition-colors ${
+                      h === hour ? 'bg-primary/15 text-primary border border-primary/30' : 'hover:bg-secondary/30'
+                    }`}
+                  >
+                    {h}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-lg border border-border/70 bg-background/40 p-1">
+              <div className="text-[11px] text-muted-foreground px-1 pb-1">Минуты</div>
+              <div className="max-h-36 overflow-y-auto pr-1 space-y-1">
+                {MINUTE_OPTIONS.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => onChange(`${hour || '09'}:${m}`)}
+                    className={`w-full h-8 rounded-md text-sm transition-colors ${
+                      m === minute ? 'bg-primary/15 text-primary border border-primary/30' : 'hover:bg-secondary/30'
+                    }`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function SchedulePage() {
+  const { user, members } = useAuth()
   const [events, setEvents] = useState<Event[]>([])
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<View>('month')
   const [current, setCurrent] = useState(new Date())
   const [showForm, setShowForm] = useState(false)
-  const [form, setForm] = useState({ title: '', description: '', start_at: '', end_at: '', all_day: true, color: COLORS[0], recurrence: '' })
+  const [form, setForm] = useState({
+    title: '',
+    description: '',
+    start_at: '',
+    end_at: '',
+    all_day: false,
+    color: COLORS[0],
+    recurrence: '',
+    participant_ids: [] as string[],
+    reminder_offsets_minutes: [] as number[],
+  })
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
+  const [memberSearch, setMemberSearch] = useState('')
   const [editError, setEditError] = useState('')
   const [editEvent, setEditEvent] = useState<Event | null>(null)
-  const [editForm, setEditForm] = useState({ title: '', description: '', start_at: '', end_at: '', all_day: true, color: COLORS[0], recurrence: '' })
+  const [editForm, setEditForm] = useState({
+    title: '',
+    description: '',
+    start_at: '',
+    end_at: '',
+    all_day: false,
+    color: COLORS[0],
+    recurrence: '',
+    participant_ids: [] as string[],
+    reminder_offsets_minutes: [] as number[],
+  })
+  const [editMemberSearch, setEditMemberSearch] = useState('')
 
   const load = useCallback(async () => {
     try {
@@ -60,7 +207,15 @@ export default function SchedulePage() {
   const openForm = (day?: Date) => {
     const d = day || new Date()
     const iso = d.toISOString().slice(0, 10)
-    setForm(f => ({ ...f, start_at: iso + 'T09:00', end_at: iso + 'T10:00' }))
+    setForm(f => ({
+      ...f,
+      start_at: iso + 'T09:00',
+      end_at: iso + 'T10:00',
+      all_day: false,
+      participant_ids: user?.id ? [user.id] : [],
+      reminder_offsets_minutes: [60],
+    }))
+    setMemberSearch('')
     setFormError('')
     setShowForm(true)
   }
@@ -68,22 +223,45 @@ export default function SchedulePage() {
   const handleSave = async () => {
     if (!form.title.trim()) return
     const eventDate = new Date(form.start_at)
+    const eventEndDate = form.end_at ? new Date(form.end_at) : null
     const now = new Date()
     now.setSeconds(0, 0)
     if (eventDate < now) {
       setFormError('Нельзя создать событие задним числом. Выберите дату и время не раньше текущего момента.')
       return
     }
+    if (eventEndDate && eventEndDate < eventDate) {
+      setFormError('Время окончания не может быть раньше времени начала.')
+      return
+    }
     setFormError('')
     setSaving(true)
     try {
-      const r = await scheduleApi.create({ ...form, all_day: form.all_day, recurrence: form.recurrence || undefined })
+      const assignedTo = form.participant_ids.find(id => id !== user?.id)
+      const r = await scheduleApi.create({
+        ...form,
+        all_day: form.all_day,
+        recurrence: form.recurrence || undefined,
+        assigned_to: assignedTo,
+      })
       if (r.data.ok && r.data.data) {
         setEvents(prev => [...prev, r.data.data as Event])
         setShowForm(false)
-        setForm({ title: '', description: '', start_at: '', end_at: '', all_day: true, color: COLORS[0], recurrence: '' })
+        setForm({
+          title: '',
+          description: '',
+          start_at: '',
+          end_at: '',
+          all_day: false,
+          color: COLORS[0],
+          recurrence: '',
+          participant_ids: user?.id ? [user.id] : [],
+          reminder_offsets_minutes: [],
+        })
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      setFormError(extractApiError(e, 'Не удалось создать событие'))
+    }
     setSaving(false)
   }
 
@@ -98,21 +276,30 @@ export default function SchedulePage() {
       all_day: ev.all_day,
       color: ev.color || COLORS[0],
       recurrence: ev.recurrence || '',
+      participant_ids: ev.participant_ids || (ev.assigned_to ? [ev.assigned_to] : []),
+      reminder_offsets_minutes: ev.reminder_offsets_minutes || [],
     })
+    setEditMemberSearch('')
   }
 
   const handleUpdate = async () => {
     if (!editEvent || !editForm.title.trim()) return
     const eventDate = new Date(editForm.start_at)
+    const eventEndDate = editForm.end_at ? new Date(editForm.end_at) : null
     const now = new Date()
     now.setSeconds(0, 0)
     if (eventDate < now) {
       setEditError('Нельзя перенести событие в прошлое. Выберите дату и время не раньше текущего момента.')
       return
     }
+    if (eventEndDate && eventEndDate < eventDate) {
+      setEditError('Время окончания не может быть раньше времени начала.')
+      return
+    }
     setEditError('')
     setSaving(true)
     try {
+      const assignedTo = editForm.participant_ids.find(id => id !== user?.id)
       const r = await scheduleApi.update(editEvent.id, {
         title: editForm.title,
         description: editForm.description || undefined,
@@ -120,13 +307,18 @@ export default function SchedulePage() {
         end_at: editForm.end_at || undefined,
         all_day: editForm.all_day,
         color: editForm.color,
+        assigned_to: assignedTo,
+        participant_ids: editForm.participant_ids,
+        reminder_offsets_minutes: editForm.reminder_offsets_minutes,
         recurrence: editForm.recurrence || undefined,
       })
       if (r.data.ok && r.data.data) {
         setEvents(prev => prev.map(e => e.id === editEvent.id ? r.data.data as Event : e))
         setEditEvent(null)
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      setEditError(extractApiError(e, 'Не удалось обновить событие'))
+    }
     setSaving(false)
   }
 
@@ -225,6 +417,28 @@ export default function SchedulePage() {
 
   // --- Day view ---
   const dayEvents = eventsOnDay(current)
+  const filteredMembers = useMemo(() => {
+    const q = memberSearch.trim().toLowerCase()
+    if (!q) return members
+    return members.filter(m => {
+      const fullName = `${m.user_first_name || ''} ${m.user_last_name || ''}`.trim().toLowerCase()
+      return (
+        fullName.includes(q) ||
+        (m.user_email || '').toLowerCase().includes(q)
+      )
+    })
+  }, [memberSearch, members])
+  const filteredEditMembers = useMemo(() => {
+    const q = editMemberSearch.trim().toLowerCase()
+    if (!q) return members
+    return members.filter(m => {
+      const fullName = `${m.user_first_name || ''} ${m.user_last_name || ''}`.trim().toLowerCase()
+      return (
+        fullName.includes(q) ||
+        (m.user_email || '').toLowerCase().includes(q)
+      )
+    })
+  }, [editMemberSearch, members])
 
   if (loading) {
     return (
@@ -403,8 +617,42 @@ export default function SchedulePage() {
             </div>
             {!form.all_day && (
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-xs text-muted-foreground">Начало</label><input type="datetime-local" min={new Date().toISOString().slice(0,16)} value={form.start_at} onChange={e => { setForm(f => ({ ...f, start_at: e.target.value })); setFormError('') }} className="w-full h-9 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary mt-1" /></div>
-                <div><label className="text-xs text-muted-foreground">Конец</label><input type="datetime-local" min={form.start_at || new Date().toISOString().slice(0,16)} value={form.end_at} onChange={e => setForm(f => ({ ...f, end_at: e.target.value }))} className="w-full h-9 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary mt-1" /></div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Дата начала</label>
+                  <input
+                    type="date"
+                    min={todayIso()}
+                    value={splitDateTime(form.start_at).date}
+                    onChange={e => {
+                      setForm(f => ({ ...f, start_at: withDate(f.start_at, e.target.value) }))
+                      setFormError('')
+                    }}
+                    className="w-full h-9 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary mt-1"
+                  />
+                </div>
+                <TimeWheelField
+                  label="Время начала"
+                  value={splitDateTime(form.start_at).time}
+                  onChange={(next) => {
+                    setForm(f => ({ ...f, start_at: withTime(f.start_at, next) }))
+                    setFormError('')
+                  }}
+                />
+                <div>
+                  <label className="text-xs text-muted-foreground">Дата конца</label>
+                  <input
+                    type="date"
+                    min={splitDateTime(form.start_at).date || todayIso()}
+                    value={splitDateTime(form.end_at).date}
+                    onChange={e => setForm(f => ({ ...f, end_at: withDate(f.end_at || f.start_at, e.target.value) }))}
+                    className="w-full h-9 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary mt-1"
+                  />
+                </div>
+                <TimeWheelField
+                  label="Время конца"
+                  value={splitDateTime(form.end_at).time}
+                  onChange={(next) => setForm(f => ({ ...f, end_at: withTime(f.end_at || f.start_at, next) }))}
+                />
               </div>
             )}
             {form.all_day && (
@@ -416,6 +664,70 @@ export default function SchedulePage() {
               <select value={form.recurrence} onChange={e => setForm(f => ({ ...f, recurrence: e.target.value }))} className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary">
                 {RECURRENCE.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground block">Участники события</label>
+              <input
+                value={memberSearch}
+                onChange={e => setMemberSearch(e.target.value)}
+                placeholder="Поиск сотрудника по имени/email"
+                className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary"
+              />
+              <div className="max-h-32 overflow-auto rounded-lg border border-border/60 divide-y divide-border/40">
+                {filteredMembers.map(m => {
+                  const display = `${m.user_first_name || ''} ${m.user_last_name || ''}`.trim() || m.user_email || 'Пользователь'
+                  const checked = form.participant_ids.includes(m.user_id)
+                  return (
+                    <label key={m.id} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-secondary/20">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={e => {
+                          setForm(prev => ({
+                            ...prev,
+                            participant_ids: e.target.checked
+                              ? [...prev.participant_ids, m.user_id]
+                              : prev.participant_ids.filter(id => id !== m.user_id),
+                          }))
+                        }}
+                      />
+                      <span>{display}</span>
+                    </label>
+                  )
+                })}
+              </div>
+              <button
+                type="button"
+                onClick={() => setForm(prev => ({ ...prev, participant_ids: user?.id ? [user.id] : [] }))}
+                className="text-xs text-primary hover:underline"
+              >
+                Оставить только меня
+              </button>
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground block">Напомнить</label>
+              <div className="grid grid-cols-3 gap-2">
+                {REMINDER_OPTIONS.map(opt => {
+                  const checked = form.reminder_offsets_minutes.includes(opt.value)
+                  return (
+                    <label key={opt.value} className="flex items-center gap-2 text-xs rounded-lg border border-border px-2 py-2 cursor-pointer hover:bg-secondary/20">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={e => {
+                          setForm(prev => ({
+                            ...prev,
+                            reminder_offsets_minutes: e.target.checked
+                              ? [...prev.reminder_offsets_minutes, opt.value]
+                              : prev.reminder_offsets_minutes.filter(x => x !== opt.value),
+                          }))
+                        }}
+                      />
+                      <span>{opt.label}</span>
+                    </label>
+                  )
+                })}
+              </div>
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1.5">Цвет</label>
@@ -451,8 +763,42 @@ export default function SchedulePage() {
             </div>
             {!editForm.all_day && (
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="text-xs text-muted-foreground">Начало</label><input type="datetime-local" min={new Date().toISOString().slice(0,16)} value={editForm.start_at} onChange={e => { setEditForm(f => ({ ...f, start_at: e.target.value })); setEditError('') }} className="w-full h-9 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary mt-1" /></div>
-                <div><label className="text-xs text-muted-foreground">Конец</label><input type="datetime-local" min={editForm.start_at || new Date().toISOString().slice(0,16)} value={editForm.end_at} onChange={e => setEditForm(f => ({ ...f, end_at: e.target.value }))} className="w-full h-9 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary mt-1" /></div>
+                <div>
+                  <label className="text-xs text-muted-foreground">Дата начала</label>
+                  <input
+                    type="date"
+                    min={todayIso()}
+                    value={splitDateTime(editForm.start_at).date}
+                    onChange={e => {
+                      setEditForm(f => ({ ...f, start_at: withDate(f.start_at, e.target.value) }))
+                      setEditError('')
+                    }}
+                    className="w-full h-9 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary mt-1"
+                  />
+                </div>
+                <TimeWheelField
+                  label="Время начала"
+                  value={splitDateTime(editForm.start_at).time}
+                  onChange={(next) => {
+                    setEditForm(f => ({ ...f, start_at: withTime(f.start_at, next) }))
+                    setEditError('')
+                  }}
+                />
+                <div>
+                  <label className="text-xs text-muted-foreground">Дата конца</label>
+                  <input
+                    type="date"
+                    min={splitDateTime(editForm.start_at).date || todayIso()}
+                    value={splitDateTime(editForm.end_at).date}
+                    onChange={e => setEditForm(f => ({ ...f, end_at: withDate(f.end_at || f.start_at, e.target.value) }))}
+                    className="w-full h-9 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary mt-1"
+                  />
+                </div>
+                <TimeWheelField
+                  label="Время конца"
+                  value={splitDateTime(editForm.end_at).time}
+                  onChange={(next) => setEditForm(f => ({ ...f, end_at: withTime(f.end_at || f.start_at, next) }))}
+                />
               </div>
             )}
             {editForm.all_day && (
@@ -464,6 +810,63 @@ export default function SchedulePage() {
               <select value={editForm.recurrence} onChange={e => setEditForm(f => ({ ...f, recurrence: e.target.value }))} className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary">
                 {RECURRENCE.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground block">Участники события</label>
+              <input
+                value={editMemberSearch}
+                onChange={e => setEditMemberSearch(e.target.value)}
+                placeholder="Поиск сотрудника по имени/email"
+                className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary"
+              />
+              <div className="max-h-32 overflow-auto rounded-lg border border-border/60 divide-y divide-border/40">
+                {filteredEditMembers.map(m => {
+                  const display = `${m.user_first_name || ''} ${m.user_last_name || ''}`.trim() || m.user_email || 'Пользователь'
+                  const checked = editForm.participant_ids.includes(m.user_id)
+                  return (
+                    <label key={m.id} className="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-secondary/20">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={e => {
+                          setEditForm(prev => ({
+                            ...prev,
+                            participant_ids: e.target.checked
+                              ? [...prev.participant_ids, m.user_id]
+                              : prev.participant_ids.filter(id => id !== m.user_id),
+                          }))
+                        }}
+                      />
+                      <span>{display}</span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground block">Напомнить</label>
+              <div className="grid grid-cols-3 gap-2">
+                {REMINDER_OPTIONS.map(opt => {
+                  const checked = editForm.reminder_offsets_minutes.includes(opt.value)
+                  return (
+                    <label key={opt.value} className="flex items-center gap-2 text-xs rounded-lg border border-border px-2 py-2 cursor-pointer hover:bg-secondary/20">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={e => {
+                          setEditForm(prev => ({
+                            ...prev,
+                            reminder_offsets_minutes: e.target.checked
+                              ? [...prev.reminder_offsets_minutes, opt.value]
+                              : prev.reminder_offsets_minutes.filter(x => x !== opt.value),
+                          }))
+                        }}
+                      />
+                      <span>{opt.label}</span>
+                    </label>
+                  )
+                })}
+              </div>
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1.5">Цвет</label>

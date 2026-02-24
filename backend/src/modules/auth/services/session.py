@@ -36,8 +36,35 @@ class AuthSessionService:
 
             user = await user_repo.get_by_email(email)
             if not user or not verify_password(password, user.hashed_password):
+                if user:
+                    memberships = await member_repo.get_user_memberships(user.id)
+                    if memberships:
+                        primary = memberships[0]
+                        await audit_repo.log(
+                            org_id=primary.org_id,
+                            actor_id=user.id,
+                            action=AuditAction.LOGIN_FAILED,
+                            entity_type="user",
+                            entity_id=str(user.id),
+                            meta={"reason": "invalid_credentials"},
+                            ip_address=ip_address,
+                        )
+                        await uow.commit()
                 raise UnauthorizedError("Invalid email or password")
             if not user.is_active:
+                memberships = await member_repo.get_user_memberships(user.id)
+                if memberships:
+                    primary = memberships[0]
+                    await audit_repo.log(
+                        org_id=primary.org_id,
+                        actor_id=user.id,
+                        action=AuditAction.LOGIN_FAILED,
+                        entity_type="user",
+                        entity_id=str(user.id),
+                        meta={"reason": "account_deactivated"},
+                        ip_address=ip_address,
+                    )
+                    await uow.commit()
                 raise UnauthorizedError("Account is deactivated")
 
             memberships = await member_repo.get_user_memberships(user.id)
@@ -74,10 +101,29 @@ class AuthSessionService:
         async with UnitOfWork() as uow:
             token_repo = RefreshTokenRepository(uow.session)
             member_repo = MembershipRepository(uow.session)
+            audit_repo = AuditRepository(uow.session)
 
             token_hash_value = hash_token(raw_refresh)
-            refresh_token = await token_repo.get_by_hash(token_hash_value)
+            refresh_token = await token_repo.get_by_hash_for_update(token_hash_value)
             if not refresh_token:
+                stale_token = await token_repo.get_any_by_hash(token_hash_value)
+                if stale_token:
+                    memberships = await member_repo.get_user_memberships(stale_token.user_id)
+                    if memberships:
+                        primary = memberships[0]
+                        await audit_repo.log(
+                            org_id=primary.org_id,
+                            actor_id=stale_token.user_id,
+                            action=AuditAction.TOKEN_ANOMALY,
+                            entity_type="refresh_token",
+                            entity_id=str(stale_token.id),
+                            meta={
+                                "reason": "refresh_reuse_or_expired",
+                                "is_revoked": bool(stale_token.is_revoked),
+                            },
+                            ip_address=ip_address,
+                        )
+                        await uow.commit()
                 raise UnauthorizedError("Invalid or expired refresh token")
 
             await token_repo.revoke(refresh_token.id)
@@ -109,4 +155,3 @@ class AuthSessionService:
             if refresh_token:
                 await token_repo.revoke(refresh_token.id)
             await uow.commit()
-

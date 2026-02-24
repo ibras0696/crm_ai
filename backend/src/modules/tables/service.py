@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import uuid
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.common.enums import SubscriptionStatus
+from src.modules.billing.models import Plan
+from src.modules.org.models import Organization, Subscription
 from src.modules.tables.models import Column, FieldType, Table, TableFolder, TableView
 from src.modules.tables.records import Record, RecordRepository
 from src.modules.tables.repository import (
@@ -39,6 +43,7 @@ class TableServiceError(Exception):
 
 class TablesService:
     """Application service for folders/tables/columns CRUD."""
+    MAX_FOLDER_DEPTH = 2
 
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -53,10 +58,16 @@ class TablesService:
         user_id: uuid.UUID,
         body: CreateFolderRequest,
     ) -> TableFolder:
+        parent_id = await self._validate_parent_folder(
+            org_id=org_id,
+            parent_id=body.parent_id,
+            current_folder_id=None,
+        )
         max_pos = await self.folder_repo.get_max_position(org_id)
         folder = TableFolder(
             org_id=org_id,
             created_by=user_id,
+            parent_id=parent_id,
             name=body.name,
             position=max_pos + 1,
         )
@@ -75,7 +86,16 @@ class TablesService:
         folder = await self.folder_repo.get_by_id(folder_id)
         if not folder or folder.org_id != org_id:
             raise TableServiceError(code="NOT_FOUND", message="Папка не найдена")
-        for field, value in body.model_dump(exclude_unset=True).items():
+
+        updates = body.model_dump(exclude_unset=True)
+        if "parent_id" in updates:
+            updates["parent_id"] = await self._validate_parent_folder(
+                org_id=org_id,
+                parent_id=updates["parent_id"],
+                current_folder_id=folder.id,
+            )
+
+        for field, value in updates.items():
             setattr(folder, field, value)
         return await self.folder_repo.update(folder)
 
@@ -93,6 +113,7 @@ class TablesService:
         user_id: uuid.UUID,
         body: CreateTableRequest,
     ) -> Table:
+        await self._enforce_table_limit(org_id=org_id)
         if body.folder_id is not None:
             folder = await self.folder_repo.get_by_id(body.folder_id)
             if not folder or folder.org_id != org_id:
@@ -224,6 +245,84 @@ class TablesService:
         if field_type not in FieldType.ALL:
             raise TableServiceError(code="INVALID_FIELD_TYPE", message=f"Неверный тип поля: {field_type}")
 
+    async def _validate_parent_folder(
+        self,
+        *,
+        org_id: uuid.UUID,
+        parent_id: uuid.UUID | None,
+        current_folder_id: uuid.UUID | None,
+    ) -> uuid.UUID | None:
+        if parent_id is None:
+            return None
+
+        if current_folder_id is not None and parent_id == current_folder_id:
+            raise TableServiceError(code="INVALID_PARENT", message="Нельзя вложить папку в саму себя")
+
+        parent = await self.folder_repo.get_by_id(parent_id)
+        if not parent or parent.org_id != org_id:
+            raise TableServiceError(code="NOT_FOUND", message="Родительская папка не найдена")
+
+        # Защита от циклов: нельзя выбрать потомка в качестве родителя.
+        if current_folder_id is not None:
+            cursor = parent
+            while cursor.parent_id is not None:
+                if cursor.parent_id == current_folder_id:
+                    raise TableServiceError(code="INVALID_PARENT", message="Нельзя вложить папку в своего потомка")
+                cursor = await self.folder_repo.get_by_id(cursor.parent_id)
+                if cursor is None or cursor.org_id != org_id:
+                    break
+
+        depth = 0
+        cursor = parent
+        while cursor.parent_id is not None:
+            depth += 1
+            cursor = await self.folder_repo.get_by_id(cursor.parent_id)
+            if cursor is None or cursor.org_id != org_id:
+                break
+            if depth > self.MAX_FOLDER_DEPTH:
+                break
+
+        if depth + 1 > self.MAX_FOLDER_DEPTH:
+            raise TableServiceError(
+                code="MAX_DEPTH_EXCEEDED",
+                message="Максимальная вложенность папок: 2 уровня",
+            )
+
+        return parent_id
+
+    async def _enforce_table_limit(self, *, org_id: uuid.UUID) -> None:
+        plan = await self._resolve_effective_plan(org_id=org_id)
+        limit = int(getattr(plan, "max_tables", 0) or 0)
+        if limit <= 0:
+            return
+        current = int(
+            (await self.session.execute(select(func.count(Table.id)).where(Table.org_id == org_id))).scalar()
+            or 0
+        )
+        if current >= limit:
+            raise TableServiceError(
+                code="TABLE_LIMIT_REACHED",
+                message=f"Достигнут лимит тарифа по таблицам ({limit})",
+            )
+
+    async def _resolve_effective_plan(self, *, org_id: uuid.UUID) -> Plan | None:
+        sub_stmt = select(Subscription).where(Subscription.org_id == org_id).limit(1)
+        sub = (await self.session.execute(sub_stmt)).scalar_one_or_none()
+
+        plan_name = None
+        if sub and sub.status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE}:
+            plan_name = sub.plan.value
+        if not plan_name:
+            org_stmt = select(Organization.plan).where(Organization.id == org_id).limit(1)
+            org_plan = (await self.session.execute(org_stmt)).scalar_one_or_none()
+            plan_name = str(getattr(org_plan, "value", org_plan or "free")).lower()
+
+        if not plan_name:
+            return None
+        return (
+            await self.session.execute(select(Plan).where(Plan.name == plan_name, Plan.is_active.is_(True)))
+        ).scalar_one_or_none()
+
 
 class TableRecordsService:
     """Application service for table records CRUD and ordering."""
@@ -242,6 +341,7 @@ class TableRecordsService:
         body: CreateRecordRequest,
     ) -> Record:
         await self._ensure_table_scope(table_id=table_id, org_id=org_id)
+        await self._enforce_record_limit(org_id=org_id)
         position = (await self.record_repo.get_max_position(table_id)) + 1
         record = Record(
             table_id=table_id,
@@ -334,6 +434,39 @@ class TableRecordsService:
         if table is None:
             raise TableServiceError(code="NOT_FOUND", message="Таблица не найдена")
         return table
+
+    async def _enforce_record_limit(self, *, org_id: uuid.UUID) -> None:
+        plan = await self._resolve_effective_plan(org_id=org_id)
+        limit = int(getattr(plan, "max_records", 0) or 0)
+        if limit <= 0:
+            return
+        current = int(
+            (await self.session.execute(select(func.count(Record.id)).where(Record.org_id == org_id))).scalar()
+            or 0
+        )
+        if current >= limit:
+            raise TableServiceError(
+                code="RECORD_LIMIT_REACHED",
+                message=f"Достигнут лимит тарифа по записям ({limit})",
+            )
+
+    async def _resolve_effective_plan(self, *, org_id: uuid.UUID) -> Plan | None:
+        sub_stmt = select(Subscription).where(Subscription.org_id == org_id).limit(1)
+        sub = (await self.session.execute(sub_stmt)).scalar_one_or_none()
+
+        plan_name = None
+        if sub and sub.status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE}:
+            plan_name = sub.plan.value
+        if not plan_name:
+            org_stmt = select(Organization.plan).where(Organization.id == org_id).limit(1)
+            org_plan = (await self.session.execute(org_stmt)).scalar_one_or_none()
+            plan_name = str(getattr(org_plan, "value", org_plan or "free")).lower()
+
+        if not plan_name:
+            return None
+        return (
+            await self.session.execute(select(Plan).where(Plan.name == plan_name, Plan.is_active.is_(True)))
+        ).scalar_one_or_none()
 
 
 class TableViewsService:

@@ -11,6 +11,59 @@ env:
   NODE_VERSION: "20"
 
 jobs:
+  infra-compose-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate docker-compose files
+        run: |
+          docker compose -f docker-compose.yml config -q
+          docker compose -f docker-compose.prod.yml config -q
+
+      - name: Build and start infra + background workers
+        run: |
+          docker compose -f docker-compose.yml --profile dev up -d --build \
+            db redis rabbitmq minio bootstrap api celery_worker celery_beat
+
+      - name: Wait for worker/beat readiness
+        run: |
+          for i in {1..20}; do
+            if docker compose -f docker-compose.yml ps --format '{{.Name}} {{.Status}}' celery_worker celery_beat | grep -Eiq 'healthy|Up'; then
+              sleep 3
+            fi
+            W=$(docker compose -f docker-compose.yml ps --format '{{.Status}}' celery_worker || true)
+            B=$(docker compose -f docker-compose.yml ps --format '{{.Status}}' celery_beat || true)
+            echo "worker=$W"
+            echo "beat=$B"
+            if echo "$W" | grep -qi "healthy\|Up" && echo "$B" | grep -qi "healthy\|Up"; then
+              break
+            fi
+            sleep 3
+          done
+
+      - name: Celery/RabbitMQ smoke checks
+        run: |
+          docker compose -f docker-compose.yml exec -T celery_worker sh -lc "celery -A src.infrastructure.celery_app inspect ping -t 5 | grep -q OK"
+          docker compose -f docker-compose.yml exec -T celery_beat sh -lc "ps aux | grep -q '[c]elery.*beat'"
+          docker compose -f docker-compose.yml exec -T api python - <<'PY'
+          from src.modules.schedule.tasks import dispatch_schedule_reminders
+          from src.modules.billing.tasks import process_billing_lifecycle
+          a = dispatch_schedule_reminders.delay().id
+          b = process_billing_lifecycle.delay().id
+          print(a, b)
+          PY
+          sleep 5
+          docker compose -f docker-compose.yml logs --since=1m celery_worker | grep -E "dispatch_schedule_reminders|process_billing_lifecycle"
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml logs --no-color --timestamps
+
+      - name: Teardown
+        if: always()
+        run: docker compose -f docker-compose.yml down -v
+
   # ─── Backend tests ───
   backend-lint-test:
     runs-on: ubuntu-latest
@@ -132,7 +185,7 @@ jobs:
 
   # ─── Docker build (only on main) ───
   docker-build:
-    needs: [backend-lint-test, frontend-build, backend-deps-audit, frontend-deps-audit]
+    needs: [infra-compose-smoke, backend-lint-test, frontend-build, backend-deps-audit, frontend-deps-audit]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:

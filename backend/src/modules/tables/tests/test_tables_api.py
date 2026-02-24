@@ -22,6 +22,7 @@ async def _register_owner(client: AsyncClient) -> str:
             "first_name": "Test",
             "last_name": "User",
             "org_name": f"Org-{uuid.uuid4().hex[:6]}",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
@@ -345,6 +346,85 @@ async def test_table_and_folder_name_validation(client: AsyncClient):
 
     blank_folder = await client.post("/api/v1/tables/folders/", json={"name": "   "}, headers=_headers(token))
     assert blank_folder.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_rename_table_and_move_folder_tree(client: AsyncClient):
+    token = await _register_owner(client)
+
+    root = await client.post("/api/v1/tables/folders/", json={"name": "Root"}, headers=_headers(token))
+    assert root.status_code == 200 and root.json()["ok"] is True
+    root_id = root.json()["data"]["id"]
+
+    child = await client.post(
+        "/api/v1/tables/folders/",
+        json={"name": "Child", "parent_id": root_id},
+        headers=_headers(token),
+    )
+    assert child.status_code == 200 and child.json()["ok"] is True
+    child_id = child.json()["data"]["id"]
+
+    table = await client.post(
+        "/api/v1/tables/",
+        json={"name": "Initial table", "folder_id": child_id},
+        headers=_headers(token),
+    )
+    assert table.status_code == 200 and table.json()["ok"] is True
+    table_id = table.json()["data"]["id"]
+
+    # Table rename should work and preserve folder binding.
+    renamed = await client.patch(
+        f"/api/v1/tables/{table_id}",
+        json={"name": "Renamed table"},
+        headers=_headers(token),
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["ok"] is True
+    assert renamed.json()["data"]["name"] == "Renamed table"
+    assert renamed.json()["data"]["folder_id"] == child_id
+
+    # Move full folder subtree to root.
+    moved = await client.patch(
+        f"/api/v1/tables/folders/{child_id}",
+        json={"parent_id": None},
+        headers=_headers(token),
+    )
+    assert moved.status_code == 200
+    assert moved.json()["ok"] is True
+    assert moved.json()["data"]["parent_id"] is None
+
+    # Table should still remain linked to moved folder.
+    got_table = await client.get(f"/api/v1/tables/{table_id}", headers=_headers(token))
+    assert got_table.status_code == 200
+    assert got_table.json()["ok"] is True
+    assert got_table.json()["data"]["folder_id"] == child_id
+
+
+@pytest.mark.asyncio
+async def test_move_folder_to_descendant_is_rejected(client: AsyncClient):
+    token = await _register_owner(client)
+
+    root = await client.post("/api/v1/tables/folders/", json={"name": "Root"}, headers=_headers(token))
+    assert root.status_code == 200 and root.json()["ok"] is True
+    root_id = root.json()["data"]["id"]
+
+    child = await client.post(
+        "/api/v1/tables/folders/",
+        json={"name": "Child", "parent_id": root_id},
+        headers=_headers(token),
+    )
+    assert child.status_code == 200 and child.json()["ok"] is True
+    child_id = child.json()["data"]["id"]
+
+    # Cannot move root under its descendant.
+    invalid_move = await client.patch(
+        f"/api/v1/tables/folders/{root_id}",
+        json={"parent_id": child_id},
+        headers=_headers(token),
+    )
+    assert invalid_move.status_code == 200
+    assert invalid_move.json()["ok"] is False
+    assert invalid_move.json()["error"]["code"] == "INVALID_PARENT"
 
 
 @pytest.mark.asyncio

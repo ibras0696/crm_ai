@@ -23,6 +23,7 @@ async def test_auth_cookie_session_flow(client, random_email):
             "first_name": "Cookie",
             "last_name": "User",
             "org_name": "Cookie Org",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
@@ -82,6 +83,7 @@ async def test_tenant_isolation_for_tables(client):
             "first_name": "Tenant",
             "last_name": "A",
             "org_name": "Tenant A Org",
+            "accepted_privacy_policy": True,
         },
     )
     token1 = reg1.json()["data"]["access_token"]
@@ -94,6 +96,7 @@ async def test_tenant_isolation_for_tables(client):
             "first_name": "Tenant",
             "last_name": "B",
             "org_name": "Tenant B Org",
+            "accepted_privacy_policy": True,
         },
     )
     token2 = reg2.json()["data"]["access_token"]
@@ -119,6 +122,7 @@ async def test_acl_deny_rule_blocks_employee_read(client):
             "first_name": "Owner",
             "last_name": "User",
             "org_name": "ACL Org",
+            "accepted_privacy_policy": True,
         },
     )
     owner_token = reg_owner.json()["data"]["access_token"]

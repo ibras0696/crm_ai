@@ -32,3 +32,15 @@ IMPORTS_TOTAL = Counter(
     "Table import operations",
     ["format"],
 )
+
+NOTIFICATION_EMAIL_SEND_TOTAL = Counter(
+    "crm_notification_email_send_total",
+    "Email notification send attempts by kind and status",
+    ["kind", "status"],
+)
+
+INVITE_EMAIL_VALIDATION_TOTAL = Counter(
+    "crm_invite_email_validation_total",
+    "Invite email pre-send validation result",
+    ["result"],
+)

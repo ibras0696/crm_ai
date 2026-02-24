@@ -1,0 +1,33 @@
+groups:
+  - name: notifications
+    interval: 30s
+    rules:
+      - alert: NotificationEmailSendFailuresHigh
+        expr: sum(increase(crm_notification_email_send_total{status="failed"}[15m])) >= 5
+        for: 5m
+        labels:
+          severity: warning
+          service: notifications
+        annotations:
+          summary: "Рост ошибок отправки email"
+          description: "За последние 15 минут зафиксировано >=5 ошибок отправки email."
+
+      - alert: InviteValidationFailuresSpike
+        expr: sum(increase(crm_invite_email_validation_total{result="validation_failed"}[15m])) >= 3
+        for: 5m
+        labels:
+          severity: warning
+          service: notifications
+        annotations:
+          summary: "Ошибки предвалидации invite-email"
+          description: "Проверка invite перед отправкой падает чаще обычного (>=3 за 15 минут)."
+
+      - alert: InviteSkippedAlreadyMemberSpike
+        expr: sum(increase(crm_invite_email_validation_total{result="already_member"}[15m])) >= 10
+        for: 10m
+        labels:
+          severity: info
+          service: notifications
+        annotations:
+          summary: "Частые повторные приглашения участникам"
+          description: "В системе много invite для уже добавленных участников (>=10 за 15 минут)."

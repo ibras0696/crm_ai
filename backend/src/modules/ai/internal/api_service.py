@@ -302,7 +302,7 @@ async def build_context_sources(*, org_id: uuid.UUID) -> dict[str, Any]:
             tables = await repo.list_tables_with_columns(org_id=org_id, limit=200)
             schedule_events = await repo.list_schedule_events(org_id=org_id, limit=100)
             return {
-                "kb_pages": [{"id": str(p.id), "title": p.title} for p in kb_pages],
+                "kb_pages": [{"id": str(p.id), "title": p.title, "parent_id": str(p.parent_id) if p.parent_id else None} for p in kb_pages],
                 "tables": [
                     {
                         "id": str(t.id),

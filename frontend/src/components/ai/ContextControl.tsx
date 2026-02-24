@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react'
-import type { AIContextEstimate, AIContextOptions, AIContextSourcePage, AIContextSourceTable } from '@/lib/api'
-import { Database, Search, X } from 'lucide-react'
+import { useState } from 'react'
+import type { AIContextEstimate, AIContextOptions, AIContextSourcePage, AIContextSourceTable, FolderInfo } from '@/lib/api'
+import { Database, X } from 'lucide-react'
+import TableFolderTreeSelect from '@/components/common/TableFolderTreeSelect'
+import KbPageTreeSelect from '@/components/common/KbPageTreeSelect'
 
 type Props = {
   includeContext: boolean
@@ -9,6 +11,8 @@ type Props = {
   setContextOptions: (updater: (prev: AIContextOptions) => AIContextOptions) => void
   contextEstimate: AIContextEstimate | null
   contextSources: { kb_pages: AIContextSourcePage[]; tables: AIContextSourceTable[] }
+  tableFolders: FolderInfo[]
+  tableFolderById?: Record<string, string | null>
   showSummary?: boolean
   open?: boolean
   onOpenChange?: (open: boolean) => void
@@ -42,44 +46,6 @@ function TokenSummary({ estimate }: { estimate: AIContextEstimate | null }) {
   )
 }
 
-function SearchWithActions({
-  value,
-  onChange,
-  placeholder,
-  onAll,
-  onClear,
-}: {
-  value: string
-  onChange: (next: string) => void
-  placeholder: string
-  onAll: () => void
-  onClear: () => void
-}) {
-  return (
-    <div className="h-9 rounded-lg border border-border bg-card flex items-center overflow-hidden">
-      <div className="flex-1 min-w-0 flex items-center gap-2 px-2">
-        <Search className="h-4 w-4 text-muted-foreground shrink-0" />
-        <input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="flex-1 min-w-0 w-full bg-transparent outline-none text-sm"
-          placeholder={placeholder}
-        />
-      </div>
-      <div className="w-px self-stretch bg-border/70" />
-      <div className="shrink-0 flex items-center">
-        <button onClick={onAll} className="h-9 px-3 text-xs hover:bg-secondary transition-colors">
-          Все
-        </button>
-        <div className="w-px self-stretch bg-border/70" />
-        <button onClick={onClear} className="h-9 px-3 text-xs hover:bg-secondary transition-colors">
-          Снять
-        </button>
-      </div>
-    </div>
-  )
-}
-
 export default function ContextControl({
   includeContext,
   setIncludeContext,
@@ -87,6 +53,8 @@ export default function ContextControl({
   setContextOptions,
   contextEstimate,
   contextSources,
+  tableFolders,
+  tableFolderById,
   showSummary = true,
   open,
   onOpenChange,
@@ -97,53 +65,12 @@ export default function ContextControl({
     onOpenChange?.(next)
     if (typeof open !== 'boolean') setDrawerOpenUncontrolled(next)
   }
-  const [kbQuery, setKbQuery] = useState('')
-  const [tablesQuery, setTablesQuery] = useState('')
 
   const kbSelected = contextOptions.selected_kb_page_ids || []
   const tableSelected = contextOptions.selected_table_ids || []
 
-  const filteredKb = useMemo(() => {
-    const q = kbQuery.trim().toLowerCase()
-    if (!q) return contextSources.kb_pages
-    return contextSources.kb_pages.filter((p) => String(p.title || '').toLowerCase().includes(q))
-  }, [contextSources.kb_pages, kbQuery])
-
-  const filteredTables = useMemo(() => {
-    const q = tablesQuery.trim().toLowerCase()
-    if (!q) return contextSources.tables
-    return contextSources.tables.filter((t) => String(t.name || '').toLowerCase().includes(q))
-  }, [contextSources.tables, tablesQuery])
-
   const totalObjects = kbSelected.length + tableSelected.length
   const totalTokens = contextEstimate?.estimated_total_tokens ?? 0
-
-  const selectAllKb = () => {
-    setContextOptions((prev) => ({ ...prev, selected_kb_page_ids: contextSources.kb_pages.map((p) => p.id) }))
-  }
-  const clearKb = () => setContextOptions((prev) => ({ ...prev, selected_kb_page_ids: [] }))
-  const selectAllTables = () => {
-    setContextOptions((prev) => ({ ...prev, selected_table_ids: contextSources.tables.map((t) => t.id) }))
-  }
-  const clearTables = () => setContextOptions((prev) => ({ ...prev, selected_table_ids: [] }))
-
-  const toggleKb = (id: string) => {
-    setContextOptions((prev) => {
-      const set = new Set(prev.selected_kb_page_ids || [])
-      if (set.has(id)) set.delete(id)
-      else set.add(id)
-      return { ...prev, selected_kb_page_ids: Array.from(set) }
-    })
-  }
-
-  const toggleTable = (id: string) => {
-    setContextOptions((prev) => {
-      const set = new Set(prev.selected_table_ids || [])
-      if (set.has(id)) set.delete(id)
-      else set.add(id)
-      return { ...prev, selected_table_ids: Array.from(set) }
-    })
-  }
 
   return (
     <>
@@ -295,27 +222,14 @@ export default function ContextControl({
                   <span className="text-xs text-muted-foreground">{kbSelected.length}</span>
                 </div>
                 <div className="px-3 pb-3">
-                  <SearchWithActions
-                    value={kbQuery}
-                    onChange={setKbQuery}
-                    placeholder="Поиск страниц"
-                    onAll={selectAllKb}
-                    onClear={clearKb}
+                  <KbPageTreeSelect
+                    pages={contextSources.kb_pages}
+                    selectedIds={kbSelected}
+                    onSelectedIdsChange={(next) => setContextOptions((prev) => ({ ...prev, selected_kb_page_ids: next }))}
+                    disabled={!includeContext || !contextOptions.include_kb}
+                    emptyText="Нет страниц"
+                    heightClassName="max-h-[360px]"
                   />
-                </div>
-                <div className="px-3 pb-3 overflow-y-auto flex-1 min-h-0">
-                  {filteredKb.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">Нет страниц</p>
-                  ) : (
-                    <div className="space-y-1">
-                      {filteredKb.map((p) => (
-                        <label key={p.id} className="flex items-center gap-2 text-sm cursor-pointer py-1">
-                          <input type="checkbox" checked={kbSelected.includes(p.id)} onChange={() => toggleKb(p.id)} disabled={!includeContext || !contextOptions.include_kb} />
-                          <span className="truncate">{p.title}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
                 </div>
               </div>
 
@@ -325,27 +239,15 @@ export default function ContextControl({
                   <span className="text-xs text-muted-foreground">{tableSelected.length}</span>
                 </div>
                 <div className="px-3 pb-3">
-                  <SearchWithActions
-                    value={tablesQuery}
-                    onChange={setTablesQuery}
-                    placeholder="Поиск таблиц"
-                    onAll={selectAllTables}
-                    onClear={clearTables}
+                  <TableFolderTreeSelect
+                    tables={contextSources.tables.map(t => ({ id: t.id, name: t.name, folder_id: tableFolderById?.[t.id] ?? null }))}
+                    folders={tableFolders}
+                    selectedIds={tableSelected}
+                    onSelectedIdsChange={(next) => setContextOptions((prev) => ({ ...prev, selected_table_ids: next }))}
+                    disabled={!includeContext || (!contextOptions.include_table_schema && !contextOptions.include_table_records)}
+                    emptyText="Нет таблиц"
+                    heightClassName="max-h-[360px]"
                   />
-                </div>
-                <div className="px-3 pb-3 overflow-y-auto flex-1 min-h-0">
-                  {filteredTables.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">Нет таблиц</p>
-                  ) : (
-                    <div className="space-y-1">
-                      {filteredTables.map((t) => (
-                        <label key={t.id} className="flex items-center gap-2 text-sm cursor-pointer py-1">
-                          <input type="checkbox" checked={tableSelected.includes(t.id)} onChange={() => toggleTable(t.id)} disabled={!includeContext || (!contextOptions.include_table_schema && !contextOptions.include_table_records)} />
-                          <span className="truncate">{t.name}</span>
-                        </label>
-                      ))}
-                    </div>
-                  )}
                 </div>
               </div>
             </div>

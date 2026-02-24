@@ -4,9 +4,7 @@ from datetime import datetime, timezone
 import pytest
 from httpx import AsyncClient
 
-from src.config import settings
 from src.infrastructure.uow import UnitOfWork
-from src.modules.auth.security import hash_password
 from src.modules.ai.models import AIUsageLog
 
 
@@ -24,6 +22,7 @@ async def _register_owner(client: AsyncClient, *, org_name: str) -> tuple[str, s
             "first_name": "Owner",
             "last_name": "User",
             "org_name": org_name,
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
@@ -36,17 +35,17 @@ async def _register_owner(client: AsyncClient, *, org_name: str) -> tuple[str, s
     return token, org_id
 
 
-async def _login_sa(client: AsyncClient, monkeypatch) -> str:
-    monkeypatch.setattr(settings, "SUPERADMIN_EMAIL", "admin")
-    monkeypatch.setattr(settings, "SUPERADMIN_PASSWORD_HASH", hash_password("12345678"))
-    r = await client.post("/api/v1/superadmin/login", json={"email": "admin", "password": "12345678"})
+async def _login_sa(client: AsyncClient) -> str:
+    r = await client.post("/api/v1/superadmin/login", json={"email": "admin@test.local", "password": "12345678"})
     assert r.status_code == 200
-    return r.json()["data"]["access_token"]
+    body = r.json()
+    assert body["ok"] is True, body
+    return body["data"]["access_token"]
 
 
 @pytest.mark.asyncio
-async def test_superadmin_orgs_pagination_and_filters(client: AsyncClient, monkeypatch):
-    sa = await _login_sa(client, monkeypatch)
+async def test_superadmin_orgs_pagination_and_filters(client: AsyncClient):
+    sa = await _login_sa(client)
 
     # Create 3 orgs
     _, org1 = await _register_owner(client, org_name="Alpha Org")
@@ -100,8 +99,8 @@ async def test_superadmin_orgs_pagination_and_filters(client: AsyncClient, monke
 
 
 @pytest.mark.asyncio
-async def test_superadmin_org_detail_and_members(client: AsyncClient, monkeypatch):
-    sa = await _login_sa(client, monkeypatch)
+async def test_superadmin_org_detail_and_members(client: AsyncClient):
+    sa = await _login_sa(client)
     owner_token, org_id = await _register_owner(client, org_name="Detail Org")
 
     from src.infrastructure.uow import UnitOfWork
@@ -130,8 +129,8 @@ async def test_superadmin_org_detail_and_members(client: AsyncClient, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_superadmin_plan_change_writes_audit_and_superadmin_can_list_audit(client: AsyncClient, monkeypatch):
-    sa = await _login_sa(client, monkeypatch)
+async def test_superadmin_plan_change_writes_audit_and_superadmin_can_list_audit(client: AsyncClient):
+    sa = await _login_sa(client)
     owner_token, org_id = await _register_owner(client, org_name="Audit Org")
 
     from src.infrastructure.uow import UnitOfWork
@@ -159,8 +158,8 @@ async def test_superadmin_plan_change_writes_audit_and_superadmin_can_list_audit
 
 
 @pytest.mark.asyncio
-async def test_superadmin_ai_quick_actions_reset_usage_and_kill_switch(client: AsyncClient, monkeypatch):
-    sa = await _login_sa(client, monkeypatch)
+async def test_superadmin_ai_quick_actions_reset_usage_and_kill_switch(client: AsyncClient):
+    sa = await _login_sa(client)
     owner_token, org_id = await _register_owner(client, org_name="AI Quick Actions Org")
 
     # Add a usage row for today.

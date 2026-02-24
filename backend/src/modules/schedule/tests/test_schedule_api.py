@@ -18,6 +18,7 @@ async def _register_owner(client: AsyncClient) -> str:
             "first_name": "Owner",
             "last_name": "User",
             "org_name": f"Org-{uuid.uuid4().hex[:6]}",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
@@ -205,3 +206,68 @@ async def test_schedule_day_limit_10_events(client: AsyncClient):
     assert over.status_code == 200
     assert over.json()["ok"] is False
     assert over.json()["error"]["code"] == "DAY_LIMIT_EXCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_schedule_rejects_invalid_participant_and_reminder_offset(client: AsyncClient):
+    token = await _register_owner(client)
+
+    invalid_participant = await client.post(
+        "/api/v1/schedule/events",
+        json={
+            "title": "Invalid participant",
+            "start_at": "2026-03-02T10:00:00Z",
+            "end_at": "2026-03-02T11:00:00Z",
+            "participant_ids": [str(uuid.uuid4())],
+            "all_day": False,
+        },
+        headers=_headers(token),
+    )
+    assert invalid_participant.status_code == 200
+    assert invalid_participant.json()["ok"] is False
+    assert invalid_participant.json()["error"]["code"] == "INVALID_PARTICIPANT"
+
+    invalid_offset = await client.post(
+        "/api/v1/schedule/events",
+        json={
+            "title": "Invalid reminder",
+            "start_at": "2026-03-02T12:00:00Z",
+            "end_at": "2026-03-02T13:00:00Z",
+            "reminder_offsets_minutes": [30],
+            "all_day": False,
+        },
+        headers=_headers(token),
+    )
+    assert invalid_offset.status_code == 200
+    assert invalid_offset.json()["ok"] is False
+    assert invalid_offset.json()["error"]["code"] == "INVALID_REMINDER_OFFSET"
+
+
+@pytest.mark.asyncio
+async def test_schedule_dispatch_skips_recurrence_events(client: AsyncClient):
+    token = await _register_owner(client)
+
+    create = await client.post(
+        "/api/v1/schedule/events",
+        json={
+            "title": "Recurring meeting",
+            "description": "Should not dispatch direct reminders",
+            "start_at": "2026-03-03T12:00:00Z",
+            "end_at": "2026-03-03T13:00:00Z",
+            "all_day": False,
+            "recurrence": "RRULE:FREQ=WEEKLY;BYDAY=TU",
+            "reminder_offsets_minutes": [60, 120],
+        },
+        headers=_headers(token),
+    )
+    assert create.status_code == 200
+    assert create.json()["ok"] is True
+
+    dispatch = await client.post(
+        "/api/v1/schedule/events/dispatch-reminders",
+        json={"now": "2026-03-03T11:00:00Z"},
+        headers=_headers(token),
+    )
+    assert dispatch.status_code == 200
+    assert dispatch.json()["ok"] is True
+    assert dispatch.json()["data"]["created_notifications"] == 0

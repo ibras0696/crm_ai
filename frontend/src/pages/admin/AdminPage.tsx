@@ -35,6 +35,8 @@ export default function AdminPage() {
   const [showInvite, setShowInvite] = useState(false)
   const [inviteForm, setInviteForm] = useState({ email: '', role: 'employee' })
   const [saving, setSaving] = useState(false)
+  const [inviteError, setInviteError] = useState('')
+  const [inviteSuccess, setInviteSuccess] = useState('')
   const [showAddRule, setShowAddRule] = useState(false)
   const [ruleForm, setRuleForm] = useState({ resource_type: 'table', role: 'employee', can_read: true, can_write: true, can_delete: false })
   const [summary, setSummary] = useState<{ tables_count: number; records_count: number; columns_count: number } | null>(null)
@@ -58,15 +60,41 @@ export default function AdminPage() {
 
   useEffect(() => { loadAll() }, [loadAll])
 
+  const mapInviteError = (err: any): string => {
+    const code = err?.response?.data?.error?.code
+    const message = err?.response?.data?.error?.message
+    if (code === 'CONFLICT') return 'Пользователь уже в организации или приглашение уже отправлено.'
+    if (code === 'VALIDATION_ERROR') return message || 'Проверьте email и попробуйте снова.'
+    if (code === 'RATE_LIMIT' || code === 'RATE_LIMITED') return 'Слишком много приглашений. Попробуйте через минуту.'
+    return message || 'Не удалось отправить приглашение.'
+  }
+
   const handleInvite = async () => {
     if (!inviteForm.email.trim()) return
     setSaving(true)
+    setInviteError('')
+    setInviteSuccess('')
     try {
-      await orgApi.createInvite({ email: inviteForm.email, role: inviteForm.role })
-      setShowInvite(false)
-      setInviteForm({ email: '', role: 'employee' })
+      const resp = await orgApi.createInvite({ email: inviteForm.email, role: inviteForm.role })
+      if (!resp.data.ok) {
+        setInviteError(resp.data.error?.message || 'Не удалось отправить приглашение.')
+        return
+      }
+      const exists = resp.data.data?.invitee_exists
+      setInviteSuccess(
+        exists
+          ? 'Приглашение отправлено зарегистрированному пользователю.'
+          : 'Пользователь еще не зарегистрирован. Ссылка отправлена на email.',
+      )
       loadAll()
-    } catch { /* ignore */ }
+      setTimeout(() => {
+        setShowInvite(false)
+        setInviteForm({ email: '', role: 'employee' })
+        setInviteSuccess('')
+      }, 1400)
+    } catch (e: any) {
+      setInviteError(mapInviteError(e))
+    }
     setSaving(false)
   }
 
@@ -279,6 +307,12 @@ export default function AdminPage() {
                 {saving ? 'Отправка...' : 'Пригласить'}
               </button>
             </div>
+            {inviteError && (
+              <p className="text-sm text-red-500">{inviteError}</p>
+            )}
+            {inviteSuccess && (
+              <p className="text-sm text-emerald-500">{inviteSuccess}</p>
+            )}
           </div>
         </div>
       )}

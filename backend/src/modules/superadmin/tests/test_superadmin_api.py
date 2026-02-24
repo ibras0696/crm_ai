@@ -1,8 +1,6 @@
+import uuid
+
 import pytest
-
-from src.config import settings
-from src.modules.auth.security import hash_password
-
 
 @pytest.mark.asyncio
 async def test_superadmin_requires_auth(client):
@@ -22,20 +20,20 @@ async def test_superadmin_forbids_non_superadmin_token(client, random_email):
             "first_name": "User",
             "last_name": "One",
             "org_name": "Org",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
     user_token = reg.json()["data"]["access_token"]
 
     r = await client.get("/api/v1/superadmin/overview", headers={"Authorization": f"Bearer {user_token}"})
-    assert r.status_code == 403
+    # User token is signed with user JWT secret/audience, so for superadmin gateway it is invalid auth token.
+    assert r.status_code == 401
     assert r.json()["ok"] is False
 
 
 @pytest.mark.asyncio
-async def test_superadmin_login_and_overview(client, monkeypatch, random_email):
-    monkeypatch.setattr(settings, "SUPERADMIN_EMAIL", "admin")
-    monkeypatch.setattr(settings, "SUPERADMIN_PASSWORD_HASH", hash_password("12345678"))
+async def test_superadmin_login_and_overview(client, random_email):
 
     # Create some data.
     reg = await client.post(
@@ -46,14 +44,16 @@ async def test_superadmin_login_and_overview(client, monkeypatch, random_email):
             "first_name": "Owner",
             "last_name": "One",
             "org_name": "Test Org",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201
 
-    login = await client.post("/api/v1/superadmin/login", json={"email": "admin", "password": "12345678"})
+    login = await client.post("/api/v1/superadmin/login", json={"email": "admin@test.local", "password": "12345678"})
     assert login.status_code == 200
-    assert login.json()["ok"] is True
-    sa_token = login.json()["data"]["access_token"]
+    payload = login.json()
+    assert payload["ok"] is True, payload
+    sa_token = payload["data"]["access_token"]
 
     ov = await client.get("/api/v1/superadmin/overview", headers={"Authorization": f"Bearer {sa_token}"})
     assert ov.status_code == 200

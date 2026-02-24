@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
@@ -13,6 +14,8 @@ class RegisterRequest(BaseModel):
     # If present, registration will attach the user to an existing organization
     # with the role from the invite. org_name is ignored in that case.
     invite_token: str | None = None
+    # Legal requirement: explicit consent is mandatory.
+    accepted_privacy_policy: Literal[True]
 
 
 class LoginRequest(BaseModel):

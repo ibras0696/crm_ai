@@ -54,7 +54,7 @@ interface AuthState {
   isLoading: boolean
   isAuthenticated: boolean
   login: (email: string, password: string) => Promise<void>
-  register: (data: { email: string; password: string; first_name: string; last_name: string; org_name: string }) => Promise<void>
+  register: (data: { email: string; password: string; first_name: string; last_name: string; org_name: string; accepted_privacy_policy: true }) => Promise<void>
   logout: () => Promise<void>
   refresh: () => Promise<void>
 }
@@ -105,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const register = async (data: { email: string; password: string; first_name: string; last_name: string; org_name: string }) => {
+  const register = async (data: { email: string; password: string; first_name: string; last_name: string; org_name: string; accepted_privacy_policy: true }) => {
     try {
       const resp = await authApi.register(data)
       if (resp.data.ok) {

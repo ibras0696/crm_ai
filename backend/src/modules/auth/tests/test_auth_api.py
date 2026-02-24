@@ -14,6 +14,7 @@ async def test_register_success(client: AsyncClient, random_email: str):
             "first_name": "Test",
             "last_name": "User",
             "org_name": "Test Org",
+            "accepted_privacy_policy": True,
         },
     )
     assert resp.status_code == 201
@@ -25,6 +26,22 @@ async def test_register_success(client: AsyncClient, random_email: str):
 
 
 @pytest.mark.asyncio
+async def test_register_requires_privacy_consent(client: AsyncClient, random_email: str):
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": random_email,
+            "password": "StrongPass123!",
+            "first_name": "No",
+            "last_name": "Consent",
+            "org_name": "No Consent Org",
+            "accepted_privacy_policy": False,
+        },
+    )
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_register_duplicate_email(client: AsyncClient):
     email = f"dup-{uuid.uuid4().hex[:8]}@example.com"
     payload = {
@@ -33,6 +50,7 @@ async def test_register_duplicate_email(client: AsyncClient):
         "first_name": "Test",
         "last_name": "User",
         "org_name": "Dup Org",
+            "accepted_privacy_policy": True,
     }
     resp1 = await client.post("/api/v1/auth/register", json=payload)
     assert resp1.status_code == 201
@@ -54,6 +72,7 @@ async def test_login_success(client: AsyncClient):
             "first_name": "Login",
             "last_name": "Test",
             "org_name": "Login Org",
+            "accepted_privacy_policy": True,
         },
     )
 
@@ -75,6 +94,7 @@ async def test_login_wrong_password(client: AsyncClient):
             "first_name": "Bad",
             "last_name": "PW",
             "org_name": "Bad PW Org",
+            "accepted_privacy_policy": True,
         },
     )
 
@@ -100,6 +120,7 @@ async def test_me_endpoint(client: AsyncClient):
             "first_name": "Me",
             "last_name": "Test",
             "org_name": "Me Org",
+            "accepted_privacy_policy": True,
         },
     )
     token = reg.json()["data"]["access_token"]
@@ -128,6 +149,7 @@ async def test_update_me_profile(client: AsyncClient):
             "first_name": "Old",
             "last_name": "Name",
             "org_name": "Upd Org",
+            "accepted_privacy_policy": True,
         },
     )
     token = reg.json()["data"]["access_token"]
@@ -156,6 +178,7 @@ async def test_refresh_token(client: AsyncClient):
             "first_name": "Refresh",
             "last_name": "Test",
             "org_name": "Refresh Org",
+            "accepted_privacy_policy": True,
         },
     )
     refresh_tok = reg.json()["data"]["refresh_token"]
@@ -179,6 +202,7 @@ async def test_logout(client: AsyncClient):
             "first_name": "Logout",
             "last_name": "Test",
             "org_name": "Logout Org",
+            "accepted_privacy_policy": True,
         },
     )
     refresh_tok = reg.json()["data"]["refresh_token"]

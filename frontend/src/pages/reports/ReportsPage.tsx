@@ -7,6 +7,7 @@ import {
   type DashboardInfo,
   type DashboardWidget,
   type DashboardWidgetConfig,
+  type FolderInfo,
   type TableInfo,
 } from '@/lib/api'
 import {
@@ -27,6 +28,7 @@ import {
 } from 'lucide-react'
 import ChartCard from '@/components/reports/ChartCard'
 import WidgetEditor, { normalizeConfig } from '@/components/reports/WidgetEditor'
+import TableFolderTreeSelect from '@/components/common/TableFolderTreeSelect'
 
 type WidgetKind = 'metric' | 'bar' | 'line' | 'area' | 'pie' | 'donut' | 'table'
 
@@ -105,6 +107,7 @@ function buildConfigForWidget(kind: WidgetKind, table: TableInfo | null): Dashbo
 export default function ReportsPage() {
   const [dashboards, setDashboards] = useState<DashboardInfo[]>([])
   const [tables, setTables] = useState<TableInfo[]>([])
+  const [folders, setFolders] = useState<FolderInfo[]>([])
   const [selectedDashboardId, setSelectedDashboardId] = useState('')
   const [dashboardData, setDashboardData] = useState<DashboardDataResponse | null>(null)
 
@@ -118,6 +121,8 @@ export default function ReportsPage() {
   const [aiPrompt, setAiPrompt] = useState('Собери понятный дашборд с ключевыми показателями')
   const [aiError, setAiError] = useState('')
   const [aiLimitInfo, setAiLimitInfo] = useState<{ dailyUsed: number; dailyLimit: number } | null>(null)
+  const [isAiTableModalOpen, setIsAiTableModalOpen] = useState(false)
+  const [aiSelectedTableIds, setAiSelectedTableIds] = useState<string[]>([])
   const [dashboardToDelete, setDashboardToDelete] = useState<DashboardInfo | null>(null)
 
   const selectedDashboard = useMemo(
@@ -128,6 +133,10 @@ export default function ReportsPage() {
     () => tables.find(t => t.id === selectedTableIdForCreate) ?? null,
     [tables, selectedTableIdForCreate],
   )
+  const aiSelectedTables = useMemo(
+    () => tables.filter(t => aiSelectedTableIds.includes(t.id)),
+    [tables, aiSelectedTableIds],
+  )
 
   const itemsByWidgetId = useMemo(
     () => new Map((dashboardData?.items || []).map(i => [i.widget.id, i])),
@@ -135,16 +144,19 @@ export default function ReportsPage() {
   )
 
   const loadDashboardsAndTables = async (preserveSelected = true) => {
-    const [dashResp, tablesResp] = await Promise.all([
+    const [dashResp, tablesResp, foldersResp] = await Promise.all([
       reportsApi.listDashboards(),
       tablesApi.list(),
+      tablesApi.listFolders(),
     ])
 
     const list = dashResp.data.ok && dashResp.data.data ? dashResp.data.data : []
     const tableList = tablesResp.data.ok && tablesResp.data.data ? tablesResp.data.data : []
+    const folderList = foldersResp.data.ok && foldersResp.data.data ? foldersResp.data.data : []
 
     setDashboards(list)
     setTables(tableList)
+    setFolders(folderList)
 
     if (!selectedTableIdForCreate && tableList[0]) {
       setSelectedTableIdForCreate(tableList[0].id)
@@ -208,6 +220,22 @@ export default function ReportsPage() {
   useEffect(() => {
     void initialLoad()
   }, [])
+
+  useEffect(() => {
+    if (tables.length === 0) {
+      setAiSelectedTableIds([])
+      return
+    }
+    setAiSelectedTableIds(prev => {
+      const valid = prev.filter(id => tables.some(t => t.id === id))
+      if (valid.length > 0) return valid
+      if (selectedTableIdForCreate && tables.some(t => t.id === selectedTableIdForCreate)) {
+        return [selectedTableIdForCreate]
+      }
+      const firstTable = tables[0]
+      return firstTable ? [firstTable.id] : []
+    })
+  }, [tables, selectedTableIdForCreate])
 
   const refresh = async () => {
     setRefreshing(true)
@@ -332,21 +360,29 @@ export default function ReportsPage() {
     return 'Не удалось создать дашборд через AI. Попробуйте позже.'
   }
 
-  const createDashboardByAI = async () => {
+  const createDashboardByAI = async (tableIds?: string[]) => {
     setAiError('')
     if (aiLimitInfo && aiLimitInfo.dailyLimit > 0 && aiLimitInfo.dailyUsed >= aiLimitInfo.dailyLimit) {
       setAiError('Дневной лимит AI токенов исчерпан. Попробуйте завтра или увеличьте тариф.')
       return
     }
-    const tableName = selectedTableForCreate?.name
+    const scopedTableIds = (tableIds ?? aiSelectedTableIds).filter(id => tables.some(t => t.id === id))
+    const scopedTables = tables.filter(t => scopedTableIds.includes(t.id))
+    const scopedTableNames = scopedTables.map(t => t.name).filter(Boolean)
+    const tableName = scopedTableNames[0]
+    const promptBase = aiPrompt.trim() || 'Собери дашборд с основными метриками'
+    const promptWithScope = scopedTableNames.length > 0
+      ? `${promptBase}\n\nИспользуй только эти таблицы: ${scopedTableNames.join(', ')}.`
+      : promptBase
     setBusy(true)
     try {
       const response = await aiApi.chat({
-        message: aiPrompt.trim() || 'Собери дашборд с основными метриками',
+        message: promptWithScope,
         include_context: true,
         ui_intent: 'create_dashboard',
         ui_intent_params: {
           widget_type: aiWidgetType,
+          ...(scopedTableNames.length ? { table_names: scopedTableNames } : {}),
           ...(tableName ? { table_name: tableName } : {}),
         },
       })
@@ -507,12 +543,15 @@ export default function ReportsPage() {
             />
 
             <button
-              onClick={() => void createDashboardByAI()}
+              onClick={() => setIsAiTableModalOpen(true)}
               disabled={busy || !!(aiLimitInfo && aiLimitInfo.dailyLimit > 0 && aiLimitInfo.dailyUsed >= aiLimitInfo.dailyLimit)}
               className="w-full h-9 rounded-lg bg-primary text-white text-sm hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-1.5"
             >
-              <Bot className="h-4 w-4" /> Создать через AI
+              <Bot className="h-4 w-4" /> Выбрать таблицы и создать
             </button>
+            <p className="text-xs text-muted-foreground">
+              Выбрано таблиц: {aiSelectedTables.length}
+            </p>
             {aiLimitInfo && aiLimitInfo.dailyLimit > 0 && (
               <p className="text-xs text-muted-foreground">
                 AI токены за день: {aiLimitInfo.dailyUsed.toLocaleString('ru-RU')} / {aiLimitInfo.dailyLimit.toLocaleString('ru-RU')}
@@ -671,6 +710,59 @@ export default function ReportsPage() {
               >
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                 Удалить
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isAiTableModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => !busy && setIsAiTableModalOpen(false)}
+          />
+          <div className="relative w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-2xl space-y-4">
+            <div>
+              <h3 className="text-lg font-semibold leading-tight">Выбор таблиц для AI</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Отметь таблицы, на основе которых AI соберет дашборд.
+              </p>
+            </div>
+
+            {tables.length === 0 ? (
+              <div className="rounded-lg border border-border bg-background/40 p-3 text-sm text-muted-foreground">
+                Таблиц пока нет. Создай таблицу и попробуй снова.
+              </div>
+            ) : (
+              <TableFolderTreeSelect
+                tables={tables.map(t => ({ id: t.id, name: t.name, folder_id: t.folder_id }))}
+                folders={folders}
+                selectedIds={aiSelectedTableIds}
+                onSelectedIdsChange={setAiSelectedTableIds}
+                emptyText="Нет таблиц"
+                heightClassName="max-h-[320px]"
+              />
+            )}
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setIsAiTableModalOpen(false)}
+                disabled={busy}
+                className="h-10 rounded-lg border border-border text-sm hover:bg-secondary disabled:opacity-50"
+              >
+                Отмена
+              </button>
+              <button
+                onClick={() => {
+                  setIsAiTableModalOpen(false)
+                  void createDashboardByAI(aiSelectedTableIds)
+                }}
+                disabled={busy || tables.length > 0 && aiSelectedTableIds.length === 0}
+                className="h-10 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
+                Создать
               </button>
             </div>
           </div>

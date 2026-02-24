@@ -2,6 +2,8 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import LoginPage from './pages/auth/LoginPage'
 import RegisterPage from './pages/auth/RegisterPage'
 import LandingPage from './pages/auth/LandingPage'
+import PrivacyPolicyPage from './pages/auth/PrivacyPolicyPage'
+import PersonalDataConsentPage from './pages/auth/PersonalDataConsentPage'
 import DashboardPage from './pages/org/DashboardPage'
 import MembersPage from './pages/org/MembersPage'
 import SettingsPage from './pages/org/SettingsPage'
@@ -31,6 +33,8 @@ export default function App() {
       <Route path="/landing" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
+      <Route path="/personal-data-consent" element={<PersonalDataConsentPage />} />
       <Route element={<AppLayout />}>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/members" element={<MembersPage />} />

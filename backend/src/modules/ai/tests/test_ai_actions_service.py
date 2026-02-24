@@ -19,6 +19,7 @@ async def _register_owner(client: AsyncClient, *, org_name: str | None = None) -
             "first_name": "Owner",
             "last_name": "User",
             "org_name": org_name or f"Org-{uuid.uuid4().hex[:6]}",
+            "accepted_privacy_policy": True,
         },
     )
     assert reg.status_code == 201

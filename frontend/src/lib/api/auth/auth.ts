@@ -7,6 +7,7 @@ export interface RegisterPayload {
   first_name: string
   last_name: string
   org_name: string
+  accepted_privacy_policy: true
 }
 
 export interface LoginPayload {

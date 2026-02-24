@@ -61,6 +61,7 @@ async def table_analytics(
 async def records_timeline(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
     days: int = 30,
+    _: None = Depends(require_access(resource_type="reports", permission="can_read")),
 ):
     async with UnitOfWork() as uow:
         service = ReportsService(uow.session)

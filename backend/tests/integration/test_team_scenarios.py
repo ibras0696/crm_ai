@@ -21,6 +21,7 @@ async def _register(client: AsyncClient, email: str | None = None, org_name: str
             "first_name": "Test",
             "last_name": "User",
             "org_name": org_name,
+            "accepted_privacy_policy": True,
         },
     )
     assert resp.status_code == 201, f"Register failed: {resp.text}"
@@ -100,6 +101,7 @@ async def test_invite_employee_cannot_invite(client: AsyncClient):
             "first_name": "Emp",
             "last_name": "User",
             "org_name": "ignored",
+            "accepted_privacy_policy": True,
             "invite_token": invite_token,
         },
     )

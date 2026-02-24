@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     ENABLE_SENTRY: bool = False
     ENABLE_METRICS: bool = True
     ENABLE_RATE_LIMIT: bool = True
+    EXPOSE_API_DOCS_IN_PROD: bool = False
 
     # Security / hardening
     MAX_REQUEST_BODY_MB: int = 50
@@ -162,28 +163,56 @@ class Settings(BaseSettings):
         if str(self.ENVIRONMENT).lower() != "production":
             return self
 
-        def _bad_default(value: str, default: str) -> bool:
-            return (value or "").strip() == default
+        def _is_unsafe(value: str, *, defaults: tuple[str, ...] = ()) -> bool:
+            v = (value or "").strip()
+            if not v:
+                return True
+            vl = v.lower()
+            if vl.startswith("change_me"):
+                return True
+            if vl in {"example.com", "localhost"}:
+                return True
+            return v in defaults
 
         errors: list[str] = []
 
-        if not self.SECRET_KEY or len(self.SECRET_KEY.strip()) < 32 or _bad_default(
-            self.SECRET_KEY, "super-secret-change-in-prod"
+        if len((self.SECRET_KEY or "").strip()) < 32 or _is_unsafe(
+            self.SECRET_KEY,
+            defaults=("super-secret-change-in-prod", "super-secret-dev-key-change-in-prod"),
         ):
             errors.append("SECRET_KEY")
 
-        if not self.DATABASE_URL or _bad_default(
-            self.DATABASE_URL, "postgresql+asyncpg://crm_user:crm_pass@localhost:5432/crm_db"
+        if _is_unsafe(
+            self.DATABASE_URL,
+            defaults=("postgresql+asyncpg://crm_user:crm_pass@localhost:5432/crm_db",),
         ):
             errors.append("DATABASE_URL")
+        if _is_unsafe(
+            self.DATABASE_URL_SYNC,
+            defaults=("postgresql+psycopg2://crm_user:crm_pass@localhost:5432/crm_db",),
+        ):
+            errors.append("DATABASE_URL_SYNC")
 
-        if not self.S3_ACCESS_KEY or _bad_default(self.S3_ACCESS_KEY, "minioadmin"):
+        if _is_unsafe(self.S3_ACCESS_KEY, defaults=("minioadmin",)):
             errors.append("S3_ACCESS_KEY")
-        if not self.S3_SECRET_KEY or _bad_default(self.S3_SECRET_KEY, "minioadmin"):
+        if _is_unsafe(self.S3_SECRET_KEY, defaults=("minioadmin",)):
             errors.append("S3_SECRET_KEY")
+        if _is_unsafe(
+            self.RABBITMQ_URL,
+            defaults=("amqp://guest:guest@localhost:5672/", "amqp://guest:guest@rabbitmq:5672/"),
+        ):
+            errors.append("RABBITMQ_URL")
+        if _is_unsafe(self.DOMAIN):
+            errors.append("DOMAIN")
+        if _is_unsafe(self.FRONTEND_URL):
+            errors.append("FRONTEND_URL")
+        if any("localhost" in (o or "").lower() for o in (self.CORS_ORIGINS or [])):
+            errors.append("CORS_ORIGINS")
 
         if self.ENABLE_AI and not (self.OPENAI_BEARER_TOKEN.strip() or self.OPENAI_API_KEY.strip()):
             errors.append("OPENAI_BEARER_TOKEN/OPENAI_API_KEY")
+        if bool(self.SUPERADMIN_EMAIL.strip()) ^ bool(self.SUPERADMIN_PASSWORD.strip()):
+            errors.append("SUPERADMIN_EMAIL/SUPERADMIN_PASSWORD")
 
         if errors:
             raise ValueError(

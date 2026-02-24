@@ -13,7 +13,7 @@
 .PHONY: help init up down build restart ps logs logs-api logs-front \
         bootstrap migrate migration shell-api shell-db \
         up-prod down-prod restart-prod logs-prod \
-        test lint lint-fix clean clean-all
+        test lint lint-fix clean clean-all gen-prod-secrets
 
 COMPOSE := docker compose
 SECRETS_FILE ?= secrets.yml
@@ -49,6 +49,7 @@ help:
 	@echo "  make down-prod     - stop prod"
 	@echo "  make restart-prod  - rebuild and restart prod"
 	@echo "  make logs-prod     - logs prod"
+	@echo "  make gen-prod-secrets domain=example.com - generate strong prod secrets template"
 	@echo ""
 	@echo "DB / migrations"
 	@echo "  make migrate       - apply Alembic migrations (dev)"
@@ -83,6 +84,7 @@ help-ru:
 	@echo "  make down-prod     - остановить prod"
 	@echo "  make restart-prod  - пересобрать и перезапустить prod"
 	@echo "  make logs-prod     - логи prod"
+	@echo "  make gen-prod-secrets domain=example.com - сгенерировать шаблон сильных prod секретов"
 	@echo ""
 	@echo "БД / миграции"
 	@echo "  make migrate       - применить миграции Alembic (dev)"
@@ -150,6 +152,10 @@ logs-prod:
 restart-prod:
 	$(COMPOSE_PROD) down
 	$(COMPOSE_PROD) up -d --build
+
+gen-prod-secrets:
+	@if [ -z "$(domain)" ]; then echo "[WARN] Укажи domain=example.com"; exit 1; fi
+	./scripts/generate_prod_secrets.sh "$(domain)"
 
 ## Migrations / Shell (dev)
 migrate:

@@ -1,18 +1,18 @@
 name: crm_chechen
 
 x-backend-env: &backend_env
-  POSTGRES_USER: ${POSTGRES_USER:-crm_user}
-  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm_pass}
-  POSTGRES_DB: ${POSTGRES_DB:-crm_db}
-  DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://${POSTGRES_USER:-crm_user}:${POSTGRES_PASSWORD:-crm_pass}@db:5432/${POSTGRES_DB:-crm_db}}
-  DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:-postgresql+psycopg2://${POSTGRES_USER:-crm_user}:${POSTGRES_PASSWORD:-crm_pass}@db:5432/${POSTGRES_DB:-crm_db}}
+  POSTGRES_USER: ${POSTGRES_USER:-CHANGE_ME_DB_USER}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_ME_DB_PASSWORD}
+  POSTGRES_DB: ${POSTGRES_DB:-CHANGE_ME_DB_NAME}
+  DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://CHANGE_ME_DB_USER:CHANGE_ME_DB_PASSWORD@db:5432/CHANGE_ME_DB_NAME}
+  DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:-postgresql+psycopg2://CHANGE_ME_DB_USER:CHANGE_ME_DB_PASSWORD@db:5432/CHANGE_ME_DB_NAME}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-  RABBITMQ_URL: ${RABBITMQ_URL:-amqp://${RABBITMQ_USER:-crm_rabbit}:${RABBITMQ_PASS:-crm_rabbit_pass}@rabbitmq:5672/}
+  RABBITMQ_URL: ${RABBITMQ_URL:-amqp://CHANGE_ME_RABBIT_USER:CHANGE_ME_RABBIT_PASSWORD@rabbitmq:5672/}
   S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
-  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
-  S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY:-CHANGE_ME_S3_ACCESS_KEY}
+  S3_SECRET_KEY: ${S3_SECRET_KEY:-CHANGE_ME_S3_SECRET_KEY}
   S3_BUCKET: ${S3_BUCKET:-crm-files}
-  SECRET_KEY: ${SECRET_KEY:-super-secret-dev-key-change-in-prod}
+  SECRET_KEY: ${SECRET_KEY:-CHANGE_ME_SECRET_KEY_MIN_32}
   CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173","http://localhost:3000"]}
   ENVIRONMENT: ${ENVIRONMENT:-development}
   DEBUG: ${DEBUG:-true}
@@ -42,9 +42,9 @@ services:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-crm_user}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-crm_pass}
-      POSTGRES_DB: ${POSTGRES_DB:-crm_db}
+      POSTGRES_USER: ${POSTGRES_USER:-CHANGE_ME_DB_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-CHANGE_ME_DB_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-CHANGE_ME_DB_NAME}
     ports:
       - "5432:5432"
     volumes:
@@ -72,8 +72,8 @@ services:
     image: rabbitmq:3.13-management-alpine
     restart: unless-stopped
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-crm_rabbit}
-      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-crm_rabbit_pass}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-CHANGE_ME_RABBIT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-CHANGE_ME_RABBIT_PASSWORD}
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -98,8 +98,8 @@ services:
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-CHANGE_ME_S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-CHANGE_ME_S3_SECRET_KEY}
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -224,8 +224,8 @@ services:
     image: grafana/grafana:latest
     restart: unless-stopped
     environment:
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-CHANGE_ME_GRAFANA_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-CHANGE_ME_GRAFANA_PASSWORD}
       GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - grafana_data:/var/lib/grafana

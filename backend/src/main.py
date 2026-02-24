@@ -29,11 +29,14 @@ def create_app() -> FastAPI:
         finally:
             await app.state.redis.close()
 
+    is_prod = str(settings.ENVIRONMENT).lower() == "production"
+    docs_enabled = (not is_prod) or bool(settings.EXPOSE_API_DOCS_IN_PROD)
+
     application = FastAPI(
         title=settings.APP_NAME,
         version=settings.APP_VERSION,
-        docs_url="/api/docs",
-        openapi_url="/api/openapi.json",
+        docs_url="/api/docs" if docs_enabled else None,
+        openapi_url="/api/openapi.json" if docs_enabled else None,
         lifespan=lifespan,
     )
 

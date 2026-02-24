@@ -68,6 +68,13 @@ async def export_csv(
             payload, media_type, filename = await svc.export_csv(table_id=table_id, org_id=current_user.org_id)
         except LookupError:
             return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Таблица не найдена"})
+        except ValueError as exc:
+            code = str(exc)
+            if code == "EXPORT_TOO_MANY_ROWS":
+                return ApiResponse(ok=False, data=None, error={"code": "EXPORT_TOO_MANY_ROWS", "message": "Слишком много строк для экспорта."})
+            if code == "EXPORT_TOO_MANY_COLUMNS":
+                return ApiResponse(ok=False, data=None, error={"code": "EXPORT_TOO_MANY_COLUMNS", "message": "Слишком много колонок для экспорта."})
+            return ApiResponse(ok=False, data=None, error={"code": "BAD_REQUEST", "message": "Невозможно выполнить экспорт."})
 
         return StreamingResponse(
             iter([payload]),
@@ -89,6 +96,13 @@ async def export_xlsx(
             payload, media_type, filename = await svc.export_xlsx(table_id=table_id, org_id=current_user.org_id)
         except LookupError:
             return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Таблица не найдена"})
+        except ValueError as exc:
+            code = str(exc)
+            if code == "EXPORT_TOO_MANY_ROWS":
+                return ApiResponse(ok=False, data=None, error={"code": "EXPORT_TOO_MANY_ROWS", "message": "Слишком много строк для экспорта."})
+            if code == "EXPORT_TOO_MANY_COLUMNS":
+                return ApiResponse(ok=False, data=None, error={"code": "EXPORT_TOO_MANY_COLUMNS", "message": "Слишком много колонок для экспорта."})
+            return ApiResponse(ok=False, data=None, error={"code": "BAD_REQUEST", "message": "Невозможно выполнить экспорт."})
 
         return StreamingResponse(
             iter([payload]),
@@ -123,8 +137,17 @@ async def import_csv(
                 return ApiResponse(ok=False, data=None, error={"code": "BAD_REQUEST", "message": "Пустой CSV"})
             if code == "NO_MATCHING_COLUMNS":
                 return ApiResponse(ok=False, data=None, error={"code": "NO_MATCHING_COLUMNS", "message": "В CSV нет совпадений с колонками таблицы."})
+            if code == "CSV_TOO_LARGE":
+                return ApiResponse(ok=False, data=None, error={"code": "CSV_TOO_LARGE", "message": "CSV превышает допустимый размер."})
+            if code == "TOO_MANY_COLUMNS":
+                return ApiResponse(ok=False, data=None, error={"code": "TOO_MANY_COLUMNS", "message": "В CSV слишком много колонок."})
+            if code == "TOO_MANY_ROWS":
+                return ApiResponse(ok=False, data=None, error={"code": "TOO_MANY_ROWS", "message": "В CSV слишком много строк."})
+            if code == "CELL_TOO_LARGE":
+                return ApiResponse(ok=False, data=None, error={"code": "CELL_TOO_LARGE", "message": "В CSV есть слишком длинные значения."})
+            if code == "IMPORT_TIMEOUT":
+                return ApiResponse(ok=False, data=None, error={"code": "IMPORT_TIMEOUT", "message": "Импорт прерван по лимиту времени."})
             return ApiResponse(ok=False, data=None, error={"code": "BAD_REQUEST", "message": "Некорректный CSV"})
 
         await uow.commit()
         return ApiResponse(data={"records_created": int(result.get("created", 0))})
-

@@ -21,6 +21,26 @@ class Settings(BaseSettings):
 
     # Security / hardening
     MAX_REQUEST_BODY_MB: int = 50
+    RATE_LIMIT_REDIS_PREFIX: str = "rate_limit"
+    FILE_MAX_UPLOAD_MB: int = 25
+    FILE_UPLOAD_CHUNK_SIZE_KB: int = 256
+    FILE_ALLOWED_MIME_TYPES: list[str] = [
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "application/pdf",
+        "text/plain",
+        "text/csv",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "application/vnd.ms-excel",
+    ]
+    TABLE_EXPORT_MAX_ROWS: int = 5000
+    TABLE_EXPORT_MAX_COLUMNS: int = 200
+    TABLE_IMPORT_MAX_BYTES: int = 5 * 1024 * 1024
+    TABLE_IMPORT_MAX_ROWS: int = 5000
+    TABLE_IMPORT_MAX_COLUMNS: int = 200
+    TABLE_IMPORT_MAX_CELL_CHARS: int = 4000
+    TABLE_IMPORT_MAX_PROCESSING_S: float = 8.0
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://crm_user:crm_pass@localhost:5432/crm_db"
@@ -107,6 +127,27 @@ class Settings(BaseSettings):
             parts = [p.strip() for p in s.split(",")]
             return [p for p in parts if p]
         return [str(v).strip()]
+
+    @field_validator("FILE_ALLOWED_MIME_TYPES", mode="before")
+    @classmethod
+    def _parse_file_allowed_mime_types(cls, v: Any) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return [str(x).strip().lower() for x in v if str(x).strip()]
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return []
+            if s.startswith("["):
+                try:
+                    parsed = json.loads(s)
+                    if isinstance(parsed, list):
+                        return [str(x).strip().lower() for x in parsed if str(x).strip()]
+                except Exception:
+                    pass
+            return [p.strip().lower() for p in s.split(",") if p.strip()]
+        return [str(v).strip().lower()]
 
     # SMTP / Email
     SMTP_HOST: str = "smtp.gmail.com"

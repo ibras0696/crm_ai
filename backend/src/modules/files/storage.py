@@ -1,5 +1,6 @@
 """S3/MinIO storage service."""
 import uuid
+from typing import BinaryIO
 
 import boto3
 from botocore.config import Config
@@ -42,6 +43,16 @@ def upload_file(data: bytes, content_type: str, org_id: uuid.UUID, original_name
         Body=data,
         ContentType=content_type,
     )
+    return s3_key, settings.S3_BUCKET
+
+
+def upload_fileobj(fileobj: BinaryIO, content_type: str, org_id: uuid.UUID, original_name: str) -> tuple[str, str]:
+    """Upload file-like stream to S3. Returns (s3_key, bucket)."""
+    s3 = get_s3_client()
+    ensure_bucket()
+    ext = original_name.rsplit(".", 1)[-1] if "." in original_name else "bin"
+    s3_key = f"{org_id}/{uuid.uuid4().hex}.{ext}"
+    s3.upload_fileobj(fileobj, settings.S3_BUCKET, s3_key, ExtraArgs={"ContentType": content_type})
     return s3_key, settings.S3_BUCKET
 
 

@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     TABLE_IMPORT_MAX_COLUMNS: int = 200
     TABLE_IMPORT_MAX_CELL_CHARS: int = 4000
     TABLE_IMPORT_MAX_PROCESSING_S: float = 8.0
+    AUTH_ACCESS_COOKIE_NAME: str = "access_token"
+    AUTH_REFRESH_COOKIE_NAME: str = "refresh_token"
+    AUTH_COOKIE_SECURE: bool = False
+    AUTH_COOKIE_SAMESITE: str = "lax"
+    AUTH_COOKIE_DOMAIN: str = ""
+    AUTH_COOKIE_PATH: str = "/"
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://crm_user:crm_pass@localhost:5432/crm_db"
@@ -149,6 +155,14 @@ class Settings(BaseSettings):
             return [p.strip().lower() for p in s.split(",") if p.strip()]
         return [str(v).strip().lower()]
 
+    @field_validator("AUTH_COOKIE_SAMESITE", mode="before")
+    @classmethod
+    def _validate_auth_cookie_samesite(cls, v: Any) -> str:
+        s = str(v or "lax").strip().lower()
+        if s not in {"lax", "strict", "none"}:
+            return "lax"
+        return s
+
     # SMTP / Email
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587
@@ -184,6 +198,7 @@ class Settings(BaseSettings):
     SUPERADMIN_EMAIL: str = ""
     SUPERADMIN_PASSWORD: str = ""
     SUPERADMIN_PASSWORD_HASH: str = ""
+    SUPERADMIN_ACCESS_COOKIE_NAME: str = "sa_access_token"
     SUPERADMIN_LOGIN_MAX_ATTEMPTS: int = 5
     SUPERADMIN_LOGIN_WINDOW_S: int = 900
     SUPERADMIN_LOCK_BASE_S: int = 30
@@ -273,6 +288,10 @@ class Settings(BaseSettings):
             errors.append("SUPERADMIN_EMAIL/SUPERADMIN_PASSWORD_HASH")
         if self.SUPERADMIN_PASSWORD.strip():
             errors.append("SUPERADMIN_PASSWORD")
+        if not bool(self.AUTH_COOKIE_SECURE):
+            errors.append("AUTH_COOKIE_SECURE")
+        if self.AUTH_COOKIE_SAMESITE == "none" and not bool(self.AUTH_COOKIE_SECURE):
+            errors.append("AUTH_COOKIE_SECURE (required when AUTH_COOKIE_SAMESITE=none)")
 
         if errors:
             raise ValueError(

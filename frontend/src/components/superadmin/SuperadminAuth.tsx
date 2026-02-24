@@ -2,10 +2,9 @@ import { useState } from 'react'
 import { Shield } from 'lucide-react'
 
 import { superadminApi } from '@/lib/api'
-import { SA_TOKEN_KEY } from './constants'
 
 type Props = {
-  onLoggedIn: (token: string) => void
+  onLoggedIn: () => void
 }
 
 export function SuperadminAuth({ onLoggedIn }: Props) {
@@ -20,9 +19,8 @@ export function SuperadminAuth({ onLoggedIn }: Props) {
     setError('')
     try {
       const r = await superadminApi.login(email.trim(), password)
-      if (r.data.ok && r.data.data?.access_token) {
-        localStorage.setItem(SA_TOKEN_KEY, r.data.data.access_token)
-        onLoggedIn(r.data.data.access_token)
+      if (r.data.ok) {
+        onLoggedIn()
       } else {
         setError(r.data.error?.message || 'Ошибка входа')
       }
@@ -80,4 +78,3 @@ export function SuperadminAuth({ onLoggedIn }: Props) {
     </div>
   )
 }
-

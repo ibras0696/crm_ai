@@ -1,50 +1,85 @@
-# Sprint 1 Runbook (Security Hardening)
+# Security Hardening Runbook
 
-## Что уже внедрено в коде
+Дата обновления: 2026-02-24
 
-- В `docker-compose.prod.yml` удалены дефолтные секреты и включены обязательные переменные (`:?set in secrets`).
-- В `docker-compose.prod.yml` убраны внешние порты для `rabbitmq`, `prometheus`, `grafana`.
-- В backend закрыта публикация Swagger/OpenAPI в production по умолчанию.
-- В `nginx` добавлен явный deny на `/api/docs`, `/api/redoc`, `/api/openapi.json`.
-- В `Settings` добавлена строгая валидация production-конфига (в т.ч. `CHANGE_ME`, localhost/example, дефолтные DSN/ключи).
-- В `secrets.yml.example` заменены слабые значения на `CHANGE_ME_*`.
+## 1. Принципы запуска в production
 
-## Операционные шаги (сделать на окружении)
+- Production не должен стартовать с небезопасными секретами.
+- Все секреты задаются через env/secret manager, не через дефолты в compose.
+- Для admin-сервисов (RabbitMQ UI, Grafana, Prometheus) внешний доступ только через приватную сеть/VPN.
 
-1. Сгенерировать новый набор секретов:
+## 2. Секреты и ключи
 
-```bash
-make gen-prod-secrets domain=your-domain.com > .env.prod.generated
-```
+- `SECRET_KEY`, JWT ключи, пароли БД, RabbitMQ, MinIO, Grafana должны быть уникальными на окружение.
+- В шаблонах (`docker-compose*.yml`, `secrets.yml.example`) только пустые значения или `CHANGE_ME`.
+- Для production использовать отдельные ключи подписи:
+  - `JWT_SECRET_KEY_USER`
+  - `JWT_SECRET_KEY_SUPERADMIN`
 
-2. Перенести значения в `secrets.yml` или secret manager (Vault/1Password/Bitwarden/etc).
+## 3. Cookie-сессия вместо localStorage
 
-3. Обязательно задать:
-- `POSTGRES_*`, `DATABASE_URL`, `DATABASE_URL_SYNC`
-- `RABBITMQ_*`, `RABBITMQ_URL`
-- `S3_ACCESS_KEY`, `S3_SECRET_KEY`
-- `SECRET_KEY` (длина 32+)
-- `JWT_USER_SECRET_KEY`, `JWT_SUPERADMIN_SECRET_KEY` (разные, длина 32+)
-- `JWT_ISSUER`, `JWT_AUDIENCE_USER`, `JWT_AUDIENCE_SUPERADMIN`
-- `DOMAIN`, `FRONTEND_URL`, `CORS_ORIGINS`
-- `GRAFANA_USER`, `GRAFANA_PASSWORD`
-- `SUPERADMIN_EMAIL`, `SUPERADMIN_PASSWORD_HASH` (если нужен superadmin вход)
+Система переведена на `HttpOnly` cookie:
 
-4. Перезапустить production:
+- Access cookie: `AUTH_ACCESS_COOKIE_NAME`
+- Refresh cookie: `AUTH_REFRESH_COOKIE_NAME`
+- Обязательные prod-настройки:
+  - `AUTH_COOKIE_SECURE=true`
+  - `AUTH_COOKIE_SAMESITE` не `none` без `secure`
+  - при необходимости `AUTH_COOKIE_DOMAIN`/`AUTH_COOKIE_PATH`
 
-```bash
-docker compose -f docker-compose.prod.yml -f secrets.yml up -d --build
-```
+Проверка: backend валидирует конфиг и блокирует небезопасный prod-старт.
 
-5. Проверить, что admin-сервисы снаружи недоступны:
-- `:15672` (RabbitMQ UI)
-- `:9090` (Prometheus)
-- `:3000` (Grafana)
+## 4. CSP и security headers
 
-6. Проверить API:
-- `GET /api/health` доступен
-- `GET /api/docs` и `GET /api/openapi.json` возвращают `404` в production
+- На frontend nginx включен CSP с nonce и строгими заголовками.
+- На backend API CSP ограничен (`default-src 'none'`) и не раскрывает лишние источники.
+- Swagger/OpenAPI в production ограничены политикой доступа.
 
-## Примечание
+## 5. Auth hardening
 
-Ротация уже существующих паролей БД/брокера/объектного хранилища требует отдельной процедуры миграции данных и обновления credentials на стороне сервисов.
+- JWT валидация включает `type=access`, `iss`, `aud` и обязательные claims.
+- Для superadmin:
+  - пароль хранится в hash;
+  - включены rate-limit и lockout/backoff;
+  - login/logout работают через защищенные cookie.
+- Refresh flow защищен от race condition (atomic/locking модель).
+
+## 6. Runtime hardening
+
+- Global rate limit переведен на shared Redis limiter.
+- Для upload/streaming введены лимиты размера и безопасная потоковая обработка.
+- Для CSV/XLSX import/export введены лимиты строк/колонок/времени с graceful fail.
+- Ошибки AI-провайдера не отдаются клиенту в сыром виде.
+
+## 7. CI и контроль зависимостей
+
+- Тесты и type-check в CI блокирующие (без `|| echo` обходов).
+- Добавлены dependency audit проверки:
+  - backend: `pip-audit --strict`
+  - frontend: `npm audit --audit-level=high`
+- CVE policy описан в `docs/dependency_audit_policy.md`.
+
+## 8. Smoke/regression после релиза
+
+После каждого релиза security-изменений:
+
+1. QA smoke:
+   - login/logout/refresh (user + superadmin)
+   - ACL/tenant isolation
+   - upload/import/export граничные сценарии
+2. DevOps smoke:
+   - сервисы поднимаются только с безопасными env
+   - admin-панели не доступны из внешней сети
+   - алерты/логи security событий поступают
+3. Фиксация результата:
+   - ссылка на прогон CI
+   - ссылка на релиз/деплой
+   - отметка QA и DevOps в PR
+
+## 9. Ротация секретов (процедура)
+
+1. Сгенерировать новые секреты/ключи для окружения.
+2. Обновить secret manager и runtime переменные.
+3. Перезапустить сервисы с новым конфигом.
+4. Прогнать smoke/regression.
+5. Отозвать старые ключи и убедиться, что старые токены невалидны.

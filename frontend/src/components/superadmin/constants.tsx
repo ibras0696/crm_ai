@@ -1,4 +1,3 @@
-export const SA_TOKEN_KEY = 'sa_access_token'
 export const SA_SELECTED_ORG_KEY = 'sa_selected_org_id'
 
 export const PLAN_LABELS: Record<string, string> = {
@@ -22,4 +21,3 @@ export function formatBytes(b: number) {
   if (b < 1073741824) return `${(b / 1048576).toFixed(1)} МБ`
   return `${(b / 1073741824).toFixed(1)} ГБ`
 }
-

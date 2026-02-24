@@ -28,14 +28,18 @@
 
 ## Спринт 4 (P2: фронтенд и инженерные практики)
 
-- [ ] Уйти от хранения токенов в `localStorage` к `HttpOnly Secure SameSite` cookie-сессии. Почему: снижает риск кражи токена при XSS.
-- [ ] Пересобрать CSP под фронтенд с nonce/hash и убрать лишние разрешения. Почему: уменьшает поверхность XSS.
-- [ ] Сделать тесты и type-check блокирующими в CI (убрать `|| echo`). Почему: нельзя пропускать регрессии в production.
-- [ ] Добавить security regression набор тестов (auth, token, ACL, tenant isolation). Почему: фиксирует критичные гарантии безопасности на будущее.
-- [ ] Добавить регулярный dependency audit (pip/npm + CVE policy). Почему: снижает supply-chain риски.
+- [x] Уйти от хранения токенов в `localStorage` к `HttpOnly Secure SameSite` cookie-сессии. Почему: снижает риск кражи токена при XSS.
+- [x] Пересобрать CSP под фронтенд с nonce/hash и убрать лишние разрешения. Почему: уменьшает поверхность XSS.
+- [x] Сделать тесты и type-check блокирующими в CI (убрать `|| echo`). Почему: нельзя пропускать регрессии в production.
+- [x] Добавить security regression набор тестов (auth, token, ACL, tenant isolation). Почему: фиксирует критичные гарантии безопасности на будущее.
+- [x] Добавить регулярный dependency audit (pip/npm + CVE policy). Почему: снижает supply-chain риски.
 
 ## Definition of Done (для каждого спринта)
 
-- [ ] Есть PR с чек-листом выполненных пунктов и ссылками на коммиты.
-- [ ] Есть обновленный runbook по новым настройкам и ротации секретов.
+- [x] Есть PR с чек-листом выполненных пунктов и ссылками на коммиты.
+- [x] Есть обновленный runbook по новым настройкам и ротации секретов.
 - [ ] Есть подтверждение от QA/DevOps по smoke/regression после релиза.
+
+Артефакты DoD:
+- PR checklist: `docs/security_sprints_pr_checklist.md`
+- Runbook: `docs/sprint1_hardening_runbook.md`

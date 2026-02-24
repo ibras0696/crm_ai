@@ -140,6 +140,7 @@ export interface SuperadminAuditPage {
 export const superadminApi = {
   login: (email: string, password: string) =>
     superadminHttp.post<ApiResponse<{ access_token: string; token_type: string }>>('/login', { email, password }),
+  logout: () => superadminHttp.post<ApiResponse<null>>('/logout', {}),
   overview: (org_limit = 200) => superadminHttp.get<ApiResponse<SuperadminOverview>>(`/overview?org_limit=${org_limit}`),
   orgs: (params: { q?: string; plan?: string; sub_status?: string; limit?: number; offset?: number }) => {
     const q = new URLSearchParams()

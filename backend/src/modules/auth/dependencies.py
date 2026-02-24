@@ -2,11 +2,12 @@ import uuid
 from dataclasses import dataclass
 
 import jwt
-from fastapi import Depends, Header, Request
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.common.enums import UserRole
 from src.common.exceptions import ForbiddenError, UnauthorizedError
+from src.config import settings
 from src.modules.auth.security import decode_user_access_token
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -20,13 +21,15 @@ class CurrentUser:
 
 
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> CurrentUser:
-    if not credentials:
-        raise UnauthorizedError("Missing authorization header")
+    token = credentials.credentials if credentials else request.cookies.get(settings.AUTH_ACCESS_COOKIE_NAME)
+    if not token:
+        raise UnauthorizedError("Missing authorization credentials")
 
     try:
-        payload = decode_user_access_token(credentials.credentials)
+        payload = decode_user_access_token(token)
     except jwt.ExpiredSignatureError:
         raise UnauthorizedError("Token expired")
     except jwt.InvalidTokenError:

@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 
 from src.common.exceptions import NotFoundError
 from src.common.schemas import ApiResponse
+from src.config import settings
 from src.modules.auth.dependencies import CurrentUser, get_current_user
 from src.modules.auth.schemas import (
     LoginRequest,
@@ -17,31 +18,77 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _auth_service = AuthService()
 
 
+def _set_auth_cookies(response: Response, tokens: TokenResponse) -> None:
+    secure = bool(settings.AUTH_COOKIE_SECURE)
+    samesite = settings.AUTH_COOKIE_SAMESITE
+    domain = settings.AUTH_COOKIE_DOMAIN or None
+    path = settings.AUTH_COOKIE_PATH or "/"
+
+    response.set_cookie(
+        key=settings.AUTH_ACCESS_COOKIE_NAME,
+        value=tokens.access_token,
+        httponly=True,
+        secure=secure,
+        samesite=samesite,  # type: ignore[arg-type]
+        max_age=int(settings.ACCESS_TOKEN_EXPIRE_MINUTES) * 60,
+        path=path,
+        domain=domain,
+    )
+    response.set_cookie(
+        key=settings.AUTH_REFRESH_COOKIE_NAME,
+        value=tokens.refresh_token,
+        httponly=True,
+        secure=secure,
+        samesite=samesite,  # type: ignore[arg-type]
+        max_age=int(settings.REFRESH_TOKEN_EXPIRE_DAYS) * 24 * 3600,
+        path=path,
+        domain=domain,
+    )
+
+
+def _clear_auth_cookies(response: Response) -> None:
+    domain = settings.AUTH_COOKIE_DOMAIN or None
+    path = settings.AUTH_COOKIE_PATH or "/"
+    response.delete_cookie(settings.AUTH_ACCESS_COOKIE_NAME, path=path, domain=domain)
+    response.delete_cookie(settings.AUTH_REFRESH_COOKIE_NAME, path=path, domain=domain)
+
+
 @router.post("/register", response_model=ApiResponse[TokenResponse], status_code=201)
-async def register(body: RegisterRequest, request: Request):
+async def register(body: RegisterRequest, request: Request, response: Response):
     ip = request.client.host if request.client else None
     _, _, tokens = await _auth_service.register(body, ip_address=ip)
+    _set_auth_cookies(response, tokens)
     return ApiResponse(data=tokens)
 
 
 @router.post("/login", response_model=ApiResponse[TokenResponse])
-async def login(body: LoginRequest, request: Request):
+async def login(body: LoginRequest, request: Request, response: Response):
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
     _, tokens = await _auth_service.login(body.email, body.password, ip_address=ip, user_agent=ua)
+    _set_auth_cookies(response, tokens)
     return ApiResponse(data=tokens)
 
 
 @router.post("/refresh", response_model=ApiResponse[TokenResponse])
-async def refresh(body: RefreshRequest, request: Request):
+async def refresh(request: Request, response: Response, body: RefreshRequest | None = None):
+    raw_refresh = (body.refresh_token if body else None) or request.cookies.get(settings.AUTH_REFRESH_COOKIE_NAME)
+    if not raw_refresh:
+        from src.common.exceptions import UnauthorizedError
+
+        raise UnauthorizedError("Missing refresh token")
     ip = request.client.host if request.client else None
-    tokens = await _auth_service.refresh(body.refresh_token, ip_address=ip)
+    tokens = await _auth_service.refresh(raw_refresh, ip_address=ip)
+    _set_auth_cookies(response, tokens)
     return ApiResponse(data=tokens)
 
 
 @router.post("/logout", response_model=ApiResponse)
-async def logout(body: RefreshRequest):
-    await _auth_service.logout(body.refresh_token)
+async def logout(request: Request, response: Response, body: RefreshRequest | None = None):
+    raw_refresh = (body.refresh_token if body else None) or request.cookies.get(settings.AUTH_REFRESH_COOKIE_NAME)
+    if raw_refresh:
+        await _auth_service.logout(raw_refresh)
+    _clear_auth_cookies(response)
     return ApiResponse(data=None)
 
 

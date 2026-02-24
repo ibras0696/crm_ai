@@ -10,7 +10,7 @@ import { UsersListView } from '@/components/superadmin/UsersListView'
 import { SuperadminAuditView } from '@/components/superadmin/SuperadminAuditView'
 import { SuperadminAIView } from '@/components/superadmin/SuperadminAIView'
 import { SuperadminTablesView } from '@/components/superadmin/SuperadminTablesView'
-import { SA_SELECTED_ORG_KEY, SA_TOKEN_KEY } from '@/components/superadmin/constants'
+import { SA_SELECTED_ORG_KEY } from '@/components/superadmin/constants'
 
 type TabKey = 'dashboard' | 'orgs' | 'tables' | 'users' | 'audit' | 'ai'
 
@@ -21,7 +21,7 @@ const EMPTY_DASHBOARD: SuperadminDashboard = {
 }
 
 export default function SuperAdminPage() {
-  const [token, setToken] = useState(() => localStorage.getItem(SA_TOKEN_KEY) || '')
+  const [isAuthed, setIsAuthed] = useState(true)
   const [tab, setTab] = useState<TabKey>('dashboard')
   const [selectedOrgId, setSelectedOrgId] = useState(() => localStorage.getItem(SA_SELECTED_ORG_KEY) || '')
 
@@ -42,21 +42,27 @@ export default function SuperAdminPage() {
     } catch (e: any) {
       const msg = e?.response?.data?.error?.message || e?.message || 'Не удалось загрузить данные'
       setLoadError(msg)
+      if (e?.response?.status === 401 || e?.response?.status === 403) {
+        setIsAuthed(false)
+      }
     }
   }, [])
 
   useEffect(() => {
-    if (!token) return
+    if (!isAuthed) return
     void loadOverview()
-  }, [token, loadOverview])
+  }, [isAuthed, loadOverview])
 
-  const onLoggedIn = (t: string) => {
-    setToken(t)
+  const onLoggedIn = () => {
+    setIsAuthed(true)
+    void loadOverview()
   }
 
-  const logout = () => {
-    localStorage.removeItem(SA_TOKEN_KEY)
-    setToken('')
+  const logout = async () => {
+    try {
+      await superadminApi.logout()
+    } catch {}
+    setIsAuthed(false)
     setDashboard(EMPTY_DASHBOARD)
     setOrgOptions([])
     setLoadError('')
@@ -68,7 +74,7 @@ export default function SuperAdminPage() {
 
   const effectiveSelectedOrgId = useMemo(() => selectedOrgId || '', [selectedOrgId])
 
-  if (!token) return <SuperadminAuth onLoggedIn={onLoggedIn} />
+  if (!isAuthed) return <SuperadminAuth onLoggedIn={onLoggedIn} />
 
   return (
     <div className="min-h-screen bg-background">
@@ -113,4 +119,3 @@ export default function SuperAdminPage() {
     </div>
   )
 }
-

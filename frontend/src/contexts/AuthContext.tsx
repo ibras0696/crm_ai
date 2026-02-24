@@ -1,6 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
 import { authApi, orgApi, type UserInfo, type OrgInfo, type MemberInfo } from '@/lib/api'
-import { getAccessToken, saveTokens, clearTokens } from '@/lib/auth'
 
 export class AuthError extends Error {
   code: string | null
@@ -21,7 +20,7 @@ interface AuthState {
   isAuthenticated: boolean
   login: (email: string, password: string) => Promise<void>
   register: (data: { email: string; password: string; first_name: string; last_name: string; org_name: string }) => Promise<void>
-  logout: () => void
+  logout: () => Promise<void>
   refresh: () => Promise<void>
 }
 
@@ -44,7 +43,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (o.data.ok) setOrg(o.data.data)
       if (m.data.ok) setMembers(m.data.data ?? [])
     } catch {
-      clearTokens()
       setUser(null)
       setOrg(null)
       setMembers([])
@@ -52,17 +50,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    if (getAccessToken()) {
-      loadProfile().finally(() => setIsLoading(false))
-    } else {
-      setIsLoading(false)
-    }
+    loadProfile().finally(() => setIsLoading(false))
   }, [loadProfile])
 
   const login = async (email: string, password: string) => {
     const resp = await authApi.login({ email, password })
-    if (resp.data.ok && resp.data.data) {
-      saveTokens(resp.data.data.access_token, resp.data.data.refresh_token)
+    if (resp.data.ok) {
       await loadProfile()
     } else {
       throw new AuthError(
@@ -75,8 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const register = async (data: { email: string; password: string; first_name: string; last_name: string; org_name: string }) => {
     const resp = await authApi.register(data)
-    if (resp.data.ok && resp.data.data) {
-      saveTokens(resp.data.data.access_token, resp.data.data.refresh_token)
+    if (resp.data.ok) {
       await loadProfile()
     } else {
       throw new AuthError(
@@ -87,8 +79,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const logout = () => {
-    clearTokens()
+  const logout = async () => {
+    try {
+      await authApi.logout()
+    } catch {}
     setUser(null)
     setOrg(null)
     setMembers([])

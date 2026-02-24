@@ -1,10 +1,11 @@
 """Superadmin endpoints."""
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import StreamingResponse
 
 from src.common.http_headers import content_disposition_attachment
 from src.common.schemas import ApiResponse
+from src.config import settings
 from src.modules.superadmin.dependencies import require_superadmin
 from src.modules.superadmin.schemas import (
     SetOrgAIEnabledRequest,
@@ -39,8 +40,29 @@ NOT_FOUND_DASHBOARD = "Дашборд не найден"
 _service = SuperadminService()
 
 
+def _set_superadmin_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=settings.SUPERADMIN_ACCESS_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=bool(settings.AUTH_COOKIE_SECURE),
+        samesite=settings.AUTH_COOKIE_SAMESITE,  # type: ignore[arg-type]
+        path=settings.AUTH_COOKIE_PATH or "/",
+        domain=(settings.AUTH_COOKIE_DOMAIN or None),
+        max_age=12 * 3600,
+    )
+
+
+def _clear_superadmin_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=settings.SUPERADMIN_ACCESS_COOKIE_NAME,
+        path=settings.AUTH_COOKIE_PATH or "/",
+        domain=(settings.AUTH_COOKIE_DOMAIN or None),
+    )
+
+
 @router.post("/login", response_model=ApiResponse[SuperadminTokenResponse])
-async def superadmin_login(body: SuperadminLoginRequest, request: Request):
+async def superadmin_login(body: SuperadminLoginRequest, request: Request, response: Response):
     ip = request.client.host if request.client else None
     try:
         token = await _service.auth.authenticate_superadmin(body.email, body.password, ip_address=ip)
@@ -67,7 +89,14 @@ async def superadmin_login(body: SuperadminLoginRequest, request: Request):
         )
     except ValueError:
         return ApiResponse(ok=False, data=None, error={"code": "UNAUTHORIZED", "message": "Invalid credentials"})
+    _set_superadmin_cookie(response, token)
     return ApiResponse(data=SuperadminTokenResponse(access_token=token))
+
+
+@protected.post("/logout", response_model=ApiResponse[None])
+async def superadmin_logout(response: Response):
+    _clear_superadmin_cookie(response)
+    return ApiResponse(data=None)
 
 
 @protected.get("/dashboard", response_model=ApiResponse[SuperadminDashboardResponse])

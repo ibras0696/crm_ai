@@ -556,6 +556,21 @@ class SuperadminOverviewService:
                 for r in plan_rows
             }
             mrr_proxy_cents = sum(org_plan_counts.get(plan, 0) * price for plan, price in plan_prices.items())
+            revenue_by_plan = []
+            for plan, org_cnt in org_plan_counts.items():
+                price = _safe_int(plan_prices.get(plan, 0))
+                month_revenue = org_cnt * price
+                revenue_by_plan.append(
+                    {
+                        "plan": plan,
+                        "orgs": _safe_int(org_cnt),
+                        "price_monthly": _safe_int(price),
+                        "month_revenue": _safe_int(month_revenue),
+                    }
+                )
+            revenue_by_plan.sort(key=lambda x: x["month_revenue"], reverse=True)
+            paid_orgs = sum(v for k, v in org_plan_counts.items() if k in {"team", "business"})
+            free_orgs = _safe_int(org_plan_counts.get("free", 0))
             new_orgs_30 = (await uow.session.execute(select(func.count()).where(Organization.created_at >= d30))).scalar() or 0
             new_orgs_prev_30 = (
                 await uow.session.execute(
@@ -655,6 +670,15 @@ class SuperadminOverviewService:
                 "new_orgs_prev_30d": _safe_int(new_orgs_prev_30),
                 "growth_rate_pct": round(((_safe_int(new_orgs_30) - _safe_int(new_orgs_prev_30)) / max(_safe_int(new_orgs_prev_30), 1)) * 100, 1),
                 "net_org_growth_30d": _safe_int(new_orgs_30) - _safe_int(new_orgs_prev_30),
+            },
+            "revenue_detailed": {
+                "month_total": round(mrr_proxy_cents / 100, 2),
+                "year_total": round((mrr_proxy_cents * 12) / 100, 2),
+                "paid_orgs": _safe_int(paid_orgs),
+                "free_orgs": _safe_int(free_orgs),
+                "paid_share_pct": round((_safe_int(paid_orgs) / max(_safe_int(orgs_count), 1)) * 100, 1),
+                "avg_revenue_per_org": round((mrr_proxy_cents / max(_safe_int(orgs_count), 1)) / 100, 2),
+                "by_plan": revenue_by_plan,
             },
         }
 

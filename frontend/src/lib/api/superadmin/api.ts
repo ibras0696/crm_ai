@@ -14,7 +14,18 @@ export interface SuperadminDashboard {
   }
   registrations_timeline: { date: string; count: number }[]
   orgs_by_plan: { plan: string; count: number }[]
-  analytics?: Record<string, any>
+  analytics?: {
+    revenue_detailed?: {
+      month_total: number
+      year_total: number
+      paid_orgs: number
+      free_orgs: number
+      paid_share_pct: number
+      avg_revenue_per_org: number
+      by_plan: Array<{ plan: string; orgs: number; price_monthly: number; month_revenue: number }>
+    }
+    [key: string]: any
+  }
 }
 
 export interface SuperadminOrgOption {

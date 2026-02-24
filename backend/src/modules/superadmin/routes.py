@@ -1,6 +1,6 @@
 """Superadmin endpoints."""
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from src.common.http_headers import content_disposition_attachment
@@ -34,6 +34,7 @@ protected = APIRouter(dependencies=[Depends(require_superadmin)])
 
 NOT_FOUND_ORG = "Организация не найдена"
 NOT_FOUND_TABLE = "Таблица не найдена"
+INVALID_ID = "Некорректный идентификатор"
 NOT_FOUND_WIDGET = "Виджет не найден"
 NOT_FOUND_DASHBOARD = "Дашборд не найден"
 
@@ -219,24 +220,29 @@ async def superadmin_org_tables(
     org_id: str,
     q: str | None = None,
     include_archived: bool = True,
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
 ):
-    return ApiResponse(
-        data=await _service.tables.org_tables_page(
-            org_id,
-            q=q,
-            include_archived=include_archived,
-            limit=limit,
-            offset=offset,
-        ),
-    )
+    try:
+        return ApiResponse(
+            data=await _service.tables.org_tables_page(
+                org_id,
+                q=q,
+                include_archived=include_archived,
+                limit=limit,
+                offset=offset,
+            ),
+        )
+    except ValueError:
+        return ApiResponse(ok=False, data=None, error={"code": "INVALID_ID", "message": INVALID_ID})
 
 
 @protected.get("/orgs/{org_id}/tables/{table_id}", response_model=ApiResponse[SuperadminTableDetail])
 async def superadmin_org_table_detail(org_id: str, table_id: str):
     try:
         return ApiResponse(data=await _service.tables.org_table_detail(org_id, table_id))
+    except ValueError:
+        return ApiResponse(ok=False, data=None, error={"code": "INVALID_ID", "message": INVALID_ID})
     except LookupError:
         return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": NOT_FOUND_TABLE})
 
@@ -248,8 +254,8 @@ async def superadmin_org_table_records(
     q: str | None = None,
     sort_col_id: str | None = None,
     sort_dir: str = "asc",
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ):
     try:
         data = await _service.tables.org_table_records_page(
@@ -262,6 +268,8 @@ async def superadmin_org_table_records(
             offset=offset,
         )
         return ApiResponse(data=data)
+    except ValueError:
+        return ApiResponse(ok=False, data=None, error={"code": "INVALID_ID", "message": INVALID_ID})
     except LookupError:
         return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": NOT_FOUND_TABLE})
 
@@ -270,6 +278,8 @@ async def superadmin_org_table_records(
 async def superadmin_export_csv(org_id: str, table_id: str):
     try:
         payload, filename = await _service.tables.export_table_csv(org_id=org_id, table_id=table_id)
+    except ValueError:
+        return ApiResponse(ok=False, data=None, error={"code": "INVALID_ID", "message": INVALID_ID})
     except LookupError:
         return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": NOT_FOUND_TABLE})
 
@@ -284,6 +294,8 @@ async def superadmin_export_csv(org_id: str, table_id: str):
 async def superadmin_export_xlsx(org_id: str, table_id: str):
     try:
         payload, filename = await _service.tables.export_table_xlsx(org_id=org_id, table_id=table_id)
+    except ValueError:
+        return ApiResponse(ok=False, data=None, error={"code": "INVALID_ID", "message": INVALID_ID})
     except LookupError:
         return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": NOT_FOUND_TABLE})
 

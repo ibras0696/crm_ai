@@ -146,6 +146,23 @@ async def test_ai_service_can_create_table_columns_records_and_event(client: Asy
             },
         )
         assert ev["ok"] is True
+        human_ev = await handle_create_schedule_event_action(
+            uow,
+            org_id,
+            user_id,
+            {
+                "action": "create_schedule_event",
+                "title": "Созвон по проекту",
+                "дата": "24.02.2026",
+                "время": "09:00",
+                "дата_конца": "24.02.2026",
+                "время_конца": "10:15",
+                "повтор": "еженедельно",
+                "цвет": "зеленый",
+                "напомнить_за": ["1 час", "1 день"],
+            },
+        )
+        assert human_ev["ok"] is True
 
         await uow.commit()
 
@@ -153,8 +170,14 @@ async def test_ai_service_can_create_table_columns_records_and_event(client: Asy
     async with UnitOfWork() as uow2:
         t = await uow2.session.get(Table, table_id)
         assert t is not None
-        e = (await uow2.session.execute(select(Event).where(Event.org_id == t.org_id))).scalars().first()
+        e = await uow2.session.get(Event, uuid.UUID(str(human_ev["event"]["id"])))
         assert e is not None
+        assert e.color == "#10b981"
+        assert e.recurrence == "weekly"
+        assert e.reminder_offsets_minutes == [60, 1440]
+        assert e.start_at.hour == 9
+        assert e.end_at is not None
+        assert e.end_at.hour == 10
 
 
 @pytest.mark.asyncio

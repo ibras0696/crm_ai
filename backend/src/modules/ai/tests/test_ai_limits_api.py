@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -157,7 +156,7 @@ async def test_ai_status_uses_active_subscription_plan_over_org_plan(client: Asy
 
 
 @pytest.mark.asyncio
-async def test_check_ai_limits_rejects_projected_daily_overflow(client: AsyncClient):
+async def test_check_ai_limits_rejects_projected_monthly_wallet_overflow(client: AsyncClient):
     email_owner = f"owner3-{uuid.uuid4().hex[:8]}@example.com"
     reg = await client.post(
         "/api/v1/auth/register",
@@ -174,7 +173,6 @@ async def test_check_ai_limits_rejects_projected_daily_overflow(client: AsyncCli
 
     from src.infrastructure.uow import UnitOfWork
     from src.modules.ai.limits import check_ai_limits
-    from src.modules.ai.models import AIUsageLog
     from src.modules.auth.models import User
     from src.modules.billing.models import Plan
     from src.modules.org.models import Membership
@@ -208,19 +206,6 @@ async def test_check_ai_limits_rejects_projected_daily_overflow(client: AsyncCli
             await uow.session.flush()
         free_plan.ai_tokens_per_day = 100
         free_plan.ai_rpm_per_user = 1000
-
-        uow.session.add(
-            AIUsageLog(
-                org_id=org_id,
-                user_id=user.id,
-                model="test",
-                prompt_tokens=45,
-                completion_tokens=45,
-                total_tokens=90,
-                message_preview="seed",
-                created_at=datetime.now(timezone.utc),
-            )
-        )
         await uow.commit()
 
     async with UnitOfWork() as uow:
@@ -228,8 +213,8 @@ async def test_check_ai_limits_rejects_projected_daily_overflow(client: AsyncCli
             uow.session,
             org_id=org_id,
             user_id=user.id,
-            estimated_request_tokens=20,
+            estimated_request_tokens=120,
         )
         assert ok is False
         assert err is not None
-        assert err["code"] == "AI_DAILY_LIMIT"
+        assert err["code"] == "AI_TOKEN_LIMIT_EXCEEDED"

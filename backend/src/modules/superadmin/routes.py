@@ -10,8 +10,10 @@ from src.modules.superadmin.dependencies import require_superadmin
 from src.modules.superadmin.schemas import (
     SetOrgAIEnabledRequest,
     SetPlanRequest,
+    SetSubscriptionPeriodRequest,
     SuperadminAIUsageResetResponse,
     SuperadminAuditPage,
+    SuperadminBillingConfigResponse,
     SuperadminDashboardResponse,
     SuperadminLoginRequest,
     SuperadminOrgDetail,
@@ -21,9 +23,13 @@ from src.modules.superadmin.schemas import (
     SuperadminOverviewResponse,
     SuperadminPlanChangeResponse,
     SuperadminRecordListPage,
+    SuperadminSubscriptionPeriodResponse,
     SuperadminTableDetail,
     SuperadminTableListPage,
     SuperadminTokenResponse,
+    SuperadminUpdateBillingPlanRequest,
+    SuperadminUpdateAIConfigRequest,
+    SuperadminUpsertTokenPackageRequest,
     SuperadminUserListPage,
 )
 from src.modules.superadmin.service import SuperadminService
@@ -187,6 +193,32 @@ async def superadmin_set_plan(org_id: str, body: SetPlanRequest):
     return ApiResponse(data=data)
 
 
+@protected.patch("/orgs/{org_id}/subscription", response_model=ApiResponse[SuperadminSubscriptionPeriodResponse])
+async def superadmin_set_subscription(org_id: str, body: SetSubscriptionPeriodRequest):
+    try:
+        data = await _service.orgs.set_subscription_period(
+            org_id=org_id,
+            plan_name=body.plan,
+            period_days=body.period_days,
+            current_period_end=body.current_period_end,
+        )
+    except ValueError as exc:
+        if str(exc) == "INVALID_PERIOD":
+            return ApiResponse(
+                ok=False,
+                data=None,
+                error={"code": "INVALID_PERIOD", "message": "Срок подписки должен быть в будущем"},
+            )
+        return ApiResponse(
+            ok=False,
+            data=None,
+            error={"code": "INVALID_PLAN", "message": f"Неверный тариф: {body.plan}"},
+        )
+    except LookupError:
+        return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": NOT_FOUND_ORG})
+    return ApiResponse(data=data)
+
+
 @protected.patch("/orgs/{org_id}/ai-enabled", response_model=ApiResponse[SuperadminOrgAIEnabledResponse])
 async def superadmin_set_org_ai_enabled(org_id: str, body: SetOrgAIEnabledRequest):
     try:
@@ -207,7 +239,36 @@ async def superadmin_reset_org_ai_usage(org_id: str):
 
 @protected.get("/ai-config", response_model=ApiResponse[dict])
 async def superadmin_ai_config():
-    return ApiResponse(data=_service.auth.ai_config())
+    return ApiResponse(data=await _service.ai_config.get_config())
+
+
+@protected.patch("/ai-config", response_model=ApiResponse[dict])
+async def superadmin_update_ai_config(body: SuperadminUpdateAIConfigRequest):
+    data = await _service.ai_config.update_config(body.model_dump(exclude_none=True))
+    return ApiResponse(data=data)
+
+
+@protected.get("/billing/config", response_model=ApiResponse[SuperadminBillingConfigResponse])
+async def superadmin_billing_config():
+    return ApiResponse(data=await _service.billing.billing_config())
+
+
+@protected.patch("/billing/plans/{plan_name}", response_model=ApiResponse[dict])
+async def superadmin_update_billing_plan(plan_name: str, body: SuperadminUpdateBillingPlanRequest):
+    try:
+        data = await _service.billing.update_plan(plan_name=plan_name, payload=body.model_dump(exclude_none=True))
+    except LookupError:
+        return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Тариф не найден"})
+    return ApiResponse(data=data)
+
+
+@protected.put("/billing/token-packages/{code}", response_model=ApiResponse[dict])
+async def superadmin_upsert_token_package(code: str, body: SuperadminUpsertTokenPackageRequest):
+    payload = body.model_dump(exclude_none=True)
+    if "tokens" not in payload and "display_name" not in payload and "price_rub_cents" not in payload and "is_active" not in payload and "sort_order" not in payload:
+        return ApiResponse(ok=False, data=None, error={"code": "EMPTY_PAYLOAD", "message": "Нет полей для обновления"})
+    data = await _service.billing.upsert_token_package(code=code, payload=payload)
+    return ApiResponse(data=data)
 
 
 @protected.get("/audit/logs", response_model=ApiResponse[SuperadminAuditPage])

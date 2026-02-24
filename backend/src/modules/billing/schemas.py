@@ -33,3 +33,23 @@ class UsageOut(BaseModel):
 class CreatePaymentRequest(BaseModel):
     plan_name: str
     period: Literal["monthly"] = "monthly"
+
+
+class TokenBalanceOut(BaseModel):
+    org_id: str
+    cycle_key: str
+    plan_tokens_monthly_quota: int
+    plan_tokens_remaining: int
+    addon_tokens_remaining: int
+    total_tokens_remaining: int
+
+
+class TokenPackageOut(BaseModel):
+    code: str
+    display_name: str
+    tokens: int
+    price_rub_cents: int
+
+
+class PurchaseTokensRequest(BaseModel):
+    package_code: str

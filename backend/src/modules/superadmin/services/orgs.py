@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta, timezone
 
 from src.common.enums import AuditAction, PlanTier, SubscriptionStatus
 from src.infrastructure.uow import UnitOfWork
@@ -101,6 +101,99 @@ class SuperadminOrgsService:
             )
             await uow.commit()
         return {"org_id": org_id, "plan": plan_name}
+
+    async def set_subscription_period(
+        self,
+        *,
+        org_id: str,
+        plan_name: str,
+        period_days: int | None,
+        current_period_end: datetime | None,
+    ) -> dict:
+        try:
+            plan_tier = PlanTier(plan_name)
+        except ValueError as exc:
+            raise ValueError("INVALID_PLAN") from exc
+
+        org_uuid = uuid.UUID(org_id)
+        now = datetime.now(UTC)
+        start_at = now
+
+        if current_period_end is not None:
+            end_at = current_period_end.astimezone(UTC) if current_period_end.tzinfo else current_period_end.replace(tzinfo=UTC)
+        elif period_days is not None:
+            end_at = now + timedelta(days=int(period_days))
+        else:
+            raise ValueError("INVALID_PERIOD")
+
+        if end_at <= now:
+            raise ValueError("INVALID_PERIOD")
+
+        async with UnitOfWork() as uow:
+            repo = SuperadminRepository(uow.session)
+            org = await repo.get_org_model(org_id=org_uuid)
+            if not org:
+                raise LookupError("NOT_FOUND")
+            old_plan = org.plan.value if hasattr(org.plan, "value") else str(org.plan)
+
+            sub = await repo.get_subscription_by_org(org_id=org_uuid)
+            old_sub = {
+                "status": (sub.status.value if hasattr(sub.status, "value") else str(sub.status)) if sub else None,
+                "period_end": sub.current_period_end.isoformat() if sub and sub.current_period_end else None,
+            }
+            if sub:
+                sub.plan = plan_tier
+                sub.status = SubscriptionStatus.ACTIVE
+                sub.current_period_start = start_at
+                sub.current_period_end = end_at
+                sub.grace_period_end = None
+                sub.data_purge_at = None
+                sub.pre_expiry_notified_at = None
+                sub.post_expiry_notified_at = None
+                sub.downgraded_at = None
+                sub.data_purged_at = None
+            else:
+                from src.modules.org.models import Subscription
+
+                sub = Subscription(
+                    org_id=org_uuid,
+                    plan=plan_tier,
+                    status=SubscriptionStatus.ACTIVE,
+                    current_period_start=start_at,
+                    current_period_end=end_at,
+                )
+                uow.session.add(sub)
+
+            org.plan = plan_tier
+
+            audit_repo = AuditRepository(uow.session)
+            await audit_repo.log(
+                org_id=org_uuid,
+                actor_id=None,
+                action=AuditAction.UPDATE,
+                entity_type="org_subscription_period",
+                entity_id=str(org_uuid),
+                meta={
+                    "superadmin": True,
+                    "old_plan": old_plan,
+                    "new_plan": plan_tier.value,
+                    "old_sub_status": old_sub["status"],
+                    "old_period_end": old_sub["period_end"],
+                    "new_sub_status": SubscriptionStatus.ACTIVE.value,
+                    "new_period_start": start_at.isoformat(),
+                    "new_period_end": end_at.isoformat(),
+                    "period_days": int(period_days) if period_days is not None else None,
+                },
+            )
+            await uow.commit()
+
+        return {
+            "org_id": org_id,
+            "plan": plan_tier.value,
+            "status": SubscriptionStatus.ACTIVE.value,
+            "current_period_start": start_at.isoformat(),
+            "current_period_end": end_at.isoformat(),
+        }
 
     async def set_org_ai_enabled(self, *, org_id: str, enabled: bool) -> dict:
         """Включить или выключить AI на уровне организации."""

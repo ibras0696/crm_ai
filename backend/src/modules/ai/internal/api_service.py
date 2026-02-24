@@ -15,6 +15,7 @@ from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.limits import is_org_ai_enabled, resolve_org_plan, resolve_plan_limits
 from src.modules.ai.models import AIChatMessage
 from src.modules.ai.repository import AIRepository
+from src.modules.billing.token_wallet import get_token_balance_view
 from src.modules.ai.service import build_messages, build_org_context_for_user, estimate_tokens
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,7 @@ async def build_ai_status(*, org_id: uuid.UUID) -> dict[str, Any]:
 
             total = await repo.usage_stats(org_id=org_id)
             today = await repo.usage_stats(org_id=org_id, since=day_start)
+            wallet = await get_token_balance_view(uow.session, org_id=org_id)
     except Exception as exc:
         logger.exception("ai_build_status_failed", exc_info=exc)
         raise
@@ -74,6 +76,7 @@ async def build_ai_status(*, org_id: uuid.UUID) -> dict[str, Any]:
             "rpm_per_user": int(limits["rpm_per_user"]),
             "max_tokens_per_request": int(limits["max_tokens_per_request"]),
         },
+        "token_wallet": wallet,
     }
 
 

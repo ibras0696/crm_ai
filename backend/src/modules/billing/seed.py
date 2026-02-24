@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
-from src.modules.billing.models import Plan
+from src.modules.billing.models import Plan, TokenPackage
 
 
 DEFAULT_PLANS: list[dict] = [
@@ -59,6 +59,33 @@ DEFAULT_PLANS: list[dict] = [
     },
 ]
 
+DEFAULT_TOKEN_PACKAGES: list[dict] = [
+    {
+        "code": "pack_50k",
+        "display_name": "Пакет 50k",
+        "tokens": 50_000,
+        "price_rub_cents": 99_000,
+        "is_active": True,
+        "sort_order": 10,
+    },
+    {
+        "code": "pack_100k",
+        "display_name": "Пакет 100k",
+        "tokens": 100_000,
+        "price_rub_cents": 179_000,
+        "is_active": True,
+        "sort_order": 20,
+    },
+    {
+        "code": "pack_500k",
+        "display_name": "Пакет 500k",
+        "tokens": 500_000,
+        "price_rub_cents": 799_000,
+        "is_active": True,
+        "sort_order": 30,
+    },
+]
+
 
 async def upsert_default_plans(session: AsyncSession) -> None:
     names = [str(data["name"]) for data in DEFAULT_PLANS]
@@ -78,3 +105,18 @@ async def upsert_default_plans(session: AsyncSession) -> None:
         # Update fields (idempotent seed)
         for k, v in data.items():
             setattr(plan, k, v)
+
+
+async def upsert_default_token_packages(session: AsyncSession) -> None:
+    codes = [str(data["code"]) for data in DEFAULT_TOKEN_PACKAGES]
+    existing_rows = (await session.execute(select(TokenPackage).where(TokenPackage.code.in_(codes)))).scalars().all()
+    existing_by_code = {row.code: row for row in existing_rows}
+
+    for data in DEFAULT_TOKEN_PACKAGES:
+        code = data["code"]
+        package = existing_by_code.get(code)
+        if package is None:
+            session.add(TokenPackage(**data))
+            continue
+        for k, v in data.items():
+            setattr(package, k, v)

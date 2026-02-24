@@ -149,6 +149,36 @@ export interface SuperadminAuditPage {
   offset: number
 }
 
+export interface SuperadminBillingPlanItem {
+  name: string
+  display_name: string
+  price_monthly: number
+  price_yearly: number
+  max_members: number
+  max_tables: number
+  max_records: number
+  max_storage_mb: number
+  has_ai: boolean
+  ai_max_tokens_per_request: number
+  ai_tokens_per_day: number
+  ai_rpm_per_user: number
+  is_active: boolean
+}
+
+export interface SuperadminTokenPackageItem {
+  code: string
+  display_name: string
+  tokens: number
+  price_rub_cents: number
+  is_active: boolean
+  sort_order: number
+}
+
+export interface SuperadminBillingConfig {
+  plans: SuperadminBillingPlanItem[]
+  token_packages: SuperadminTokenPackageItem[]
+}
+
 export const superadminApi = {
   login: (email: string, password: string) =>
     superadminHttp.post<ApiResponse<{ access_token: string; token_type: string }>>('/login', { email, password }),
@@ -199,6 +229,25 @@ export const superadminApi = {
         model: string
         key_configured: boolean
         key_prefix: string
+        runtime: {
+          model: string
+          system_prompt: string
+          temperature: number
+          max_tokens_per_request: number
+          strict_actions: boolean
+        }
       }>
     >('/ai-config'),
+  updateAiConfig: (data: {
+    model?: string
+    system_prompt?: string
+    temperature?: number
+    max_tokens_per_request?: number
+    strict_actions?: boolean
+  }) => superadminHttp.patch<ApiResponse<any>>('/ai-config', data),
+  billingConfig: () => superadminHttp.get<ApiResponse<SuperadminBillingConfig>>('/billing/config'),
+  updateBillingPlan: (planName: string, data: Partial<SuperadminBillingPlanItem>) =>
+    superadminHttp.patch<ApiResponse<SuperadminBillingPlanItem>>(`/billing/plans/${planName}`, data),
+  upsertTokenPackage: (code: string, data: Partial<SuperadminTokenPackageItem>) =>
+    superadminHttp.put<ApiResponse<SuperadminTokenPackageItem>>(`/billing/token-packages/${code}`, data),
 }

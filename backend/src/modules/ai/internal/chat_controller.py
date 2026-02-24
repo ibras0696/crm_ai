@@ -13,6 +13,7 @@ from __future__ import annotations
 """
 
 import logging
+import re
 
 import httpx
 from sqlalchemy import select
@@ -24,8 +25,9 @@ from src.infrastructure.metrics_custom import AI_LIMIT_REJECTIONS_TOTAL, AI_REQU
 from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.intent_overrides import apply_ui_intent_overrides
 from src.modules.ai.limits import check_ai_limits, is_org_ai_enabled
-from src.modules.ai.models import AIChatMessage, AIUsageLog
+from src.modules.ai.models import AIChatMessage, AIRuntimeSettings, AIUsageLog
 from src.modules.ai.schemas import ChatRequest, ChatResponse
+from src.modules.billing.token_wallet import spend_tokens
 from src.modules.ai.service import (
     build_messages,
     build_org_context_for_user,
@@ -64,6 +66,41 @@ ACTION_ALLOWED_ROLES = {
     "create_schedule_event": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.EMPLOYEE.value},
     "create_kb_page": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value},
 }
+
+INTENT_TO_ACTION = {
+    "create_dashboard": "create_dashboard",
+    "create_table": "create_table",
+    "create_schedule_event": "create_schedule_event",
+    "create_kb_page": "create_kb_page",
+}
+
+
+def _is_explicit_action_request(action_name: str, user_message: str, ui_intent: str | None) -> bool:
+    if ui_intent and INTENT_TO_ACTION.get(str(ui_intent).strip()) == action_name:
+        return True
+
+    text = (user_message or "").strip().lower()
+    if not text:
+        return False
+
+    verbs = [
+        "созд", "сдела", "добав", "запол", "собер", "постро", "сформ", "назнач", "заплан",
+        "create", "add", "build", "fill", "insert", "schedule",
+    ]
+    has_verb = any(v in text for v in verbs)
+    if not has_verb:
+        return False
+
+    domain_keywords = {
+        "create_dashboard": ["дашборд", "отчет", "отчёт", "график", "виджет", "аналит"],
+        "create_table": ["таблиц", "таблица", "колонк", "поле", "структур", "table", "schema"],
+        "create_columns": ["колонк", "поле", "столб", "column", "field"],
+        "create_records": ["запис", "строк", "данн", "заполни таблиц", "добавь в таблиц", "record", "row"],
+        "create_schedule_event": ["расписан", "событ", "встреч", "календар", "schedule", "event", "meeting", "calendar"],
+        "create_kb_page": ["база знан", "knowledge", "wiki", "страниц"],
+    }
+    keys = domain_keywords.get(action_name, [])
+    return any(k in text for k in keys)
 
 
 def _record_metric(status: str, tokens: int | None = None) -> None:
@@ -171,6 +208,9 @@ async def _execute_action(
     current_user: CurrentUser,
     action_payload: dict,
     user_message: str,
+    ui_intent: str | None = None,
+    force_explicit: bool = False,
+    strict_actions: bool = True,
 ) -> dict | None:
     """Выполнить распознанное действие (crm_action) в рамках UnitOfWork.
 
@@ -187,6 +227,13 @@ async def _execute_action(
     handler = ACTION_HANDLERS.get(action_name)
     if handler is None:
         return None
+    if strict_actions and not force_explicit and not _is_explicit_action_request(action_name, user_message, ui_intent):
+        return {
+            "action": action_name,
+            "ok": False,
+            "error": "action_not_requested",
+            "message": "Действие не выполнено: нет явного запроса пользователя.",
+        }
     allowed_roles = ACTION_ALLOWED_ROLES.get(action_name, set())
     if current_user.role not in allowed_roles:
         return {
@@ -238,8 +285,19 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
             },
         )
 
+    # Runtime-параметры модели (из superadmin AI config).
+    async with UnitOfWork() as uow:
+        runtime = (await uow.session.execute(select(AIRuntimeSettings).limit(1))).scalars().first()
+    effective_model = (runtime.model.strip() if runtime and runtime.model else settings.OPENAI_MODEL)
+    effective_system_prompt = (runtime.system_prompt if runtime and runtime.system_prompt else settings.AI_SYSTEM_PROMPT)
+    effective_max_tokens_per_request = int(
+        (runtime.max_tokens_per_request if runtime and runtime.max_tokens_per_request else settings.AI_MAX_TOKENS_PER_REQUEST) or 2000
+    )
+    effective_temperature = float(runtime.temperature if runtime else 0.3)
+    strict_actions = bool(runtime.strict_actions if runtime else True)
+
     # Этап 2: подготовка system_prompt (UI intent = подсказка, не приказ).
-    system_prompt = body.system_prompt or settings.AI_SYSTEM_PROMPT
+    system_prompt = body.system_prompt or effective_system_prompt
     if body.ui_intent:
         intent = str(body.ui_intent).strip()
         params = body.ui_intent_params if isinstance(body.ui_intent_params, dict) else {}
@@ -256,6 +314,7 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
             + "- Если действие требует уточнений, задай 1-2 вопроса вместо выполнения.\n"
         )
     context_options = body.context_options or {}
+    request_id = (body.request_id or "").strip() or None
 
     # Этап 3: загрузка/создание сессии + последние сообщения из БД.
     # Важно: фиксируем session_id один раз на весь запрос, чтобы избежать гонок и
@@ -285,7 +344,7 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
         org_context, context_meta = await build_org_context_for_user(current_user.org_id, current_user.user_id, context_options)
 
     # Этап 5: предварительная оценка токенов и проверка лимитов.
-    max_tokens_per_request = int(settings.AI_MAX_TOKENS_PER_REQUEST)
+    max_tokens_per_request = int(effective_max_tokens_per_request)
     estimated_prompt_tokens = estimate_tokens(body.message) + estimate_tokens(org_context) + 280
     estimated_request_tokens = int(estimated_prompt_tokens + max_tokens_per_request)
     async with UnitOfWork() as uow:
@@ -308,7 +367,15 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
     direct_action_payload, cleaned_direct_reply = extract_action_payload(body.message)
     if direct_action_payload:
         async with UnitOfWork() as uow:
-            action_result = await _execute_action(uow, current_user, direct_action_payload, body.message)
+            action_result = await _execute_action(
+                uow,
+                current_user,
+                direct_action_payload,
+                body.message,
+                ui_intent=body.ui_intent,
+                force_explicit=True,
+                strict_actions=strict_actions,
+            )
 
             user_msg = AIChatMessage(
                 session_id=session_id,
@@ -336,7 +403,7 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
         return ApiResponse(
             data=ChatResponse(
                 reply=assistant_reply,
-                model=settings.OPENAI_MODEL,
+                model=effective_model,
                 usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
                 chat_id=str(session_id),
                 context_estimate=context_meta,
@@ -349,9 +416,10 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
         data = await call_openai_compatible_api(
             settings.AI_BASE_URL,
             bearer_token,
-            settings.OPENAI_MODEL,
+            effective_model,
             messages,
             max_tokens=max_tokens_per_request,
+            temperature=effective_temperature,
         )
         reply_raw = _extract_provider_reply(data)
         action_payload, reply = extract_action_payload(reply_raw)
@@ -368,6 +436,28 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
             }
 
         async with UnitOfWork() as uow:
+            usage_total = int(usage.get("total_tokens", 0) or 0)
+            try:
+                token_spend = await spend_tokens(
+                    uow.session,
+                    org_id=current_user.org_id,
+                    user_id=current_user.user_id,
+                    tokens=usage_total,
+                    request_id=request_id,
+                    meta={"source": "ai_chat", "model": effective_model},
+                )
+            except ValueError:
+                _record_metric("limit_exceeded")
+                _record_limit_rejection("AI_TOKEN_LIMIT_EXCEEDED")
+                return ApiResponse(
+                    ok=False,
+                    data=None,
+                    error={
+                        "code": "AI_TOKEN_LIMIT_EXCEEDED",
+                        "message": "Лимит токенов исчерпан.",
+                    },
+                )
+
             user_msg = AIChatMessage(
                 session_id=session_id,
                 org_id=current_user.org_id,
@@ -383,7 +473,7 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 user_id=current_user.user_id,
                 role="assistant",
                 content=reply,
-                token_count=int(usage.get("total_tokens", 0) or 0),
+                token_count=usage_total,
                 meta={"action_requested": bool(action_payload)},
             )
             uow.session.add(user_msg)
@@ -392,20 +482,36 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 AIUsageLog(
                     org_id=current_user.org_id,
                     user_id=current_user.user_id,
-                    model=settings.OPENAI_MODEL,
+                    model=effective_model,
                     prompt_tokens=int(usage.get("prompt_tokens", 0) or 0),
                     completion_tokens=int(usage.get("completion_tokens", 0) or 0),
-                    total_tokens=int(usage.get("total_tokens", 0) or 0),
+                    total_tokens=usage_total,
                     message_preview=body.message[:200],
                 )
             )
 
             action_result = None
             if action_payload:
-                action_result = await _execute_action(uow, current_user, action_payload, body.message)
+                action_result = await _execute_action(
+                    uow,
+                    current_user,
+                    action_payload,
+                    body.message,
+                    ui_intent=body.ui_intent,
+                    force_explicit=False,
+                    strict_actions=strict_actions,
+                )
                 if action_result is not None:
                     assistant_msg.meta = {"action_requested": True, "action_result": action_result}
 
+            usage = {
+                **usage,
+                "wallet_spent_addon": token_spend.spent_addon,
+                "wallet_spent_plan": token_spend.spent_plan,
+                "wallet_remaining_addon": token_spend.addon_remaining,
+                "wallet_remaining_plan": token_spend.plan_remaining,
+                "wallet_idempotent_replay": token_spend.idempotent_replay,
+            }
             await uow.commit()
 
         _record_metric("ok", int(usage.get("total_tokens", 0) or 0))
@@ -413,7 +519,7 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
         return ApiResponse(
             data=ChatResponse(
                 reply=reply,
-                model=settings.OPENAI_MODEL,
+                model=effective_model,
                 usage=usage,
                 chat_id=str(session_id),
                 context_estimate=context_meta,

@@ -2,7 +2,7 @@
 
 import uuid
 
-from sqlalchemy import CheckConstraint, ForeignKey, ForeignKeyConstraint, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Float, ForeignKey, ForeignKeyConstraint, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -83,3 +83,19 @@ class AIChatMessage(BaseDBModel):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+
+class AIRuntimeSettings(BaseDBModel):
+    """Глобальные runtime-настройки AI (управляются супер-админом)."""
+
+    __tablename__ = "ai_runtime_settings"
+    __table_args__ = (
+        CheckConstraint("temperature >= 0 AND temperature <= 2", name="ck_ai_runtime_settings_temperature_range"),
+        CheckConstraint("max_tokens_per_request >= 64", name="ck_ai_runtime_settings_max_tokens_min"),
+    )
+
+    model: Mapped[str] = mapped_column(String(120), nullable=False, default="")
+    system_prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    temperature: Mapped[float] = mapped_column(Float, nullable=False, default=0.3)
+    max_tokens_per_request: Mapped[int] = mapped_column(Integer, nullable=False, default=2000)
+    strict_actions: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

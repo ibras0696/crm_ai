@@ -87,6 +87,7 @@ export const aiApi = {
     ui_intent_params?: Record<string, unknown>
     include_context?: boolean
     chat_id?: string
+    request_id?: string
     context_options?: AIContextOptions
   }) => api.post<ApiResponse<AIChatResponse>>('/ai/chat', data),
   status: () =>
@@ -98,6 +99,13 @@ export const aiApi = {
         stats: { total_requests: number; total_tokens: number; prompt_tokens: number; completion_tokens: number }
         today?: { requests: number; total_tokens: number; prompt_tokens: number; completion_tokens: number }
         limits?: { daily_tokens: number; rpm_per_user: number; max_tokens_per_request: number }
+        token_wallet?: {
+          cycle_key: string
+          plan_tokens_monthly_quota: number
+          plan_tokens_remaining: number
+          addon_tokens_remaining: number
+          total_tokens_remaining: number
+        }
       }>
     >('/ai/status'),
   usage: () => api.get<ApiResponse<Array<{ user_id: string; requests: number; tokens: number }>>>('/ai/usage'),

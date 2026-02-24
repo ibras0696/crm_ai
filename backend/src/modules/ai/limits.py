@@ -10,22 +10,10 @@ from src.config import settings
 from src.common.enums import PlanTier, SubscriptionStatus
 from src.modules.ai.models import AIUsageLog
 from src.modules.billing.models import Plan
+from src.modules.billing.token_wallet import get_token_balance_view
 from src.modules.org.models import Organization, Subscription
 
 logger = logging.getLogger(__name__)
-
-
-def _utc_day_start(dt: datetime) -> datetime:
-    """Вернуть начало дня (00:00) в UTC для указанной даты-времени.
-
-    Args:
-        dt: Дата-время (любая TZ).
-
-    Returns:
-        Дата-время начала дня в UTC.
-    """
-    dt = dt.astimezone(timezone.utc)
-    return datetime(dt.year, dt.month, dt.day, tzinfo=timezone.utc)
 
 
 def _as_plan_tier(value: Any) -> PlanTier | None:
@@ -219,22 +207,23 @@ async def check_ai_limits(session, *, org_id, user_id, estimated_request_tokens:
                 "message": f"Слишком много запросов к AI (лимит {rpm_limit}/мин). Подождите минуту и попробуйте снова.",
             }
 
-    # Tokens/day per org
+    # Monthly tokens per org (plan wallet + purchased addon wallet).
+    # Название daily_limit сохранено для обратной совместимости с текущими структурами plan/settings.
     if daily_limit > 0:
-        day_start = _utc_day_start(now)
-        used_today = (
-            await session.execute(
-                select(func.coalesce(func.sum(AIUsageLog.total_tokens), 0)).where(
-                    AIUsageLog.org_id == org_id,
-                    AIUsageLog.created_at >= day_start,
-                )
-            )
-        ).scalar_one()
-        projected = int(used_today or 0) + int(max(0, estimated_request_tokens))
-        if projected > daily_limit:
+        wallet = await get_token_balance_view(session, org_id=org_id)
+        available = int(wallet["total_tokens_remaining"])
+        projected = int(max(0, estimated_request_tokens))
+        if projected > available:
             return False, {
-                "code": "AI_DAILY_LIMIT",
-                "message": f"Достигнут дневной лимит токенов ({int(used_today or 0)}/{daily_limit}).",
+                "code": "AI_TOKEN_LIMIT_EXCEEDED",
+                "message": "Лимит токенов исчерпан.",
+                "details": {
+                    "required_tokens": projected,
+                    "remaining_total": available,
+                    "remaining_addon": int(wallet["addon_tokens_remaining"]),
+                    "remaining_plan": int(wallet["plan_tokens_remaining"]),
+                    "cycle_key": wallet["cycle_key"],
+                },
             }
 
     return True, None

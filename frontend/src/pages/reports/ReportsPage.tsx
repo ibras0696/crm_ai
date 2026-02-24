@@ -351,7 +351,7 @@ export default function ReportsPage() {
 
   const mapAiError = (code?: string, message?: string) => {
     const c = String(code || '').toUpperCase()
-    if (c === 'AI_DAILY_LIMIT') return 'Дневной лимит AI токенов исчерпан. Попробуйте завтра или увеличьте тариф.'
+    if (c === 'AI_DAILY_LIMIT' || c === 'AI_TOKEN_LIMIT_EXCEEDED') return 'Лимит AI токенов исчерпан. Купите пакет токенов или дождитесь нового расчетного месяца.'
     if (c === 'AI_RATE_LIMIT') return 'Слишком много запросов к AI. Подождите немного и повторите.'
     if (c === 'AI_DISABLED') return 'AI отключен для вашей организации.'
     if (c === 'AI_NOT_CONFIGURED') return 'AI не настроен на сервере.'

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { billingApi, type PlanInfo, type UsageInfo } from '@/lib/api'
+import { billingApi, type PlanInfo, type TokenBalanceInfo, type TokenPackageInfo, type UsageInfo } from '@/lib/api'
 import { CreditCard, Zap, Users, Database, HardDrive, FileText, Check, Crown, Sparkles } from 'lucide-react'
 
 interface SubInfo {
@@ -20,22 +20,29 @@ export default function BillingPage() {
   const [plans, setPlans] = useState<PlanInfo[]>([])
   const [usage, setUsage] = useState<UsageInfo | null>(null)
   const [sub, setSub] = useState<SubInfo | null>(null)
+  const [tokenBalance, setTokenBalance] = useState<TokenBalanceInfo | null>(null)
+  const [tokenPackages, setTokenPackages] = useState<TokenPackageInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [paying, setPaying] = useState(false)
+  const [buyingPackage, setBuyingPackage] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
   const [cancelConfirm, setCancelConfirm] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [pR, uR, sR] = await Promise.all([
+      const [pR, uR, sR, tbR, tpR] = await Promise.all([
         billingApi.plans(),
         billingApi.usage(),
         billingApi.subscription(),
+        billingApi.tokenBalance(),
+        billingApi.tokenPackages(),
       ])
       if (pR.data.ok && pR.data.data) setPlans(pR.data.data)
       if (uR.data.ok && uR.data.data) setUsage(uR.data.data)
       if (sR.data.ok && sR.data.data) setSub(sR.data.data as SubInfo)
+      if (tbR.data.ok && tbR.data.data) setTokenBalance(tbR.data.data)
+      if (tpR.data.ok && tpR.data.data) setTokenPackages(tpR.data.data)
     } catch { /* ignore */ }
     setLoading(false)
   }, [])
@@ -64,6 +71,17 @@ export default function BillingPage() {
       }
     } catch { /* ignore */ }
     setPaying(false)
+  }
+
+  const handleBuyTokens = async (packageCode: string) => {
+    setBuyingPackage(packageCode)
+    try {
+      const r = await billingApi.purchaseTokens(packageCode)
+      if (r.data.ok) await load()
+    } catch {
+      // ignore
+    }
+    setBuyingPackage(null)
   }
 
   const formatBytes = (bytes: number) => {
@@ -128,6 +146,49 @@ export default function BillingPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {tokenBalance && (
+        <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <h3 className="text-base font-semibold">AI токены</h3>
+              <p className="text-xs text-muted-foreground">Сначала расходуются купленные токены, затем тарифные. Цикл: {tokenBalance.cycle_key}</p>
+            </div>
+            <div className="text-sm text-muted-foreground">Всего доступно: <span className="text-foreground font-semibold">{tokenBalance.total_tokens_remaining.toLocaleString('ru-RU')}</span></div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="rounded-lg border border-border p-3">
+              <div className="text-xs text-muted-foreground">Купленные</div>
+              <div className="text-xl font-bold">{tokenBalance.addon_tokens_remaining.toLocaleString('ru-RU')}</div>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <div className="text-xs text-muted-foreground">Тарифные (остаток)</div>
+              <div className="text-xl font-bold">{tokenBalance.plan_tokens_remaining.toLocaleString('ru-RU')}</div>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <div className="text-xs text-muted-foreground">Тарифные (квота месяца)</div>
+              <div className="text-xl font-bold">{tokenBalance.plan_tokens_monthly_quota.toLocaleString('ru-RU')}</div>
+            </div>
+          </div>
+          {tokenPackages.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-sm font-medium">Пакеты токенов</div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {tokenPackages.map((p) => (
+                  <button
+                    key={p.code}
+                    onClick={() => handleBuyTokens(p.code)}
+                    disabled={buyingPackage !== null}
+                    className="h-10 rounded-lg border border-border bg-secondary/20 hover:bg-secondary/35 text-sm transition-colors disabled:opacity-50"
+                  >
+                    {buyingPackage === p.code ? 'Покупка...' : `Купить ${p.tokens.toLocaleString('ru-RU')} токенов`}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

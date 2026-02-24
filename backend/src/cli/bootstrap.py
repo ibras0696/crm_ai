@@ -11,7 +11,7 @@ from sqlalchemy import create_engine
 from src.config import settings
 from src.infrastructure.bootstrap_lock import advisory_lock
 from src.infrastructure.database import async_session_factory
-from src.modules.billing.seed import upsert_default_plans
+from src.modules.billing.seed import upsert_default_plans, upsert_default_token_packages
 
 
 BOOTSTRAP_LOCK_KEY = 914_270_001  # stable int for pg_advisory_lock
@@ -38,6 +38,7 @@ def _database_url_sync() -> str:
 async def _run_seed() -> None:
     async with async_session_factory() as session:
         await upsert_default_plans(session)
+        await upsert_default_token_packages(session)
         await session.commit()
 
 

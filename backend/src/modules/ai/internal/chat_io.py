@@ -63,8 +63,10 @@ def build_messages(
             "content": (
                 "IMPORTANT:\n"
                 "- Only append ONE final ```crm_action``` block at the end of your answer.\n"
+                "- If user did not explicitly ask to create/change entities, do NOT append crm_action.\n"
                 "- If the user asks for a dashboard/report, do NOT modify tables. Return create_dashboard only.\n"
                 "- Do NOT create columns/records unless the user explicitly asked to change/fill a table.\n"
+                "- Prefer human-friendly keys in action payload (for schedule: дата/время/повтор/цвет/напоминания).\n"
                 "- Never dump huge JSON in the normal text. Put the action JSON ONLY inside the final ```crm_action``` block.\n"
                 "- Keep payloads small: if user asks for 50/100+ rows, create the table first with empty records, then offer to fill in batches (<= 20 rows per request).\n"
                 "If user asks to create dashboard/report, append final block:\n"
@@ -109,6 +111,7 @@ async def call_openai_compatible_api(
     model: str,
     messages: list[dict[str, str]],
     max_tokens: int = 2000,
+    temperature: float = 0.3,
 ) -> dict[str, Any]:
     """Вызвать OpenAI-compatible endpoint `/v1/chat/completions`."""
     clean_base = base_url.rstrip("/")
@@ -118,8 +121,12 @@ async def call_openai_compatible_api(
         resp = await client.post(
             f"{clean_base}/v1/chat/completions",
             headers={"Authorization": f"Bearer {bearer_token}", "Content-Type": "application/json"},
-            json={"model": model, "messages": messages, "max_tokens": max(256, int(max_tokens)), "temperature": 0.3},
+            json={
+                "model": model,
+                "messages": messages,
+                "max_tokens": max(256, int(max_tokens)),
+                "temperature": float(max(0.0, min(2.0, temperature))),
+            },
         )
         resp.raise_for_status()
         return resp.json()
-

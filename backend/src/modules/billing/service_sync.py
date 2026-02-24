@@ -3,13 +3,14 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from src.common.enums import NotificationStatus, NotificationType, PlanTier, SubscriptionStatus, UserRole
 from src.config import settings
 from src.modules.ai.models import AIChatMessage, AIChatSession, AIUsageLog
 from src.modules.audit.models import AuditLog
+from src.modules.billing.models import Plan, TokenBalance, TokenPurchase
 from src.modules.files import storage
 from src.modules.files.models import File
 from src.modules.knowledge.models import KBPage
@@ -40,6 +41,8 @@ class BillingServiceSync:
             "downgraded_orgs": 0,
             "purged_orgs": 0,
         }
+
+        self._rotate_monthly_plan_tokens_for_all_orgs(now_utc=now_utc)
 
         subscriptions = list(self.session.execute(select(Subscription)).scalars().all())
         org_ids = [sub.org_id for sub in subscriptions]
@@ -114,6 +117,87 @@ class BillingServiceSync:
 
         self.session.commit()
         return stats
+
+    def _rotate_monthly_plan_tokens_for_all_orgs(self, *, now_utc: datetime) -> None:
+        cycle = f"{now_utc.year:04d}-{now_utc.month:02d}"
+        org_ids = [row[0] for row in self.session.execute(select(Organization.id)).all()]
+        if not org_ids:
+            return
+
+        expired = list(
+            self.session.execute(
+                select(TokenPurchase).where(
+                    TokenPurchase.org_id.in_(org_ids),
+                    TokenPurchase.is_active.is_(True),
+                    TokenPurchase.expires_at.is_not(None),
+                    TokenPurchase.expires_at <= now_utc,
+                )
+            ).scalars().all()
+        )
+        for purchase in expired:
+            purchase.is_active = False
+            purchase.tokens_remaining = 0
+
+        addon_sum_rows = self.session.execute(
+            select(TokenPurchase.org_id, func.coalesce(func.sum(TokenPurchase.tokens_remaining), 0))
+            .where(
+                TokenPurchase.org_id.in_(org_ids),
+                TokenPurchase.is_active.is_(True),
+                TokenPurchase.tokens_remaining > 0,
+            )
+            .group_by(TokenPurchase.org_id)
+        ).all()
+        addon_total_by_org = {org_id: int(total or 0) for org_id, total in addon_sum_rows}
+
+        active_sub_rows = self.session.execute(
+            select(Subscription.org_id, Subscription.plan).where(
+                Subscription.org_id.in_(org_ids),
+                Subscription.status == SubscriptionStatus.ACTIVE,
+            )
+        ).all()
+        sub_plan_by_org = {}
+        for org_id, plan in active_sub_rows:
+            if plan is not None:
+                sub_plan_by_org[org_id] = plan.value if hasattr(plan, "value") else str(plan)
+
+        org_plan_rows = self.session.execute(select(Organization.id, Organization.plan).where(Organization.id.in_(org_ids))).all()
+        org_plan_by_org = {
+            org_id: (plan.value if hasattr(plan, "value") else str(plan or "free"))
+            for org_id, plan in org_plan_rows
+        }
+
+        plans = self.session.execute(select(Plan).where(Plan.is_active.is_(True))).scalars().all()
+        quota_by_plan_name = {
+            str(plan.name).lower(): int(getattr(plan, "ai_tokens_per_day", 0) or 0)
+            for plan in plans
+        }
+
+        balances = self.session.execute(select(TokenBalance).where(TokenBalance.org_id.in_(org_ids))).scalars().all()
+        balance_by_org = {b.org_id: b for b in balances}
+
+        for org_id in org_ids:
+            plan_name = str(sub_plan_by_org.get(org_id) or org_plan_by_org.get(org_id) or "free").lower()
+            quota = int(quota_by_plan_name.get(plan_name, 0) or 0)
+            addon_total = int(addon_total_by_org.get(org_id, 0))
+
+            balance = balance_by_org.get(org_id)
+            if balance is None:
+                self.session.add(
+                    TokenBalance(
+                        org_id=org_id,
+                        plan_cycle_key=cycle,
+                        plan_tokens_monthly_quota=quota,
+                        plan_tokens_remaining=quota,
+                        addon_tokens_remaining=addon_total,
+                    )
+                )
+                continue
+
+            if balance.plan_cycle_key != cycle:
+                balance.plan_cycle_key = cycle
+                balance.plan_tokens_monthly_quota = quota
+                balance.plan_tokens_remaining = quota
+            balance.addon_tokens_remaining = addon_total
 
     def _create_billing_notification(self, *, org_id: uuid.UUID, title: str, body: str, meta: dict) -> int:
         recipients = [

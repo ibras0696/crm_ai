@@ -4,14 +4,22 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import httpx
+from sqlalchemy import select
 
 from src.common.enums import NotificationStatus, NotificationType, PlanTier, SubscriptionStatus
 from src.config import settings
 from src.infrastructure.uow import UnitOfWork
+from src.modules.billing.models import TokenPackage
 from src.modules.billing.repository import BillingRepository
 from src.modules.billing.schemas import UsageOut
+from src.modules.billing.token_wallet import (
+    ensure_token_balances_bulk,
+    get_token_balance_view,
+    purchase_addon_tokens,
+)
 from src.modules.files import storage
 from src.modules.notifications.models import Notification
+from src.modules.org.models import Organization
 
 
 class BillingOperationError(Exception):
@@ -42,6 +50,54 @@ class BillingService:
             files=files,
             storage_bytes=storage_bytes,
         )
+
+    async def get_token_balance(self, *, org_id: uuid.UUID) -> dict:
+        async with UnitOfWork() as uow:
+            wallet = await get_token_balance_view(uow.session, org_id=org_id)
+        return wallet
+
+    async def list_token_packages(self) -> list[dict]:
+        async with UnitOfWork() as uow:
+            rows = (
+                await uow.session.execute(
+                    select(TokenPackage)
+                    .where(TokenPackage.is_active.is_(True))
+                    .order_by(TokenPackage.sort_order.asc(), TokenPackage.created_at.asc())
+                )
+            ).scalars().all()
+        return [
+            {
+                "code": row.code,
+                "display_name": row.display_name,
+                "tokens": int(row.tokens),
+                "price_rub_cents": int(row.price_rub_cents or 0),
+            }
+            for row in rows
+        ]
+
+    async def purchase_tokens(
+        self,
+        *,
+        org_id: uuid.UUID,
+        user_id: uuid.UUID,
+        package_code: str,
+    ) -> dict:
+        async with UnitOfWork() as uow:
+            try:
+                data = await purchase_addon_tokens(
+                    uow.session,
+                    org_id=org_id,
+                    user_id=user_id,
+                    package_code=package_code,
+                    months_valid=12,
+                    payment_id=None,
+                )
+            except ValueError as exc:
+                if str(exc) == "UNKNOWN_PACKAGE":
+                    raise BillingOperationError("UNKNOWN_PACKAGE", "Неизвестный пакет токенов") from exc
+                raise BillingOperationError("INVALID_PACKAGE", "Некорректный пакет токенов") from exc
+            await uow.commit()
+        return data
 
     async def create_payment(
         self,
@@ -211,9 +267,19 @@ class BillingService:
         async with UnitOfWork() as uow:
             repo = BillingRepository(uow.session)
             subscriptions = await repo.list_subscriptions()
+            all_org_ids = [row[0] for row in (await uow.session.execute(select(Organization.id))).all()]
+            org_map = {}
+            if all_org_ids:
+                org_rows = (
+                    await uow.session.execute(select(Organization).where(Organization.id.in_(all_org_ids)))
+                ).scalars().all()
+                org_map = {org.id: org for org in org_rows}
+
+            # Ротация plan-токенов по месячному циклу (без переноса остатка).
+            await ensure_token_balances_bulk(uow.session, org_ids=all_org_ids, lock=False)
 
             for sub in subscriptions:
-                org = await repo.get_org(org_id=sub.org_id)
+                org = org_map.get(sub.org_id)
                 if org is None:
                     continue
                 if sub.current_period_end is None:

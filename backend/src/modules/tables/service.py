@@ -258,7 +258,9 @@ class TablesService:
         if current_folder_id is not None and parent_id == current_folder_id:
             raise TableServiceError(code="INVALID_PARENT", message="Нельзя вложить папку в саму себя")
 
-        parent = await self.folder_repo.get_by_id(parent_id)
+        folders = await self.folder_repo.list_by_org(org_id)
+        folders_by_id = {folder.id: folder for folder in folders}
+        parent = folders_by_id.get(parent_id)
         if not parent or parent.org_id != org_id:
             raise TableServiceError(code="NOT_FOUND", message="Родительская папка не найдена")
 
@@ -268,7 +270,7 @@ class TablesService:
             while cursor.parent_id is not None:
                 if cursor.parent_id == current_folder_id:
                     raise TableServiceError(code="INVALID_PARENT", message="Нельзя вложить папку в своего потомка")
-                cursor = await self.folder_repo.get_by_id(cursor.parent_id)
+                cursor = folders_by_id.get(cursor.parent_id)
                 if cursor is None or cursor.org_id != org_id:
                     break
 
@@ -276,7 +278,7 @@ class TablesService:
         cursor = parent
         while cursor.parent_id is not None:
             depth += 1
-            cursor = await self.folder_repo.get_by_id(cursor.parent_id)
+            cursor = folders_by_id.get(cursor.parent_id)
             if cursor is None or cursor.org_id != org_id:
                 break
             if depth > self.MAX_FOLDER_DEPTH:

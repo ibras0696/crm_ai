@@ -7,6 +7,7 @@ export { OrgDetailView } from './orgs/DetailView'
 export { UsersListView } from './users/ListView'
 export { SuperadminAuditView } from './audit/View'
 export { SuperadminAIView } from './ai/View'
+export { SuperadminBillingView } from './billing/View'
 export { SuperadminTablesView } from './tables/View'
 export { SuperadminProfileView } from './profile/View'
 

@@ -216,12 +216,17 @@ export default function AIPage() {
     setMessages((prev) => [...prev, { role: 'user', content: messageText }])
     setInput('')
     setSending(true)
+    const requestId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `ai-${Date.now()}-${Math.random().toString(16).slice(2)}`
     try {
       const r = await aiApi.chat({
         message: messageText,
         history: messages.slice(-10).map((m) => ({ role: m.role, content: m.content })),
         include_context: includeContext,
         chat_id: currentChatId || undefined,
+        request_id: requestId,
         context_options: contextOptions,
         ui_intent: uiIntent?.type,
         ui_intent_params: uiIntent?.params,

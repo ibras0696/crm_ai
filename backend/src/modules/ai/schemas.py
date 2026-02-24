@@ -25,6 +25,7 @@ class ChatRequest(BaseModel):
     ui_intent_params: dict | None = None
     include_context: bool = True
     chat_id: str | None = None
+    request_id: str | None = None
     context_options: dict | None = None
 
 

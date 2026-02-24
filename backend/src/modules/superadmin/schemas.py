@@ -1,6 +1,9 @@
 """Pydantic schemas for superadmin module."""
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
+from pydantic import model_validator
 
 
 class SuperadminLoginRequest(BaseModel):
@@ -24,6 +27,26 @@ class SetOrgAIEnabledRequest(BaseModel):
 class SuperadminPlanChangeResponse(BaseModel):
     org_id: str
     plan: str
+
+
+class SetSubscriptionPeriodRequest(BaseModel):
+    plan: str = "free"
+    period_days: int | None = Field(default=None, ge=1, le=3650)
+    current_period_end: datetime | None = None
+
+    @model_validator(mode="after")
+    def _validate_period(self) -> "SetSubscriptionPeriodRequest":
+        if (self.period_days is None) == (self.current_period_end is None):
+            raise ValueError("set exactly one: period_days or current_period_end")
+        return self
+
+
+class SuperadminSubscriptionPeriodResponse(BaseModel):
+    org_id: str
+    plan: str
+    status: str
+    current_period_start: str | None = None
+    current_period_end: str | None = None
 
 
 class SuperadminOrgAIEnabledResponse(BaseModel):
@@ -265,3 +288,64 @@ class SuperadminRecordListPage(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class SuperadminBillingPlanItem(BaseModel):
+    name: str
+    display_name: str
+    price_monthly: int
+    price_yearly: int
+    max_members: int
+    max_tables: int
+    max_records: int
+    max_storage_mb: int
+    has_ai: bool
+    ai_max_tokens_per_request: int
+    ai_tokens_per_day: int
+    ai_rpm_per_user: int
+    is_active: bool
+
+
+class SuperadminTokenPackageItem(BaseModel):
+    code: str
+    display_name: str
+    tokens: int
+    price_rub_cents: int
+    is_active: bool
+    sort_order: int
+
+
+class SuperadminBillingConfigResponse(BaseModel):
+    plans: list[SuperadminBillingPlanItem]
+    token_packages: list[SuperadminTokenPackageItem]
+
+
+class SuperadminUpdateBillingPlanRequest(BaseModel):
+    display_name: str | None = None
+    price_monthly: int | None = Field(default=None, ge=0)
+    price_yearly: int | None = Field(default=None, ge=0)
+    max_members: int | None = Field(default=None, ge=1)
+    max_tables: int | None = Field(default=None, ge=1)
+    max_records: int | None = Field(default=None, ge=1)
+    max_storage_mb: int | None = Field(default=None, ge=1)
+    has_ai: bool | None = None
+    ai_max_tokens_per_request: int | None = Field(default=None, ge=0)
+    ai_tokens_per_day: int | None = Field(default=None, ge=0)
+    ai_rpm_per_user: int | None = Field(default=None, ge=0)
+    is_active: bool | None = None
+
+
+class SuperadminUpsertTokenPackageRequest(BaseModel):
+    display_name: str | None = None
+    tokens: int | None = Field(default=None, ge=1)
+    price_rub_cents: int | None = Field(default=None, ge=0)
+    is_active: bool | None = None
+    sort_order: int | None = Field(default=None, ge=0)
+
+
+class SuperadminUpdateAIConfigRequest(BaseModel):
+    model: str | None = Field(default=None, min_length=1, max_length=120)
+    system_prompt: str | None = Field(default=None, min_length=1, max_length=12000)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    max_tokens_per_request: int | None = Field(default=None, ge=64, le=12000)
+    strict_actions: bool | None = None

@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     ENABLE_SENTRY: bool = False
     ENABLE_METRICS: bool = True
     ENABLE_RATE_LIMIT: bool = True
+    RATE_LIMIT_REQUESTS_PER_MINUTE: int = 120
     EXPOSE_API_DOCS_IN_PROD: bool = False
 
     # Security / hardening

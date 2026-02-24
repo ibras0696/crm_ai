@@ -77,7 +77,11 @@ def create_app() -> FastAPI:
     if settings.ENABLE_RATE_LIMIT:
         from src.middleware.rate_limit import RateLimitMiddleware
 
-        application.add_middleware(RateLimitMiddleware, requests_per_minute=120)
+        rpm = int(settings.RATE_LIMIT_REQUESTS_PER_MINUTE or 120)
+        # Dev UX: avoid false-positive 429 under local proxy/HMR noise.
+        if str(settings.ENVIRONMENT).lower() != "production":
+            rpm = max(rpm, 600)
+        application.add_middleware(RateLimitMiddleware, requests_per_minute=rpm)
 
     # Error handlers
     application.add_exception_handler(AppError, app_error_handler)

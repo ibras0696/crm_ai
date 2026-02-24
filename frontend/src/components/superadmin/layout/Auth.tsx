@@ -15,6 +15,10 @@ export function SuperadminAuth({ onLoggedIn }: Props) {
 
   const login = async () => {
     if (!email.trim() || !password) return
+    if (password.length < 8) {
+      setError('Пароль должен быть не менее 8 символов')
+      return
+    }
     setLoading(true)
     setError('')
     try {

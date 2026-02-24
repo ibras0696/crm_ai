@@ -6,6 +6,9 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 })
 
+let refreshPromise: Promise<void> | null = null
+let authRedirectInProgress = false
+
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -16,14 +19,32 @@ api.interceptors.response.use(
       reqUrl.includes('/auth/register') ||
       reqUrl.includes('/auth/refresh') ||
       reqUrl.includes('/auth/logout')
+    const isBootstrapAuthProbe =
+      reqUrl.includes('/auth/me') ||
+      reqUrl.includes('/orgs/current') ||
+      reqUrl.includes('/orgs/members')
 
-    if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint) {
+    if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint && !isBootstrapAuthProbe) {
       originalRequest._retry = true
       try {
-        await axios.post('/api/v1/auth/refresh', {}, { withCredentials: true })
+        if (!refreshPromise) {
+          refreshPromise = axios
+            .post('/api/v1/auth/refresh', {}, { withCredentials: true })
+            .then(() => undefined)
+            .finally(() => {
+              refreshPromise = null
+            })
+        }
+        await refreshPromise
         return api(originalRequest)
       } catch {
-        window.location.href = '/login'
+        refreshPromise = null
+        const path = window.location.pathname
+        const isAuthPage = path.startsWith('/login') || path.startsWith('/register')
+        if (!isAuthPage && !authRedirectInProgress) {
+          authRedirectInProgress = true
+          window.location.href = '/login'
+        }
       }
     }
     return Promise.reject(error)

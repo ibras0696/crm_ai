@@ -84,6 +84,12 @@ async def test_login_wrong_password(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_login_short_password_validation(client: AsyncClient):
+    resp = await client.post("/api/v1/auth/login", json={"email": "short@example.com", "password": "1234567"})
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_me_endpoint(client: AsyncClient):
     email = f"me-{uuid.uuid4().hex[:8]}@example.com"
     reg = await client.post(
@@ -155,4 +161,3 @@ async def test_logout(client: AsyncClient):
     # Refresh should fail after logout.
     resp2 = await client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_tok})
     assert resp2.status_code == 401
-

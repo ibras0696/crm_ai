@@ -1,4 +1,5 @@
 export const SA_SELECTED_ORG_KEY = 'sa_selected_org_id'
+export const SA_SIDEBAR_COLLAPSED_KEY = 'sa_sidebar_collapsed'
 
 export const PLAN_LABELS: Record<string, string> = {
   free: 'Бесплатный',

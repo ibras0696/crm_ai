@@ -64,3 +64,9 @@ async def test_superadmin_login_and_overview(client, monkeypatch, random_email):
     assert data["dashboard"]["totals"]["orgs"] >= 1
     assert data["dashboard"]["totals"]["users"] >= 1
     assert isinstance(data["orgs"], list)
+
+
+@pytest.mark.asyncio
+async def test_superadmin_login_short_password_validation(client):
+    r = await client.post("/api/v1/superadmin/login", json={"email": "admin", "password": "1234567"})
+    assert r.status_code == 422

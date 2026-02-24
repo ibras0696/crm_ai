@@ -10,6 +10,9 @@ import { Loader2, ArrowRight, Building2 } from 'lucide-react'
 const AUTH_ERRORS_RU: Record<string, string> = {
   CONFLICT: 'Аккаунт с таким email уже существует',
   VALIDATION_ERROR: 'Ошибка валидации данных',
+  RATE_LIMITED: 'Слишком много попыток. Подождите минуту и попробуйте снова.',
+  NETWORK_ERROR: 'Нет соединения с сервером. Проверьте сеть.',
+  SERVER_ERROR: 'Сервис временно недоступен. Попробуйте позже.',
 }
 
 type FormFields = { email: string; password: string; first_name: string; last_name: string; org_name: string }

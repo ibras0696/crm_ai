@@ -11,6 +11,10 @@ const AUTH_ERRORS_RU: Record<string, string> = {
   UNAUTHORIZED: 'Неверный email или пароль',
   NOT_FOUND: 'Аккаунт не найден',
   FORBIDDEN: 'Аккаунт деактивирован',
+  RATE_LIMITED: 'Слишком много попыток. Подождите минуту и попробуйте снова.',
+  VALIDATION_ERROR: 'Проверьте корректность введенных данных.',
+  NETWORK_ERROR: 'Нет соединения с сервером. Проверьте сеть.',
+  SERVER_ERROR: 'Сервис временно недоступен. Попробуйте позже.',
 }
 
 type FieldErrors = { email?: string; password?: string }
@@ -35,6 +39,8 @@ export default function LoginPage() {
     }
     if (!password) {
       errs.password = 'Введите пароль'
+    } else if (password.length < 8) {
+      errs.password = 'Пароль должен быть не менее 8 символов'
     }
     setFieldErrors(errs)
     return Object.keys(errs).length === 0
@@ -152,7 +158,7 @@ export default function LoginPage() {
               <Input
                 id="password"
                 type="password"
-                placeholder="Введите пароль"
+                placeholder="Минимум 8 символов"
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); clearFieldError('password') }}
                 className={`h-11 bg-secondary/50 ${fieldErrors.password ? 'border-red-500 focus-visible:ring-red-500' : ''}`}

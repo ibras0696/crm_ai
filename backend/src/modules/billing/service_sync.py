@@ -42,9 +42,18 @@ class BillingServiceSync:
         }
 
         subscriptions = list(self.session.execute(select(Subscription)).scalars().all())
+        org_ids = [sub.org_id for sub in subscriptions]
+        org_map: dict[uuid.UUID, Organization] = {}
+        if org_ids:
+            org_rows = list(
+                self.session.execute(
+                    select(Organization).where(Organization.id.in_(org_ids)),
+                ).scalars().all(),
+            )
+            org_map = {org.id: org for org in org_rows}
 
         for sub in subscriptions:
-            org = self.session.execute(select(Organization).where(Organization.id == sub.org_id)).scalar_one_or_none()
+            org = org_map.get(sub.org_id)
             if org is None or sub.current_period_end is None:
                 continue
 

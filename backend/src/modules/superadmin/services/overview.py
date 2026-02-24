@@ -13,7 +13,7 @@ from src.modules.auth.models import User
 from src.modules.billing.models import Plan
 from src.modules.files.models import File
 from src.modules.org.models import Membership, Organization
-from src.modules.tables.models import Table
+from src.modules.tables.models import Column, Table
 from src.modules.tables.records import Record
 
 
@@ -723,23 +723,43 @@ class SuperadminOverviewService:
 
     async def list_tables(self, limit: int, offset: int) -> list[dict]:
         async with UnitOfWork() as uow:
-            stmt = select(Table).order_by(Table.created_at.desc()).limit(limit).offset(offset)
-            tables = list((await uow.session.execute(stmt)).scalars().all())
+            col_sq = (
+                select(Column.table_id.label("table_id"), func.count().label("columns"))
+                .group_by(Column.table_id)
+                .subquery()
+            )
+            rec_sq = (
+                select(Record.table_id.label("table_id"), func.count().label("records"))
+                .group_by(Record.table_id)
+                .subquery()
+            )
+            stmt = (
+                select(
+                    Table.id,
+                    Table.name,
+                    Table.org_id,
+                    Table.created_at,
+                    func.coalesce(col_sq.c.columns, 0).label("columns"),
+                    func.coalesce(rec_sq.c.records, 0).label("records"),
+                )
+                .select_from(Table)
+                .outerjoin(col_sq, col_sq.c.table_id == Table.id)
+                .outerjoin(rec_sq, rec_sq.c.table_id == Table.id)
+                .order_by(Table.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+            rows = (await uow.session.execute(stmt)).all()
             result: list[dict] = []
-            for table in tables:
-                rec_cnt = (
-                    await uow.session.execute(
-                        select(func.count()).select_from(Record).where(Record.table_id == table.id),
-                    )
-                ).scalar() or 0
+            for row in rows:
                 result.append(
                     {
-                        "id": str(table.id),
-                        "name": table.name,
-                        "org_id": str(table.org_id),
-                        "columns": len(table.columns) if table.columns else 0,
-                        "records": rec_cnt,
-                        "created_at": table.created_at.isoformat() if table.created_at else None,
+                        "id": str(row.id),
+                        "name": row.name,
+                        "org_id": str(row.org_id),
+                        "columns": _safe_int(row.columns),
+                        "records": _safe_int(row.records),
+                        "created_at": row.created_at.isoformat() if row.created_at else None,
                     },
                 )
         return result

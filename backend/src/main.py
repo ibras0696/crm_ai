@@ -3,16 +3,18 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from src.common.exceptions import AppError
+from src.common.exceptions import BaseAppError
 from src.config import settings
 from src.infrastructure.logging import setup_logging
 from src.infrastructure.metrics import setup_metrics
 from src.infrastructure.redis_client import RedisClient, ping_with_timeout
 from src.middleware.correlation import CorrelationIdMiddleware
-from src.middleware.error_handler import app_error_handler, generic_error_handler
+from src.middleware.error_handler import app_error_handler, generic_error_handler, http_error_handler, validation_error_handler
 from src.middleware.request_size_limit import RequestSizeLimitMiddleware
 
 setup_logging(debug=settings.DEBUG)
@@ -84,7 +86,9 @@ def create_app() -> FastAPI:
         application.add_middleware(RateLimitMiddleware, requests_per_minute=rpm)
 
     # Error handlers
-    application.add_exception_handler(AppError, app_error_handler)
+    application.add_exception_handler(BaseAppError, app_error_handler)
+    application.add_exception_handler(RequestValidationError, validation_error_handler)
+    application.add_exception_handler(StarletteHTTPException, http_error_handler)
     application.add_exception_handler(Exception, generic_error_handler)
 
     from src.router import router as api_router

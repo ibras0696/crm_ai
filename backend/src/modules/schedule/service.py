@@ -7,16 +7,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.enums import NotificationStatus, NotificationType
 from src.modules.notifications.models import Notification
+from src.modules.schedule.errors import ScheduleModuleError
 from src.modules.schedule.models import Event
 from src.modules.schedule.repository import ScheduleRepository
 from src.modules.schedule.schemas import CreateEventRequest, UpdateEventRequest
 
 
-class ScheduleServiceError(Exception):
+class ScheduleServiceError(ScheduleModuleError):
     def __init__(self, *, code: str, message: str):
-        super().__init__(message)
-        self.code = code
-        self.message = message
+        super().__init__(code=code, message=message, status_code=422)
 
 
 class ScheduleService:

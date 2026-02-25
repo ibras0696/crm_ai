@@ -319,6 +319,13 @@ class AIRepository:
             )
         ).scalars().all()
 
+    async def get_kb_page_for_org(self, *, org_id: uuid.UUID, page_id: uuid.UUID) -> KBPage | None:
+        return (
+            await self.session.execute(
+                select(KBPage).where(KBPage.org_id == org_id, KBPage.id == page_id).limit(1)
+            )
+        ).scalars().first()
+
     async def list_tables_with_columns(self, *, org_id: uuid.UUID, limit: int = 200) -> list[Table]:
         """Получить таблицы организации вместе с колонками.
 

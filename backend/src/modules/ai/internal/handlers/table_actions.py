@@ -33,14 +33,46 @@ def _resolve_row_key_to_column_id(row_key: Any, columns: list[Column]) -> str | 
 def _extract_rows_payload(action_payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Извлечь список строк/records из payload действия."""
     source = action_payload.get("records")
-    if not isinstance(source, list):
+    if isinstance(source, dict):
+        columns_raw = source.get("columns")
+        rows_raw = source.get("rows")
+        if isinstance(columns_raw, list) and isinstance(rows_raw, list):
+            columns = [str(c).strip() for c in columns_raw if str(c).strip()]
+            out: list[dict[str, Any]] = []
+            if not columns:
+                return out
+            for row in rows_raw[:2000]:
+                if isinstance(row, list):
+                    rec: dict[str, Any] = {}
+                    for idx, val in enumerate(row[: len(columns)]):
+                        rec[columns[idx]] = val
+                    if rec:
+                        out.append(rec)
+                elif isinstance(row, dict):
+                    out.append(row)
+            return out
+
+    if source is None:
         source = action_payload.get("rows")
-    if not isinstance(source, list):
+    if source is None:
         source = action_payload.get("data_rows")
+    if source is None:
+        columns_raw = action_payload.get("records_columns")
+        rows_raw = action_payload.get("records_rows")
+        if isinstance(columns_raw, list) and isinstance(rows_raw, list):
+            source = {"columns": columns_raw, "rows": rows_raw}
+            action_payload = {**action_payload, "records": source}
+            return _extract_rows_payload(action_payload)
+        source = action_payload.get("records_compact")
+        if isinstance(source, dict):
+            action_payload = {**action_payload, "records": source}
+            return _extract_rows_payload(action_payload)
+
     if not isinstance(source, list):
         return []
+
     out: list[dict[str, Any]] = []
-    for item in source[:200]:
+    for item in source[:2000]:
         if isinstance(item, dict):
             out.append(item)
     return out
@@ -159,7 +191,7 @@ async def _create_records_for_table(
 
     await repo.lock_table(table_id=table_obj.id)
 
-    max_rows = 20
+    max_rows = 1000
     ignored += max(0, len(rows_payload) - max_rows)
     rows_payload = rows_payload[:max_rows]
 

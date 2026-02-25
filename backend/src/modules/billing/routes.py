@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -116,7 +117,7 @@ async def yookassa_webhook(request: Request):
         body = await request.json()
         await _billing_service.handle_yookassa_webhook(body)
         return {"status": "ok"}
-    except Exception as exc:
+    except (ValueError, json.JSONDecodeError) as exc:
         logger.error("Webhook error: %s", exc)
         raise HTTPException(status_code=400, detail="Invalid webhook payload") from exc
 

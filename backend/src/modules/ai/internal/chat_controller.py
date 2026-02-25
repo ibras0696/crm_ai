@@ -13,8 +13,9 @@ from __future__ import annotations
 """
 
 import logging
-import re
 import uuid
+import json
+import re
 
 import httpx
 from src.common.enums import UserRole
@@ -22,6 +23,7 @@ from src.common.schemas import ApiResponse
 from src.config import settings
 from src.infrastructure.metrics_custom import AI_LIMIT_REJECTIONS_TOTAL, AI_REQUESTS_TOTAL, AI_TOKENS_TOTAL
 from src.infrastructure.uow import UnitOfWork
+from src.modules.ai.errors import AIModuleError
 from src.modules.ai.internal.repository import AIRepository
 from src.modules.ai.intent_overrides import apply_ui_intent_overrides
 from src.modules.ai.limits import check_ai_limits, is_org_ai_enabled
@@ -32,6 +34,7 @@ from src.modules.ai.service import (
     build_messages,
     build_org_context_for_user,
     call_openai_compatible_api,
+    call_timeweb_native_api,
     estimate_tokens,
     extract_action_payload,
     get_or_create_session,
@@ -41,6 +44,7 @@ from src.modules.ai.service import (
     handle_create_records_action,
     handle_create_schedule_event_action,
     handle_create_table_action,
+    resolve_timeweb_agent_id,
 )
 from src.modules.auth.dependencies import CurrentUser
 
@@ -66,42 +70,6 @@ ACTION_ALLOWED_ROLES = {
     "create_schedule_event": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.EMPLOYEE.value},
     "create_kb_page": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value},
 }
-
-INTENT_TO_ACTION = {
-    "create_dashboard": "create_dashboard",
-    "create_table": "create_table",
-    "create_schedule_event": "create_schedule_event",
-    "create_kb_page": "create_kb_page",
-}
-
-
-def _is_explicit_action_request(action_name: str, user_message: str, ui_intent: str | None) -> bool:
-    if ui_intent and INTENT_TO_ACTION.get(str(ui_intent).strip()) == action_name:
-        return True
-
-    text = (user_message or "").strip().lower()
-    if not text:
-        return False
-
-    verbs = [
-        "созд", "сдела", "добав", "запол", "собер", "постро", "сформ", "назнач", "заплан",
-        "create", "add", "build", "fill", "insert", "schedule",
-    ]
-    has_verb = any(v in text for v in verbs)
-    if not has_verb:
-        return False
-
-    domain_keywords = {
-        "create_dashboard": ["дашборд", "отчет", "отчёт", "график", "виджет", "аналит"],
-        "create_table": ["таблиц", "таблица", "колонк", "поле", "структур", "table", "schema"],
-        "create_columns": ["колонк", "поле", "столб", "column", "field"],
-        "create_records": ["запис", "строк", "данн", "заполни таблиц", "добавь в таблиц", "record", "row"],
-        "create_schedule_event": ["расписан", "событ", "встреч", "календар", "schedule", "event", "meeting", "calendar"],
-        "create_kb_page": ["база знан", "knowledge", "wiki", "страниц"],
-    }
-    keys = domain_keywords.get(action_name, [])
-    return any(k in text for k in keys)
-
 
 def _record_metric(status: str, tokens: int | None = None) -> None:
     """Безопасно записать метрики AI-запроса.
@@ -172,6 +140,16 @@ def _extract_provider_reply(data: dict) -> str:
     Raises:
         ValueError: Если структура ответа некорректная или пустая.
     """
+    if isinstance(data.get("message"), str) and data.get("message"):
+        return str(data.get("message"))
+    nested = data.get("data")
+    if isinstance(nested, dict):
+        if isinstance(nested.get("message"), str) and nested.get("message"):
+            return str(nested.get("message"))
+        response = nested.get("response")
+        if isinstance(response, dict) and isinstance(response.get("message"), str) and response.get("message"):
+            return str(response.get("message"))
+
     choices = data.get("choices")
     if not isinstance(choices, list) or not choices:
         raise ValueError("AI_EMPTY_CHOICES")
@@ -185,6 +163,27 @@ def _extract_provider_reply(data: dict) -> str:
     if content is None:
         raise ValueError("AI_EMPTY_REPLY")
     return str(content)
+
+
+def _extract_provider_message_id(data: dict) -> str | None:
+    """Извлечь идентификатор сообщения провайдера (для parent_message_id)."""
+    for key in ("id", "message_id", "response_id"):
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    nested = data.get("data")
+    if isinstance(nested, dict):
+        for key in ("id", "message_id", "response_id"):
+            value = nested.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        response = nested.get("response")
+        if isinstance(response, dict):
+            for key in ("id", "message_id", "response_id"):
+                value = response.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+    return None
 
 
 def _estimate_prompt_tokens(messages: list[dict]) -> int:
@@ -201,6 +200,181 @@ def _estimate_prompt_tokens(messages: list[dict]) -> int:
         tokens += estimate_tokens(str(msg.get("content") or ""))
     # Небольшой оверхед на структуру chat-messages.
     return int(tokens + max(0, len(messages) * 4))
+
+
+def _build_native_provider_message(
+    *,
+    messages: list[dict[str, str]],
+    user_message: str,
+    has_parent: bool,
+) -> str:
+    """Собрать текст для нативного Timeweb /call.
+
+    Для первого сообщения отправляем полный инструктивный контекст.
+    Для продолжения цепочки отправляем только user message.
+    """
+    if has_parent:
+        return user_message
+    chunks: list[str] = []
+    for msg in messages:
+        role = str(msg.get("role") or "").strip().upper() or "MSG"
+        content = str(msg.get("content") or "").strip()
+        if not content:
+            continue
+        chunks.append(f"{role}:\n{content}")
+    return "\n\n".join(chunks) if chunks else user_message
+
+
+def _looks_like_table_create_request(text: str) -> bool:
+    t = (text or "").lower()
+    return ("созд" in t and "таблиц" in t) or ("create" in t and "table" in t)
+
+
+def _extract_requested_record_count(text: str) -> int | None:
+    t = (text or "").lower()
+    patterns = [
+        r"(\d{1,5})\s*(?:запис(?:ей|и|ь)|строк(?:и)?|слов(?:а)?)",
+        r"(?:на|с)\s*(\d{1,5})\s*(?:запис(?:ей|и|ь)|строк(?:и)?|слов(?:а)?)",
+    ]
+    for p in patterns:
+        m = re.search(p, t)
+        if m:
+            try:
+                n = int(m.group(1))
+                if 1 <= n <= 5000:
+                    return n
+            except Exception:
+                return None
+    return None
+
+
+def _looks_like_broken_action(reply_raw: str) -> bool:
+    text = (reply_raw or "").lower()
+    return ("action" in text and "{" in text) or "crm_action" in text
+
+
+def _claims_action_completed(reply_text: str) -> bool:
+    text = (reply_text or "").lower()
+    markers = [
+        "создал",
+        "создала",
+        "создана таблица",
+        "добавил",
+        "добавила",
+        "заполнил",
+        "заполнила",
+        "выполнил",
+        "готово, создано",
+    ]
+    return any(m in text for m in markers)
+
+
+async def _repair_action_payload_with_model(
+    *,
+    base_url: str,
+    bearer_token: str,
+    model: str,
+    broken_reply: str,
+) -> dict | None:
+    """Попробовать восстановить валидный action JSON из битого ответа модели."""
+    repair_messages = [
+        {
+            "role": "system",
+            "content": (
+                "Ты валидатор JSON-действий CRM. "
+                "Верни только один валидный JSON-объект действия. "
+                "Без комментариев, без markdown, без лишнего текста."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "Преобразуй это в валидный JSON действия. "
+                "Если действия нет или нельзя восстановить, верни {}.\n\n"
+                f"{broken_reply}"
+            ),
+        },
+    ]
+    try:
+        data = await call_openai_compatible_api(
+            base_url,
+            bearer_token,
+            model,
+            repair_messages,
+            max_tokens=1200,
+            temperature=0,
+        )
+        raw = _extract_provider_reply(data).strip()
+        if not raw:
+            return None
+        try:
+            obj = json.loads(raw)
+            if isinstance(obj, dict) and str(obj.get("action") or "").strip():
+                return obj
+            return None
+        except Exception:
+            payload, _ = extract_action_payload(raw)
+            if isinstance(payload, dict) and str(payload.get("action") or "").strip():
+                return payload
+            return None
+    except Exception:
+        return None
+
+
+async def _synthesize_missing_action_with_model(
+    *,
+    base_url: str,
+    bearer_token: str,
+    model: str,
+    user_message: str,
+    assistant_reply: str,
+) -> dict | None:
+    """Если модель не отдала crm_action, попросить ее вернуть только action-JSON или {}."""
+    synth_messages = [
+        {
+            "role": "system",
+            "content": (
+                "Ты арбитр действий CRM. "
+                "Проанализируй сообщение пользователя и ответ ассистента. "
+                "Если действительно нужно выполнить действие CRM (создать/изменить сущность), "
+                "верни ОДИН валидный JSON-объект действия с полем action. "
+                "Если действия не требуется, верни пустой объект {}. "
+                "Никакого markdown и пояснений."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"Сообщение пользователя:\n{user_message}\n\n"
+                f"Ответ ассистента:\n{assistant_reply}\n\n"
+                "Верни только JSON."
+            ),
+        },
+    ]
+    try:
+        data = await call_openai_compatible_api(
+            base_url,
+            bearer_token,
+            model,
+            synth_messages,
+            max_tokens=1400,
+            temperature=0,
+        )
+        raw = _extract_provider_reply(data).strip()
+        if not raw:
+            return None
+        try:
+            obj = json.loads(raw)
+            if isinstance(obj, dict) and str(obj.get("action") or "").strip():
+                return obj
+            return None
+        except Exception:
+            payload, _ = extract_action_payload(raw)
+            if isinstance(payload, dict) and str(payload.get("action") or "").strip():
+                return payload
+            return None
+    except Exception:
+        return None
 
 
 async def _load_action_limits(uow: UnitOfWork, *, org_id: uuid.UUID) -> dict[str, int]:
@@ -268,9 +442,6 @@ async def _execute_action(
     current_user: CurrentUser,
     action_payload: dict,
     user_message: str,
-    ui_intent: str | None = None,
-    force_explicit: bool = False,
-    strict_actions: bool = True,
 ) -> dict | None:
     """Выполнить распознанное действие (crm_action) в рамках UnitOfWork.
 
@@ -287,13 +458,6 @@ async def _execute_action(
     handler = ACTION_HANDLERS.get(action_name)
     if handler is None:
         return None
-    if strict_actions and not force_explicit and not _is_explicit_action_request(action_name, user_message, ui_intent):
-        return {
-            "action": action_name,
-            "ok": False,
-            "error": "action_not_requested",
-            "message": "Действие не выполнено: нет явного запроса пользователя.",
-        }
     allowed_roles = ACTION_ALLOWED_ROLES.get(action_name, set())
     if current_user.role not in allowed_roles:
         return {
@@ -354,10 +518,11 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
         (runtime.max_tokens_per_request if runtime and runtime.max_tokens_per_request else settings.AI_MAX_TOKENS_PER_REQUEST) or 2000
     )
     effective_temperature = float(runtime.temperature if runtime else 0.3)
-    strict_actions = bool(runtime.strict_actions if runtime else True)
 
     # Этап 2: подготовка system_prompt (UI intent = подсказка, не приказ).
     system_prompt = body.system_prompt or effective_system_prompt
+    requested_records_target = _extract_requested_record_count(body.message)
+    is_table_create_request = _looks_like_table_create_request(body.message)
     if body.ui_intent:
         intent = str(body.ui_intent).strip()
         params = body.ui_intent_params if isinstance(body.ui_intent_params, dict) else {}
@@ -380,6 +545,13 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
             if limit_error is not None:
                 return ApiResponse(ok=False, data=None, error=limit_error)
             system_prompt += _build_limits_hint(intent, action_limits)
+    if requested_records_target and is_table_create_request:
+        system_prompt += (
+            "\n\nСтрогое правило для текущего запроса:\n"
+            + f"- Пользователь запросил {requested_records_target} записей.\n"
+            + "- Нужно сформировать action create_table/create_records с этим количеством записей (если лимиты тарифа позволяют).\n"
+            + "- Не дели на порции и не предлагай 'продолжай'.\n"
+        )
     context_options = body.context_options or {}
     request_id = (body.request_id or "").strip() or None
 
@@ -406,8 +578,12 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
 
     # Этап 5: предварительная оценка токенов и проверка лимитов.
     max_tokens_per_request = int(effective_max_tokens_per_request)
+    provider_max_tokens = max_tokens_per_request
+    if requested_records_target and is_table_create_request:
+        desired = 1200 + int(requested_records_target * 35)
+        provider_max_tokens = max(max_tokens_per_request, min(12000, desired))
     estimated_prompt_tokens = estimate_tokens(body.message) + estimate_tokens(org_context) + 280
-    estimated_request_tokens = int(estimated_prompt_tokens + max_tokens_per_request)
+    estimated_request_tokens = int(estimated_prompt_tokens + provider_max_tokens)
     async with UnitOfWork() as uow:
         ok, err = await check_ai_limits(
             uow.session,
@@ -423,6 +599,20 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
     # Этап 6: сбор сообщений для провайдера.
     history_rows = _sanitize_client_history(body.history)
     messages = build_messages(system_prompt, org_context, db_messages, history_rows, body.message)
+    use_timeweb_native = (
+        str(getattr(settings, "AI_PROVIDER_MODE", "openai_compatible")).strip().lower() == "timeweb_native"
+        and resolve_timeweb_agent_id(settings.AI_BASE_URL) is not None
+    )
+    provider_parent_message_id: str | None = None
+    if use_timeweb_native:
+        for msg in reversed(db_messages):
+            if msg.role != "assistant":
+                continue
+            meta = msg.meta or {}
+            provider_id = meta.get("provider_message_id") if isinstance(meta, dict) else None
+            if isinstance(provider_id, str) and provider_id.strip():
+                provider_parent_message_id = provider_id.strip()
+                break
 
     # Этап 7: поддержка "прямых команд" (когда пользователь сам прислал crm_action).
     direct_action_payload, cleaned_direct_reply = extract_action_payload(body.message)
@@ -433,9 +623,6 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 current_user,
                 direct_action_payload,
                 body.message,
-                ui_intent=body.ui_intent,
-                force_explicit=True,
-                strict_actions=strict_actions,
             )
 
             user_msg = AIChatMessage(
@@ -474,20 +661,75 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
 
     # Этап 8: вызов провайдера, парсинг ответа и запись в БД.
     try:
-        data = await call_openai_compatible_api(
-            settings.AI_BASE_URL,
-            bearer_token,
-            effective_model,
-            messages,
-            max_tokens=max_tokens_per_request,
-            temperature=effective_temperature,
-        )
+        if use_timeweb_native:
+            provider_message = _build_native_provider_message(
+                messages=messages,
+                user_message=body.message,
+                has_parent=provider_parent_message_id is not None,
+            )
+            data = await call_timeweb_native_api(
+                base_url=settings.AI_BASE_URL,
+                bearer_token=bearer_token,
+                message=provider_message,
+                parent_message_id=provider_parent_message_id,
+            )
+        else:
+            data = await call_openai_compatible_api(
+                settings.AI_BASE_URL,
+                bearer_token,
+                effective_model,
+                messages,
+                max_tokens=provider_max_tokens,
+                temperature=effective_temperature,
+            )
         reply_raw = _extract_provider_reply(data)
+        provider_message_id = _extract_provider_message_id(data)
         action_payload, reply = extract_action_payload(reply_raw)
+        if action_payload is None and _looks_like_broken_action(reply_raw):
+            repaired_payload = await _repair_action_payload_with_model(
+                base_url=settings.AI_BASE_URL,
+                bearer_token=bearer_token,
+                model=effective_model,
+                broken_reply=reply_raw,
+            )
+            if repaired_payload is not None:
+                action_payload = repaired_payload
+                if not reply.strip():
+                    reply = "Готово, выполняю."
+        if action_payload is None:
+            synthesized_payload = await _synthesize_missing_action_with_model(
+                base_url=settings.AI_BASE_URL,
+                bearer_token=bearer_token,
+                model=effective_model,
+                user_message=body.message,
+                assistant_reply=reply,
+            )
+            if synthesized_payload is not None:
+                action_payload = synthesized_payload
+                if not reply.strip():
+                    reply = "Готово, выполняю."
+        if action_payload is None and _claims_action_completed(reply):
+            reply = (
+                "Действие не выполнено: модель не сформировала структурированную команду для системы. "
+                "Повторите запрос в формате: «создай таблицу ... и добавь N записей»."
+            )
         action_payload = apply_ui_intent_overrides(action_payload, body.ui_intent, body.ui_intent_params)
         usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
+        if use_timeweb_native and provider_parent_message_id is not None:
+            prompt_tokens_est = int(estimate_tokens(body.message) + 20)
+            completion_tokens_est = int(estimate_tokens(reply_raw))
+            usage = {
+                "prompt_tokens": prompt_tokens_est,
+                "completion_tokens": completion_tokens_est,
+                "total_tokens": prompt_tokens_est + completion_tokens_est,
+                "estimated": True,
+                "estimation_mode": "native_followup_message_only",
+            }
         if not usage or not int(usage.get("total_tokens", 0) or 0):
-            prompt_tokens_est = _estimate_prompt_tokens(messages)
+            if use_timeweb_native and provider_parent_message_id is not None:
+                prompt_tokens_est = int(estimate_tokens(body.message) + 20)
+            else:
+                prompt_tokens_est = _estimate_prompt_tokens(messages)
             completion_tokens_est = int(estimate_tokens(reply_raw))
             usage = {
                 "prompt_tokens": prompt_tokens_est,
@@ -535,7 +777,12 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 role="assistant",
                 content=reply,
                 token_count=usage_total,
-                meta={"action_requested": bool(action_payload)},
+                meta={
+                    "action_requested": bool(action_payload),
+                    "provider_message_id": provider_message_id,
+                    "provider_parent_message_id": provider_parent_message_id,
+                    "provider_mode": "timeweb_native_call" if use_timeweb_native else "openai_compatible",
+                },
             )
             uow.session.add(user_msg)
             uow.session.add(assistant_msg)
@@ -558,9 +805,6 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                     current_user,
                     action_payload,
                     body.message,
-                    ui_intent=body.ui_intent,
-                    force_explicit=False,
-                    strict_actions=strict_actions,
                 )
                 if action_result is not None:
                     assistant_msg.meta = {"action_requested": True, "action_result": action_result}
@@ -594,6 +838,20 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
             data=None,
             error={"code": "AI_BAD_PROVIDER_RESPONSE", "message": "AI provider returned an invalid response format."},
         )
+    except httpx.TimeoutException:
+        _record_metric("error")
+        return ApiResponse(
+            ok=False,
+            data=None,
+            error={"code": "AI_PROVIDER_TIMEOUT", "message": "AI provider timeout. Please try again later."},
+        )
+    except httpx.RequestError:
+        _record_metric("error")
+        return ApiResponse(
+            ok=False,
+            data=None,
+            error={"code": "AI_PROVIDER_UNAVAILABLE", "message": "AI provider unavailable. Please try again later."},
+        )
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
             _record_metric("unauthorized")
@@ -611,10 +869,7 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
             data=None,
             error={"code": "AI_ERROR", "message": "AI provider error. Please try again later."},
         )
-    except Exception:
+    except Exception as exc:
         _record_metric("error")
-        return ApiResponse(
-            ok=False,
-            data=None,
-            error={"code": "AI_ERROR", "message": "AI service internal error. Please try again later."},
-        )
+        logger.exception("ai_chat_unexpected_error", exc_info=exc)
+        raise AIModuleError.internal() from exc

@@ -116,30 +116,34 @@ export default function KbPageTreeSelect({
 
   return (
     <div className="space-y-2">
-      <div className="h-9 rounded-lg border border-border bg-card/70 flex items-center gap-2 px-2">
-        <Search className="h-4 w-4 text-muted-foreground shrink-0" />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder="Поиск страниц"
-          className="flex-1 bg-transparent outline-none text-sm"
-        />
-        <button
-          type="button"
-          onClick={() => onSelectedIdsChange(pages.map(p => p.id))}
-          className="text-xs h-7 px-2 rounded-md border border-border hover:bg-secondary"
-          disabled={disabled}
-        >
-          Все
-        </button>
-        <button
-          type="button"
-          onClick={() => onSelectedIdsChange([])}
-          className="text-xs h-7 px-2 rounded-md border border-border hover:bg-secondary"
-          disabled={disabled}
-        >
-          Снять
-        </button>
+      <div className="rounded-lg border border-border bg-card/70 p-2 space-y-2">
+        <div className="h-9 flex items-center gap-2">
+          <Search className="h-4 w-4 text-muted-foreground shrink-0" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Поиск страниц"
+            className="min-w-0 flex-1 bg-transparent outline-none text-sm"
+          />
+        </div>
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => onSelectedIdsChange(pages.map(p => p.id))}
+            className="text-xs h-7 px-2 rounded-md border border-border hover:bg-secondary whitespace-nowrap"
+            disabled={disabled}
+          >
+            Все
+          </button>
+          <button
+            type="button"
+            onClick={() => onSelectedIdsChange([])}
+            className="text-xs h-7 px-2 rounded-md border border-border hover:bg-secondary whitespace-nowrap"
+            disabled={disabled}
+          >
+            Снять
+          </button>
+        </div>
       </div>
 
       <div className={`${heightClassName} overflow-auto rounded-lg border border-border bg-background/30 p-2 space-y-1`}>
@@ -152,4 +156,3 @@ export default function KbPageTreeSelect({
     </div>
   )
 }
-

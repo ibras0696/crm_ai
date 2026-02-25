@@ -23,6 +23,7 @@ import {
   Plus,
   RefreshCw,
   Settings2,
+  Sparkles,
   Table2,
   Trash2,
 } from 'lucide-react'
@@ -55,6 +56,43 @@ const WIDGET_PRESETS: Array<{
   { kind: 'pie', title: 'Круговая', description: 'Доли по категориям', icon: PieChart },
   { kind: 'donut', title: 'Кольцевая', description: 'Доли в компактном виде', icon: Donut },
   { kind: 'table', title: 'Таблица', description: 'Список строк', icon: Table2 },
+]
+
+const SIMPLE_GOALS: Array<{
+  id: string
+  title: string
+  description: string
+  kind: WidgetKind
+  aiPrompt: string
+}> = [
+  {
+    id: 'overview',
+    title: 'Общая картина',
+    description: 'Показать главное число и общее состояние',
+    kind: 'metric',
+    aiPrompt: 'Сделай простой обзорный дашборд с главным показателем и короткой расшифровкой.',
+  },
+  {
+    id: 'compare',
+    title: 'Сравнение',
+    description: 'Сравнить категории между собой',
+    kind: 'bar',
+    aiPrompt: 'Собери дашборд для сравнения категорий и выведи понятные выводы.',
+  },
+  {
+    id: 'trend',
+    title: 'Динамика',
+    description: 'Показать изменения по времени',
+    kind: 'line',
+    aiPrompt: 'Собери дашборд с динамикой по времени, чтобы видеть рост и падение.',
+  },
+  {
+    id: 'share',
+    title: 'Доли',
+    description: 'Показать, что занимает больше всего',
+    kind: 'pie',
+    aiPrompt: 'Сделай дашборд с долями категорий и выдели лидеров.',
+  },
 ]
 
 function buildConfigForWidget(kind: WidgetKind, table: TableInfo | null): DashboardWidgetConfig {
@@ -124,6 +162,7 @@ export default function ReportsPage() {
   const [isAiTableModalOpen, setIsAiTableModalOpen] = useState(false)
   const [aiSelectedTableIds, setAiSelectedTableIds] = useState<string[]>([])
   const [dashboardToDelete, setDashboardToDelete] = useState<DashboardInfo | null>(null)
+  const [uiMode, setUiMode] = useState<'simple' | 'advanced'>('simple')
 
   const selectedDashboard = useMemo(
     () => dashboards.find(d => d.id === selectedDashboardId) ?? null,
@@ -420,6 +459,16 @@ export default function ReportsPage() {
     }
   }
 
+  const createSimpleWidget = async (goal: (typeof SIMPLE_GOALS)[number]) => {
+    await createWidget(goal.kind)
+  }
+
+  const createSimpleByAI = async (goal: (typeof SIMPLE_GOALS)[number]) => {
+    const scoped = selectedTableIdForCreate ? [selectedTableIdForCreate] : aiSelectedTableIds
+    setAiPrompt(goal.aiPrompt)
+    await createDashboardByAI(scoped)
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -433,18 +482,168 @@ export default function ReportsPage() {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold">Конструктор дашбордов</h1>
-          <p className="text-sm text-muted-foreground">Собери понятные графики и таблицы по своим данным</p>
+          <p className="text-sm text-muted-foreground">Понятная сборка графиков и отчетов без сложных настроек</p>
         </div>
-        <button
-          onClick={refresh}
-          disabled={refreshing || busy}
-          className="h-9 px-3 rounded-lg border border-border text-sm hover:bg-secondary flex items-center gap-1.5 disabled:opacity-50"
-        >
-          <RefreshCw className={`h-4 w-4 ${(refreshing || busy) ? 'animate-spin' : ''}`} />
-          Обновить
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="h-9 rounded-lg border border-border bg-card p-0.5 flex items-center">
+            <button
+              onClick={() => setUiMode('simple')}
+              className={`h-8 px-3 rounded-md text-sm ${uiMode === 'simple' ? 'bg-primary text-white' : 'hover:bg-secondary'}`}
+            >
+              Просто
+            </button>
+            <button
+              onClick={() => setUiMode('advanced')}
+              className={`h-8 px-3 rounded-md text-sm ${uiMode === 'advanced' ? 'bg-primary text-white' : 'hover:bg-secondary'}`}
+            >
+              Продвинуто
+            </button>
+          </div>
+          <button
+            onClick={refresh}
+            disabled={refreshing || busy}
+            className="h-9 px-3 rounded-lg border border-border text-sm hover:bg-secondary flex items-center gap-1.5 disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${(refreshing || busy) ? 'animate-spin' : ''}`} />
+            Обновить
+          </button>
+        </div>
       </div>
 
+      {uiMode === 'simple' ? (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-border bg-card p-4">
+            <p className="text-sm font-semibold">Как пользоваться</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              1) Выбери дашборд. 2) Выбери таблицу. 3) Нажми цель. Система сама соберет нужный виджет или дашборд.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Шаг 1. Дашборд</p>
+              <select
+                value={selectedDashboardId}
+                onChange={async (e) => {
+                  const id = e.target.value
+                  setSelectedDashboardId(id)
+                  await loadSelectedData(id)
+                }}
+                className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm"
+              >
+                <option value="">Выбери дашборд</option>
+                {dashboards.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+              <div className="grid grid-cols-[1fr_auto] gap-2">
+                <input
+                  value={newDashName}
+                  onChange={e => setNewDashName(e.target.value)}
+                  className="h-9 px-3 rounded-lg border border-input bg-background text-sm"
+                  placeholder="Название нового дашборда"
+                />
+                <button
+                  onClick={createDashboard}
+                  disabled={busy || !newDashName.trim()}
+                  className="h-9 px-3 rounded-lg border border-border text-sm hover:bg-secondary disabled:opacity-50"
+                >
+                  Создать
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Шаг 2. Таблица</p>
+              <select
+                value={selectedTableIdForCreate}
+                onChange={e => setSelectedTableIdForCreate(e.target.value)}
+                className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm"
+              >
+                <option value="">Выбери таблицу</option>
+                {tables.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Сейчас выбрано: {selectedTableForCreate?.name || '—'}
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Шаг 3. Что строим</p>
+              <div className="space-y-2">
+                {SIMPLE_GOALS.map(goal => (
+                  <div key={goal.id} className="rounded-lg border border-border p-2">
+                    <p className="text-sm font-medium">{goal.title}</p>
+                    <p className="text-xs text-muted-foreground">{goal.description}</p>
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <button
+                        onClick={() => void createSimpleWidget(goal)}
+                        disabled={!selectedDashboardId || busy}
+                        className="h-8 rounded-md border border-border text-xs hover:bg-secondary disabled:opacity-50"
+                      >
+                        Быстро
+                      </button>
+                      <button
+                        onClick={() => void createSimpleByAI(goal)}
+                        disabled={busy || !selectedDashboardId}
+                        className="h-8 rounded-md bg-primary text-white text-xs hover:bg-primary/90 disabled:opacity-50 inline-flex items-center justify-center gap-1"
+                      >
+                        <Sparkles className="h-3.5 w-3.5" />
+                        AI
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {aiError && (
+            <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {aiError}
+            </div>
+          )}
+
+          {!selectedDashboardId || !dashboardData ? (
+            <div className="rounded-xl border border-dashed border-border p-12 text-center text-muted-foreground">
+              Выбери дашборд, чтобы увидеть результат.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="rounded-xl border border-border bg-card p-4 flex items-center justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Текущий дашборд</p>
+                  <h2 className="text-lg font-semibold">{dashboardData.dashboard.name}</h2>
+                </div>
+                <button
+                  onClick={() => setUiMode('advanced')}
+                  className="h-9 px-3 rounded-lg border border-border text-sm hover:bg-secondary"
+                >
+                  Открыть детальные настройки
+                </button>
+              </div>
+              {dashboardData.dashboard.widgets
+                .slice()
+                .sort((a, b) => a.position - b.position)
+                .map(widget => {
+                  const item = itemsByWidgetId.get(widget.id)
+                  return (
+                    <div key={widget.id} className="rounded-xl border border-border bg-card p-3">
+                      <div className="mb-2">
+                        <span className="text-sm font-semibold">{widget.title}</span>
+                      </div>
+                      {item ? (
+                        <ChartCard item={item} />
+                      ) : (
+                        <div className="rounded-lg border border-border p-4 text-sm text-muted-foreground">
+                          Данные виджета не рассчитаны.
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+            </div>
+          )}
+        </div>
+      ) : (
       <div className="grid grid-cols-1 xl:grid-cols-[360px_1fr] gap-4">
         <div className="space-y-4 xl:sticky xl:top-6 h-fit">
           <div className="rounded-xl border border-border bg-card p-3 space-y-3">
@@ -671,6 +870,7 @@ export default function ReportsPage() {
           )}
         </div>
       </div>
+      )}
 
       {dashboardToDelete && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">

@@ -5,10 +5,10 @@ from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
+from src.modules.files.errors import FilesModuleError
 from src.modules.files import storage
 from src.modules.files.models import File
 from src.modules.files.repository import FileRepository
-
 
 ALLOWED_SIGNATURES: dict[str, tuple[bytes, ...]] = {
     "application/pdf": (b"%PDF",),
@@ -32,34 +32,37 @@ class FilesService:
         original_name = (file.filename or "unnamed").strip() or "unnamed"
         allowed = {m.strip().lower() for m in (settings.FILE_ALLOWED_MIME_TYPES or []) if str(m).strip()}
         if allowed and content_type not in allowed:
-            raise ValueError("UNSUPPORTED_MIME")
+            raise FilesModuleError(code="UNSUPPORTED_MIME", message="Недопустимый тип файла.")
 
         max_bytes = int(max(1, int(settings.FILE_MAX_UPLOAD_MB)) * 1024 * 1024)
         chunk_size = int(max(16 * 1024, int(settings.FILE_UPLOAD_CHUNK_SIZE_KB) * 1024))
         total_size = 0
         first_bytes = b""
-        tmp = SpooledTemporaryFile(max_size=min(max_bytes, 8 * 1024 * 1024), mode="w+b")
         try:
-            while True:
-                chunk = await file.read(chunk_size)
-                if not chunk:
-                    break
-                if not first_bytes:
-                    first_bytes = chunk[:32]
-                total_size += len(chunk)
-                if total_size > max_bytes:
-                    raise ValueError("FILE_TOO_LARGE")
-                tmp.write(chunk)
+            with SpooledTemporaryFile(max_size=min(max_bytes, 8 * 1024 * 1024), mode="w+b") as tmp:
+                while True:
+                    chunk = await file.read(chunk_size)
+                    if not chunk:
+                        break
+                    if not first_bytes:
+                        first_bytes = chunk[:32]
+                    total_size += len(chunk)
+                    if total_size > max_bytes:
+                        raise FilesModuleError(code="FILE_TOO_LARGE", message="Файл превышает допустимый размер.")
+                    tmp.write(chunk)
 
-            if total_size <= 0:
-                raise ValueError("EMPTY_FILE")
-            if not _content_matches_mime(content_type, first_bytes):
-                raise ValueError("CONTENT_MISMATCH")
+                if total_size <= 0:
+                    raise FilesModuleError(code="EMPTY_FILE", message="Файл пустой.")
+                if not _content_matches_mime(content_type, first_bytes):
+                    raise FilesModuleError(
+                        code="CONTENT_MISMATCH",
+                        message="Содержимое файла не соответствует заявленному типу.",
+                    )
+                await self._enforce_storage_limit(org_id=org_id, incoming_size=total_size)
 
-            tmp.seek(0)
-            s3_key, bucket = storage.upload_fileobj(tmp, content_type, org_id, original_name)
+                tmp.seek(0)
+                s3_key, bucket = storage.upload_fileobj(tmp, content_type, org_id, original_name)
         finally:
-            tmp.close()
             await file.close()
 
         db_file = File(
@@ -94,6 +97,19 @@ class FilesService:
         storage.delete_file(db_file.s3_key, db_file.s3_bucket)
         await self.repo.delete(db_file)
         return True
+
+    async def _enforce_storage_limit(self, *, org_id: uuid.UUID, incoming_size: int) -> None:
+        plan = await self.repo.resolve_effective_plan(org_id=org_id)
+        max_storage_mb = int(getattr(plan, "max_storage_mb", 0) or 0)
+        if max_storage_mb <= 0:
+            return
+        max_storage_bytes = max_storage_mb * 1024 * 1024
+        current_bytes = await self.repo.get_org_storage_bytes(org_id)
+        if current_bytes + int(incoming_size) > max_storage_bytes:
+            raise FilesModuleError(
+                code="STORAGE_LIMIT_REACHED",
+                message="Достигнут лимит тарифа по хранилищу.",
+            )
 
 
 def _content_matches_mime(content_type: str, first_bytes: bytes) -> bool:

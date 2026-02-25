@@ -16,6 +16,19 @@ const PLAN_COLORS: Record<string, { bg: string; border: string; text: string; ba
 
 const DEFAULT_PLAN_COLORS = PLAN_COLORS.free ?? { bg: 'bg-secondary/30', border: 'border-border', text: 'text-muted-foreground', badge: 'bg-secondary text-muted-foreground' }
 
+function getApiErrorMessage(error: unknown, fallback: string): string {
+  const err = error as { response?: { data?: { error?: { code?: string; message?: string } } } } | undefined
+  const code = err?.response?.data?.error?.code
+  const message = err?.response?.data?.error?.message
+  const mapped: Record<string, string> = {
+    MEMBER_LIMIT_REACHED: 'Достигнут лимит участников по вашему тарифу.',
+    STORAGE_LIMIT_REACHED: 'Достигнут лимит хранилища по вашему тарифу.',
+    PAYMENT_REQUIRED: 'Для этого действия нужна активная подписка.',
+    AI_TOKEN_LIMIT_EXCEEDED: 'Лимит AI токенов исчерпан.',
+  }
+  return (code && mapped[code]) || message || fallback
+}
+
 export default function BillingPage() {
   const [plans, setPlans] = useState<PlanInfo[]>([])
   const [usage, setUsage] = useState<UsageInfo | null>(null)
@@ -27,9 +40,11 @@ export default function BillingPage() {
   const [buyingPackage, setBuyingPackage] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
   const [cancelConfirm, setCancelConfirm] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
+    setErrorMessage(null)
     try {
       const [pR, uR, sR, tbR, tpR] = await Promise.all([
         billingApi.plans(),
@@ -43,7 +58,9 @@ export default function BillingPage() {
       if (sR.data.ok && sR.data.data) setSub(sR.data.data as SubInfo)
       if (tbR.data.ok && tbR.data.data) setTokenBalance(tbR.data.data)
       if (tpR.data.ok && tpR.data.data) setTokenPackages(tpR.data.data)
-    } catch { /* ignore */ }
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error, 'Не удалось загрузить данные биллинга.'))
+    }
     setLoading(false)
   }, [])
 
@@ -51,35 +68,42 @@ export default function BillingPage() {
 
   const handleCancelSubscription = async () => {
     setCancelling(true)
+    setErrorMessage(null)
     try {
       const r = await billingApi.cancelSubscription()
       if (r.data.ok) {
         setCancelConfirm(false)
         await load()
       }
-    } catch { /* ignore */ }
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error, 'Не удалось отменить подписку.'))
+    }
     setCancelling(false)
   }
 
   const handleUpgrade = async (planName: string) => {
     setPaying(true)
+    setErrorMessage(null)
     try {
       const r = await billingApi.createPayment(planName, 'monthly')
       if (r.data.ok && r.data.data) {
         const url = (r.data.data as any).confirmation_url
         if (url) window.location.href = url
       }
-    } catch { /* ignore */ }
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error, 'Не удалось создать оплату тарифа.'))
+    }
     setPaying(false)
   }
 
   const handleBuyTokens = async (packageCode: string) => {
     setBuyingPackage(packageCode)
+    setErrorMessage(null)
     try {
       const r = await billingApi.purchaseTokens(packageCode)
       if (r.data.ok) await load()
-    } catch {
-      // ignore
+    } catch (error) {
+      setErrorMessage(getApiErrorMessage(error, 'Не удалось купить пакет токенов.'))
     }
     setBuyingPackage(null)
   }
@@ -105,6 +129,11 @@ export default function BillingPage() {
         <h1 className="text-2xl font-bold flex items-center gap-2"><CreditCard className="h-6 w-6 text-primary" /> Биллинг</h1>
         <p className="text-sm text-muted-foreground mt-0.5">Управление тарифом и использованием ресурсов</p>
       </div>
+      {errorMessage && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {errorMessage}
+        </div>
+      )}
 
       {/* Current subscription */}
       {sub && (

@@ -3,6 +3,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.modules.knowledge.errors import KnowledgeModuleError
 from src.modules.knowledge.models import KBPage
 from src.modules.knowledge.repository import KnowledgeRepository
 from src.modules.knowledge.schemas import CreatePageRequest, UpdatePageRequest
@@ -17,6 +18,7 @@ class KnowledgeService:
 
     async def create_page(self, *, org_id: uuid.UUID, user_id: uuid.UUID, body: CreatePageRequest) -> KBPage:
         """Create knowledge page for organization."""
+        await self._enforce_knowledge_limit(org_id=org_id)
         page = KBPage(
             org_id=org_id,
             created_by=user_id,
@@ -51,11 +53,17 @@ class KnowledgeService:
 
     async def delete_page(self, *, org_id: uuid.UUID, page_id: uuid.UUID) -> bool:
         """Delete organization page."""
-        page = await self.repo.get_by_id_for_org(page_id=page_id, org_id=org_id)
-        if page is None:
-            return False
-        await self.repo.delete(page)
-        return True
+        deleted_count = await self.repo.delete_subtree(org_id=org_id, root_page_id=page_id)
+        return deleted_count > 0
+
+    async def _enforce_knowledge_limit(self, *, org_id: uuid.UUID) -> None:
+        plan = await self.repo.get_effective_plan(org_id=org_id)
+        limit = int(getattr(plan, "max_records", 0) or 0)
+        if limit <= 0:
+            return
+        current = await self.repo.count_by_org(org_id=org_id)
+        if current >= limit:
+            raise KnowledgeModuleError.limit_reached()
 
 
 def _build_slug(title: str) -> str:

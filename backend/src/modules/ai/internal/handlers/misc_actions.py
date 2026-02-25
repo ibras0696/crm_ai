@@ -306,26 +306,11 @@ async def handle_create_kb_page_action(
     action_payload: dict[str, Any],
     user_message: str | None = None,
 ) -> dict[str, Any]:
-    """Создать страницу базы знаний."""
-    title = str(action_payload.get("title") or action_payload.get("name") or "").strip()[:500]
-    if not title:
+    """Создать страницу(ы) базы знаний, включая древовидную структуру."""
+    repo = AIRepository(uow.session)
+    nodes = _extract_kb_nodes(action_payload)
+    if not nodes:
         return {"action": "create_kb_page", "ok": False, "error": "title_required"}
-
-    max_kb_pages = await _resolve_kb_limit(uow, org_id=org_id)
-    if max_kb_pages > 0:
-        current_kb_pages = await AIRepository(uow.session).count_kb_pages(org_id=org_id)
-        if current_kb_pages >= max_kb_pages:
-            return {
-                "action": "create_kb_page",
-                "ok": False,
-                "error": "knowledge_limit_reached",
-                "message": "Достигнут лимит тарифа по записям базы знаний.",
-            }
-
-    content = action_payload.get("content")
-    if content is not None:
-        content = str(content)
-    icon = str(action_payload.get("icon") or "").strip() or None
 
     parent_id_raw = action_payload.get("parent_id")
     parent_id: uuid.UUID | None = None
@@ -334,15 +319,154 @@ async def handle_create_kb_page_action(
             parent_id = uuid.UUID(str(parent_id_raw))
     except Exception:
         parent_id = None
+    if parent_id is not None:
+        parent = await repo.get_kb_page_for_org(org_id=org_id, page_id=parent_id)
+        if parent is None:
+            return {"action": "create_kb_page", "ok": False, "error": "parent_not_found"}
 
-    slug = title.lower().replace(" ", "-")[:200]
-    page = KBPage(org_id=org_id, created_by=user_id, title=title, slug=slug, content=content, parent_id=parent_id, icon=icon)
-    uow.session.add(page)
-    await uow.session.flush()
-    return {"action": "create_kb_page", "ok": True, "page": {"id": str(page.id), "title": page.title, "slug": page.slug}}
+    max_kb_pages = await _resolve_kb_limit(uow, org_id=org_id)
+    current_kb_pages = await repo.count_kb_pages(org_id=org_id)
+    if max_kb_pages > 0 and current_kb_pages >= max_kb_pages:
+        return {
+            "action": "create_kb_page",
+            "ok": False,
+            "error": "knowledge_limit_reached",
+            "message": "Достигнут лимит тарифа по записям базы знаний.",
+        }
+
+    requested_total = sum(_count_kb_nodes(node) for node in nodes)
+    remaining_slots = max(0, max_kb_pages - current_kb_pages) if max_kb_pages > 0 else 10_000_000
+
+    created_pages: list[KBPage] = []
+    skipped_due_to_limit = 0
+
+    async def _create_node(node: dict[str, Any], parent: uuid.UUID | None) -> None:
+        nonlocal remaining_slots, skipped_due_to_limit
+        if remaining_slots <= 0:
+            skipped_due_to_limit += _count_kb_nodes(node)
+            return
+
+        page = KBPage(
+            org_id=org_id,
+            created_by=user_id,
+            title=str(node["title"])[:500],
+            slug=_build_kb_slug(str(node["title"])),
+            content=(str(node["content"]) if node.get("content") is not None else None),
+            parent_id=parent,
+            icon=(str(node["icon"]).strip()[:50] if node.get("icon") else None),
+        )
+        uow.session.add(page)
+        await uow.session.flush()
+        created_pages.append(page)
+        remaining_slots -= 1
+
+        for child in (node.get("children") or []):
+            await _create_node(child, page.id)
+
+    for node in nodes:
+        await _create_node(node, parent_id)
+
+    if not created_pages:
+        return {
+            "action": "create_kb_page",
+            "ok": False,
+            "error": "knowledge_limit_reached",
+            "message": "Достигнут лимит тарифа по записям базы знаний.",
+        }
+
+    first = created_pages[0]
+    return {
+        "action": "create_kb_page",
+        "ok": True,
+        "page": {"id": str(first.id), "title": first.title, "slug": first.slug},
+        "created_pages": [
+            {
+                "id": str(p.id),
+                "title": p.title,
+                "slug": p.slug,
+                "parent_id": str(p.parent_id) if p.parent_id else None,
+            }
+            for p in created_pages
+        ],
+        "created_count": len(created_pages),
+        "requested_count": requested_total,
+        "skipped_count": max(0, skipped_due_to_limit),
+    }
 
 
 async def _resolve_kb_limit(uow: UnitOfWork, *, org_id: uuid.UUID) -> int:
     plan = await AIRepository(uow.session).resolve_effective_plan(org_id=org_id)
     # Для KB используем общий лимит записей тарифа.
     return int(getattr(plan, "max_records", 0) or 0)
+
+
+def _normalize_kb_node(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    title = str(raw.get("title") or raw.get("name") or "").strip()[:500]
+    if not title:
+        return None
+    content = raw.get("content")
+    if content is not None:
+        content = str(content)
+    icon = str(raw.get("icon") or "").strip() or None
+    children_raw = raw.get("children")
+    if not isinstance(children_raw, list):
+        children_raw = raw.get("pages")
+    children: list[dict[str, Any]] = []
+    if isinstance(children_raw, list):
+        for child in children_raw[:200]:
+            norm = _normalize_kb_node(child)
+            if norm is not None:
+                children.append(norm)
+    return {"title": title, "content": content, "icon": icon, "children": children}
+
+
+def _extract_kb_nodes(action_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    nodes: list[dict[str, Any]] = []
+
+    tree_raw = action_payload.get("tree")
+    if isinstance(tree_raw, dict):
+        normalized = _normalize_kb_node(tree_raw)
+        if normalized is not None:
+            nodes.append(normalized)
+            return nodes
+
+    root_title = str(action_payload.get("title") or action_payload.get("name") or "").strip()
+    pages_raw = action_payload.get("pages")
+    if root_title:
+        root_node = _normalize_kb_node(
+            {
+                "title": root_title,
+                "content": action_payload.get("content"),
+                "icon": action_payload.get("icon"),
+                "children": pages_raw if isinstance(pages_raw, list) else [],
+            }
+        )
+        if root_node is not None:
+            nodes.append(root_node)
+            return nodes
+
+    if isinstance(pages_raw, list):
+        for raw in pages_raw[:200]:
+            normalized = _normalize_kb_node(raw)
+            if normalized is not None:
+                nodes.append(normalized)
+    return nodes
+
+
+def _count_kb_nodes(node: dict[str, Any]) -> int:
+    children = node.get("children") or []
+    if not isinstance(children, list):
+        return 1
+    return 1 + sum(_count_kb_nodes(child) for child in children if isinstance(child, dict))
+
+
+def _build_kb_slug(title: str) -> str:
+    raw = (title or "").strip().lower()
+    replaced = re.sub(r"\s+", "-", raw)
+    cleaned = re.sub(r"[^a-z0-9\-а-яё]", "", replaced)
+    collapsed = re.sub(r"-{2,}", "-", cleaned).strip("-")
+    if not collapsed:
+        return "page"
+    return collapsed[:200]

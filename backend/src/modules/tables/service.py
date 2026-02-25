@@ -7,6 +7,7 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.modules.tables.models import Column, FieldType, Table, TableFolder, TableView
+from src.modules.tables.errors import TablesModuleError
 from src.modules.tables.records import Record, RecordRepository
 from src.modules.tables.repository import (
     ColumnRepository,
@@ -29,13 +30,11 @@ from src.modules.tables.schemas import (
 )
 
 
-class TableServiceError(Exception):
+class TableServiceError(TablesModuleError):
     """Domain error for tables module operations."""
 
     def __init__(self, *, code: str, message: str):
-        super().__init__(message)
-        self.code = code
-        self.message = message
+        super().__init__(code=code, message=message, status_code=422)
 
 
 class TablesService:

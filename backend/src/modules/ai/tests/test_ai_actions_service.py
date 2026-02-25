@@ -43,6 +43,18 @@ async def test_extract_action_payload_from_codeblock_and_plain_json():
     assert "create_dashboard" not in cleaned2 or cleaned2 != reply2
 
 
+def test_extract_action_payload_strips_broken_raw_action_blob():
+    from src.modules.ai.service import extract_action_payload
+
+    broken = (
+        "Сейчас создам таблицу.\n"
+        '{"action":"create_table","name":"Broken","columns":[{"name":"A","field_type":"text"}],"records":[{"A":"x"}'
+    )
+    payload, cleaned = extract_action_payload(broken)
+    assert payload is None
+    assert cleaned == "Сейчас создам таблицу."
+
+
 def test_ui_intent_overrides_force_widget_type_and_table_hint():
     from src.modules.ai.intent_overrides import apply_ui_intent_overrides
 
@@ -131,6 +143,27 @@ async def test_ai_service_can_create_table_columns_records_and_event(client: Asy
         )
         assert res_rec["ok"] is True
 
+        # Add records in compact format (columns once + rows matrix).
+        res_compact = await handle_create_records_action(
+            uow,
+            org_id,
+            user_id,
+            {
+                "action": "create_records",
+                "table_id": str(table_id),
+                "records": {
+                    "columns": ["Name", "Price", "SKU"],
+                    "rows": [
+                        ["Mango", 15, "M-1"],
+                        ["Banana", 8, "B-1"],
+                    ],
+                },
+            },
+            user_message="add compact records",
+        )
+        assert res_compact["ok"] is True
+        assert res_compact["records_created"] >= 2
+
         # Create schedule event with long recurrence string (should not blow up on short varchar fields like color).
         ev = await handle_create_schedule_event_action(
             uow,
@@ -178,6 +211,124 @@ async def test_ai_service_can_create_table_columns_records_and_event(client: Asy
         assert e.start_at.hour == 9
         assert e.end_at is not None
         assert e.end_at.hour == 10
+
+
+@pytest.mark.asyncio
+async def test_ai_service_can_create_knowledge_tree(client: AsyncClient):
+    token, email = await _register_owner(client, org_name="AI KB Tree")
+    assert token
+
+    from src.infrastructure.uow import UnitOfWork
+    from src.modules.ai.service import handle_create_kb_page_action
+    from src.modules.auth.models import User
+    from src.modules.knowledge.models import KBPage
+    from src.modules.org.models import Membership
+
+    async with UnitOfWork() as uow:
+        user = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
+        assert user is not None
+        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        assert membership is not None
+        org_id = membership.org_id
+        user_id = user.id
+
+        res = await handle_create_kb_page_action(
+            uow,
+            org_id,
+            user_id,
+            {
+                "action": "create_kb_page",
+                "title": "Курс Python",
+                "content": "Вводный материал",
+                "pages": [
+                    {"title": "Урок 1", "content": "Базовый синтаксис"},
+                    {"title": "Урок 2", "content": "Типы данных", "children": [{"title": "Практика", "content": "Домашнее задание"}]},
+                ],
+            },
+            user_message="создай курс и страницы",
+        )
+        assert res["ok"] is True
+        assert int(res["created_count"]) == 4
+        created_pages = res.get("created_pages")
+        assert isinstance(created_pages, list)
+        assert len(created_pages) == 4
+        root_id = str(res["page"]["id"])
+        # Уроки должны быть дочерними относительно корня.
+        child_parent_ids = {str(x.get("parent_id")) for x in created_pages if x.get("title") in {"Урок 1", "Урок 2"}}
+        assert root_id in child_parent_ids
+        await uow.commit()
+
+    async with UnitOfWork() as uow2:
+        pages = (await uow2.session.execute(select(KBPage).where(KBPage.org_id == org_id))).scalars().all()
+        assert len(pages) >= 4
+
+
+@pytest.mark.asyncio
+async def test_ai_create_records_returns_limit_error_when_records_exhausted(client: AsyncClient):
+    token, email = await _register_owner(client)
+    assert token
+
+    from src.infrastructure.uow import UnitOfWork
+    from src.modules.ai.service import handle_create_records_action, handle_create_table_action
+    from src.modules.auth.models import User
+    from src.modules.billing.models import Plan
+    from src.modules.org.models import Membership
+
+    async with UnitOfWork() as uow:
+        user = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
+        assert user is not None
+        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        assert membership is not None
+        org_id = membership.org_id
+        user_id = user.id
+
+        free_plan = (await uow.session.execute(select(Plan).where(Plan.name == "free"))).scalars().first()
+        if free_plan is None:
+            free_plan = Plan(
+                name="free",
+                display_name="Бесплатный",
+                price_monthly=0,
+                price_yearly=0,
+                max_members=10,
+                max_tables=10,
+                max_records=1,
+                max_storage_mb=500,
+                has_ai=True,
+                features={"ai": True},
+                is_active=True,
+                ai_max_tokens_per_request=2000,
+                ai_tokens_per_day=20000,
+                ai_rpm_per_user=30,
+            )
+            uow.session.add(free_plan)
+        else:
+            free_plan.max_records = 1
+
+        table_result = await handle_create_table_action(
+            uow,
+            org_id,
+            user_id,
+            {
+                "action": "create_table",
+                "name": "Products Limits",
+                "columns": [{"name": "Name", "field_type": "text", "is_primary": True}],
+                "records": [{"Name": "One"}],
+            },
+            user_message="создай таблицу",
+        )
+        assert table_result["ok"] is True
+        table_id = str(table_result["table"]["id"])
+
+        res = await handle_create_records_action(
+            uow,
+            org_id,
+            user_id,
+            {"action": "create_records", "table_id": table_id, "records": [{"Name": "Two"}]},
+            user_message="добавь запись",
+        )
+        assert res["ok"] is False
+        assert res["error"] == "record_limit_reached"
+        await uow.commit()
 
 
 @pytest.mark.asyncio

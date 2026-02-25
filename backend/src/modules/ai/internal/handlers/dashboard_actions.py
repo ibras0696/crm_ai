@@ -190,4 +190,10 @@ async def handle_create_dashboard_action(
                 "data": await build_widget_data(reports_repo, org_id, widget),
             }
         )
-    return {"action": "create_dashboard", "dashboard": {"id": str(dash.id), "name": dash.name, "description": dash.description}, "items": preview_items, "skipped": skipped}
+    return {
+        "action": "create_dashboard",
+        "ok": True,
+        "dashboard": {"id": str(dash.id), "name": dash.name, "description": dash.description},
+        "items": preview_items,
+        "skipped": skipped,
+    }

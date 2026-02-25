@@ -1,4 +1,5 @@
 ﻿import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { isAxiosError } from 'axios'
 import { knowledgeApi, type KBPageInfo } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Plus, Trash2, ChevronRight, ChevronDown, FileText, FolderOpen, X, Save, Edit3, Search, Bold, Italic, Code, Heading1, Heading2, Heading3, List, ListOrdered, Link, Quote, Minus, Eye, EyeOff, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
@@ -67,12 +68,31 @@ export default function KnowledgePage() {
   const [newForm, setNewForm] = useState({ title: '', content: '', parent_id: '' })
   const [search, setSearch] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [errorText, setErrorText] = useState('')
+
+  const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (isAxiosError(error)) {
+      const code = error.response?.data?.error?.code
+      const message = error.response?.data?.error?.message
+      if (typeof message === 'string' && message.trim()) return message
+      if (code === 'KNOWLEDGE_LIMIT_REACHED') {
+        return 'Достигнут лимит тарифа по базе знаний. Удалите лишние записи или повысьте тариф.'
+      }
+    }
+    return fallback
+  }
 
   const load = useCallback(async () => {
     try {
       const r = await knowledgeApi.list()
-      if (r.data.ok && r.data.data) setPages(r.data.data.map(normalizePage))
-    } catch { /* ignore */ }
+      if (r.data.ok && r.data.data) {
+        setPages(r.data.data.map(normalizePage))
+      } else {
+        setErrorText(r.data.error?.message || 'Не удалось загрузить страницы базы знаний')
+      }
+    } catch (e) {
+      setErrorText(getErrorMessage(e, 'Не удалось загрузить страницы базы знаний'))
+    }
     setLoading(false)
   }, [])
 
@@ -84,6 +104,7 @@ export default function KnowledgePage() {
 
   const handleSave = async () => {
     if (!selected) return
+    setErrorText('')
     setSaving(true)
     try {
       const r = await knowledgeApi.update(selected.id, draft)
@@ -92,13 +113,18 @@ export default function KnowledgePage() {
         setPages(prev => prev.map(p => p.id === updated.id ? updated : p))
         setSelected(updated)
         setEditing(false)
+      } else {
+        setErrorText(r.data.error?.message || 'Не удалось сохранить страницу')
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      setErrorText(getErrorMessage(e, 'Не удалось сохранить страницу'))
+    }
     setSaving(false)
   }
 
   const handleCreate = async () => {
     if (!newForm.title.trim()) return
+    setErrorText('')
     setSaving(true)
     try {
       const r = await knowledgeApi.create({ ...newForm, parent_id: newForm.parent_id || undefined })
@@ -109,17 +135,24 @@ export default function KnowledgePage() {
         setDraft({ title: created.title, content: created.content })
         setShowNew(false)
         setNewForm({ title: '', content: '', parent_id: '' })
+      } else {
+        setErrorText(r.data.error?.message || 'Не удалось создать страницу')
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      setErrorText(getErrorMessage(e, 'Не удалось создать страницу'))
+    }
     setSaving(false)
   }
 
   const handleDelete = async (id: string) => {
+    setErrorText('')
     try {
       await knowledgeApi.delete(id)
       setPages(prev => prev.filter(p => p.id !== id))
       if (selected?.id === id) setSelected(null)
-    } catch { /* ignore */ }
+    } catch (e) {
+      setErrorText(getErrorMessage(e, 'Не удалось удалить страницу'))
+    }
   }
 
   const filtered = search ? pages.filter(p => p.title.toLowerCase().includes(search.toLowerCase()) || (p.content || '').toLowerCase().includes(search.toLowerCase())) : pages
@@ -183,6 +216,7 @@ export default function KnowledgePage() {
             setDraft={setDraft}
             saving={saving}
             onSave={handleSave}
+            errorText={errorText}
           />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-3">
@@ -257,7 +291,7 @@ function renderMarkdown(md: string): string {
 }
 
 /* ─── KBEditor component ─── */
-function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSave }: {
+function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSave, errorText }: {
   selected: KBPage
   editing: boolean
   setEditing: (v: boolean) => void
@@ -265,6 +299,7 @@ function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSa
   setDraft: (fn: (d: { title: string; content: string }) => { title: string; content: string }) => void
   saving: boolean
   onSave: () => Promise<void>
+  errorText: string
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [preview, setPreview] = useState(false)
@@ -354,15 +389,20 @@ function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSa
             className="w-full h-full min-h-[400px] text-sm bg-transparent outline-none resize-none font-mono leading-relaxed"
             placeholder="Содержимое страницы (поддерживается Markdown)..." />
         ) : (
-          <div className="prose prose-sm dark:prose-invert max-w-none">
+          <div className="prose prose-sm dark:prose-invert max-w-none prose-p:break-words prose-li:break-words prose-pre:whitespace-pre-wrap prose-pre:break-words">
             {(editing ? draft.content : selected.content) ? (
-              <div className="text-sm leading-relaxed text-foreground" dangerouslySetInnerHTML={{ __html: renderedHtml }} />
+              <div className="text-sm leading-relaxed text-foreground break-words [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: renderedHtml }} />
             ) : (
               <p className="text-muted-foreground italic">Страница пуста. Нажмите «Редактировать» для добавления содержимого.</p>
             )}
           </div>
         )}
       </div>
+      {errorText && (
+        <div className="mx-5 mb-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {errorText}
+        </div>
+      )}
       <div className="px-5 py-2 border-t border-border text-xs text-muted-foreground flex items-center justify-between">
         <span>Изменено: {new Date(selected.updated_at || selected.created_at).toLocaleString('ru')}</span>
         {editing && <span className="text-primary/60">Markdown поддерживается</span>}

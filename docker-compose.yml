@@ -33,6 +33,7 @@ x-backend-env: &backend_env
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4.1}
   AI_BASE_URL: ${AI_BASE_URL:-https://agent.timeweb.cloud/api/v1/cloud-ai/agents/289156bc-4adc-4be8-94cf-6767a704a80c/v1}
+  AI_PROVIDER_MODE: ${AI_PROVIDER_MODE:-openai_compatible}
 
   AI_MAX_TOKENS_PER_REQUEST: ${AI_MAX_TOKENS_PER_REQUEST:-2000}
   AI_MAX_TOKENS_PER_DAY_PER_ORG: ${AI_MAX_TOKENS_PER_DAY_PER_ORG:-20000}

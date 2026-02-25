@@ -5,17 +5,16 @@ import {
   type AIChatMessage,
   type AIChatSession,
   type AIContextOptions,
-  type AIContextEstimate,
   type AIContextSourcePage,
   type AIContextSourceTable,
   type FolderInfo,
   type TableInfo,
 } from '@/lib/api'
-import ContextControl from '@/components/ai/ContextControl'
 import CapabilitiesMenu from '@/components/ai/CapabilitiesMenu'
-import { DashboardPreview, KnowledgePreview, SchedulePreview, TablePreview } from '@/components/ai/ActionPreviews'
+import { ActionErrorPreview, DashboardPreview, KnowledgePreview, SchedulePreview, TablePreview } from '@/components/ai/ActionPreviews'
 import StatsTab from '@/components/ai/StatsTab'
 import ChatHistory from '@/components/ai/ChatHistory'
+import ContextHoverPickers from '@/components/ai/ContextHoverPickers'
 import {
   Send,
   Bot,
@@ -26,7 +25,6 @@ import {
   Sparkles,
   MessageSquareDashed,
   X,
-  Layers,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -83,23 +81,21 @@ export default function AIPage() {
   const [currentChatId, setCurrentChatId] = useState<string>('')
   const [loadingChats, setLoadingChats] = useState(false)
   const [historyMobileOpen, setHistoryMobileOpen] = useState(false)
-  const [contextOpen, setContextOpen] = useState(false)
 
   const [contextSources, setContextSources] = useState<{ kb_pages: AIContextSourcePage[]; tables: AIContextSourceTable[] }>({ kb_pages: [], tables: [] })
   const [contextTableFolders, setContextTableFolders] = useState<FolderInfo[]>([])
   const [contextTableFolderById, setContextTableFolderById] = useState<Record<string, string | null>>({})
-  const [includeContext, setIncludeContext] = useState(true)
+  const [includeContext] = useState(true)
   const [contextOptions, setContextOptions] = useState<AIContextOptions>({
     include_kb: true,
     include_table_schema: true,
     include_table_records: true,
-    kb_limit: 30,
-    tables_limit: 20,
+    kb_limit: 1000,
+    tables_limit: 5000,
     records_per_table: 5,
     selected_kb_page_ids: [],
     selected_table_ids: [],
   })
-  const [contextEstimate, setContextEstimate] = useState<AIContextEstimate | null>(null)
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -182,20 +178,6 @@ export default function AIPage() {
     }
   }, [])
 
-  const loadContextEstimate = useCallback(async () => {
-    try {
-      const r = await aiApi.estimatePrompt({
-        include_context: includeContext,
-        context_options: contextOptions,
-        history: messages.slice(-10).map((m) => ({ role: m.role, content: m.content })),
-        user_message: input || '',
-      })
-      if (r.data.ok && r.data.data) setContextEstimate(r.data.data)
-    } catch {
-      // ignore
-    }
-  }, [includeContext, contextOptions, messages, input])
-
   useEffect(() => {
     loadStatus()
     loadChats()
@@ -204,11 +186,6 @@ export default function AIPage() {
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
   useEffect(() => { loadChatMessages(currentChatId) }, [currentChatId, loadChatMessages])
-
-  useEffect(() => {
-    const t = setTimeout(() => loadContextEstimate(), 200)
-    return () => clearTimeout(t)
-  }, [loadContextEstimate])
 
   const handleSend = async (preset?: string) => {
     const messageText = (preset ?? input).trim()
@@ -245,7 +222,6 @@ export default function AIPage() {
         if (d.chat_id && d.chat_id !== currentChatId) setCurrentChatId(d.chat_id)
         await loadChats()
         loadStatus()
-        if (d.context_estimate) setContextEstimate(d.context_estimate)
         // Сбрасываем режим, если AI реально выполнил действие (чтобы не было случайных повторов).
         if ((d.action_result as any)?.ok) setUiIntent(null)
       } else {
@@ -323,7 +299,7 @@ export default function AIPage() {
           ))}
         </div>
         <button
-          onClick={() => { loadStatus(); loadChats(); loadContextEstimate(); loadContextSources() }}
+          onClick={() => { loadStatus(); loadChats(); loadContextSources() }}
           disabled={loadingStatus}
           className="h-9 w-9 rounded-lg border border-border flex items-center justify-center hover:bg-secondary transition-colors disabled:opacity-50"
         >
@@ -349,13 +325,14 @@ export default function AIPage() {
                   >
                     <History className="h-4 w-4" />
                   </button>
-                  <button
-                    onClick={() => setContextOpen(true)}
-                    className="h-8 w-8 rounded-md border border-border flex items-center justify-center hover:bg-secondary transition-colors"
-                    title="Контекст"
-                  >
-                    <Layers className="h-4 w-4" />
-                  </button>
+                  <ContextHoverPickers
+                    includeContext={includeContext}
+                    contextOptions={contextOptions}
+                    setContextOptions={(updater) => setContextOptions(updater)}
+                    contextSources={contextSources}
+                    tableFolders={contextTableFolders}
+                    tableFolderById={contextTableFolderById}
+                  />
                 </div>
                 <button
                   onClick={handleNewChat}
@@ -404,6 +381,7 @@ export default function AIPage() {
                             <DashboardPreview result={msg.actionResult} />
                             <SchedulePreview result={msg.actionResult} />
                             <KnowledgePreview result={msg.actionResult} />
+                            <ActionErrorPreview result={msg.actionResult} />
                           </>
                         )}
                       </div>
@@ -501,20 +479,6 @@ export default function AIPage() {
               onClose={() => setHistoryMobileOpen(false)}
             />
           )}
-
-          <ContextControl
-            showSummary={false}
-            open={contextOpen}
-            onOpenChange={setContextOpen}
-            includeContext={includeContext}
-            setIncludeContext={setIncludeContext}
-            contextOptions={contextOptions}
-            setContextOptions={(updater) => setContextOptions(updater)}
-            contextEstimate={contextEstimate}
-            contextSources={contextSources}
-            tableFolders={contextTableFolders}
-            tableFolderById={contextTableFolderById}
-          />
         </>
       )}
     </div>

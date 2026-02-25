@@ -5,13 +5,12 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.common.enums import PlanTier, SubscriptionStatus
+from src.common.enums import PlanTier
 from src.config import settings
-from src.modules.billing.models import Plan, TokenBalance, TokenLedger, TokenPackage, TokenPurchase, TokenUsageIdempotency
-from src.modules.org.models import Organization, Subscription
+from src.modules.billing.models import TokenBalance, TokenLedger, TokenPurchase, TokenUsageIdempotency
+from src.modules.billing.token_wallet_repository import TokenWalletRepository
 
 
 DEFAULT_TOKEN_PACKAGE_CATALOG: dict[str, int] = {
@@ -37,33 +36,23 @@ class TokenSpendResult:
 
 
 async def _monthly_plan_quota(session: AsyncSession, *, org_id: uuid.UUID) -> int:
-    sub_plan = (
-        await session.execute(
-            select(Subscription.plan).where(
-                Subscription.org_id == org_id,
-                Subscription.status == SubscriptionStatus.ACTIVE,
-            )
-        )
-    ).scalars().first()
+    repo = TokenWalletRepository(session)
+    sub_rows = await repo.get_active_subscription_plans_by_org_ids(org_ids=[org_id])
+    sub_plan = sub_rows[0][1] if sub_rows else None
     try:
         plan_tier = PlanTier(str(sub_plan.value if hasattr(sub_plan, "value") else sub_plan)) if sub_plan else None
     except Exception:
         plan_tier = None
     if plan_tier is None:
-        org_plan = (await session.execute(select(Organization.plan).where(Organization.id == org_id))).scalar_one_or_none()
+        org_rows = await repo.get_org_plans_by_org_ids(org_ids=[org_id])
+        org_plan = org_rows[0][1] if org_rows else None
         try:
             plan_tier = PlanTier(str(org_plan.value if hasattr(org_plan, "value") else org_plan)) if org_plan else PlanTier.FREE
         except Exception:
             plan_tier = PlanTier.FREE
 
-    plan_db = (
-        await session.execute(
-            select(Plan).where(
-                Plan.name == plan_tier.value,
-                Plan.is_active.is_(True),
-            )
-        )
-    ).scalars().first()
+    plan_db = (await repo.get_active_plans_for_tiers(plan_names=[plan_tier.value]))[0:1]
+    plan_db = plan_db[0] if plan_db else None
     default_by_plan = {
         PlanTier.FREE: int(getattr(settings, "AI_MAX_TOKENS_PER_DAY_FREE", 0) or 0),
         PlanTier.TEAM: int(getattr(settings, "AI_MAX_TOKENS_PER_DAY_TEAM", 0) or 0),
@@ -77,33 +66,16 @@ async def _monthly_plan_quota(session: AsyncSession, *, org_id: uuid.UUID) -> in
 
 
 async def _recalculate_addon_remaining(session: AsyncSession, *, org_id: uuid.UUID, now_utc: datetime) -> int:
-    total = (
-        await session.execute(
-            select(func.coalesce(func.sum(TokenPurchase.tokens_remaining), 0)).where(
-                TokenPurchase.org_id == org_id,
-                TokenPurchase.is_active.is_(True),
-                TokenPurchase.tokens_remaining > 0,
-                or_(
-                    TokenPurchase.expires_at.is_(None),
-                    and_(TokenPurchase.expires_at.is_not(None), TokenPurchase.expires_at > now_utc),
-                ),
-            )
-        )
-    ).scalar_one()
-    return int(total or 0)
+    repo = TokenWalletRepository(session)
+    rows = await repo.get_addon_sum_by_org_ids(org_ids=[org_id], now_utc=now_utc)
+    if not rows:
+        return 0
+    return int(rows[0][1] or 0)
 
 
 async def _deactivate_expired_purchases(session: AsyncSession, *, org_id: uuid.UUID, now_utc: datetime) -> None:
-    rows = (
-        await session.execute(
-            select(TokenPurchase).where(
-                TokenPurchase.org_id == org_id,
-                TokenPurchase.is_active.is_(True),
-                TokenPurchase.expires_at.is_not(None),
-                TokenPurchase.expires_at <= now_utc,
-            )
-        )
-    ).scalars().all()
+    repo = TokenWalletRepository(session)
+    rows = await repo.get_expired_purchases(org_ids=[org_id], now_utc=now_utc)
     for p in rows:
         p.is_active = False
         p.tokens_remaining = 0
@@ -120,23 +92,14 @@ async def ensure_token_balances_bulk(
     if not unique_org_ids:
         return {}
 
+    repo = TokenWalletRepository(session)
     now_utc = datetime.now(UTC)
     key = cycle_key(now_utc)
 
-    balance_stmt = select(TokenBalance).where(TokenBalance.org_id.in_(unique_org_ids))
-    if lock:
-        balance_stmt = balance_stmt.with_for_update()
-    existing_balances = (await session.execute(balance_stmt)).scalars().all()
+    existing_balances = await repo.get_balances_by_org_ids(org_ids=unique_org_ids, lock=lock)
     balances_by_org: dict[uuid.UUID, TokenBalance] = {b.org_id: b for b in existing_balances}
 
-    active_sub_rows = (
-        await session.execute(
-            select(Subscription.org_id, Subscription.plan).where(
-                Subscription.org_id.in_(unique_org_ids),
-                Subscription.status == SubscriptionStatus.ACTIVE,
-            )
-        )
-    ).all()
+    active_sub_rows = await repo.get_active_subscription_plans_by_org_ids(org_ids=unique_org_ids)
     active_sub_plan_by_org: dict[uuid.UUID, PlanTier] = {}
     for org_id, sub_plan in active_sub_rows:
         try:
@@ -144,9 +107,7 @@ async def ensure_token_balances_bulk(
         except Exception:
             continue
 
-    org_plan_rows = (
-        await session.execute(select(Organization.id, Organization.plan).where(Organization.id.in_(unique_org_ids)))
-    ).all()
+    org_plan_rows = await repo.get_org_plans_by_org_ids(org_ids=unique_org_ids)
     org_plan_by_org: dict[uuid.UUID, PlanTier] = {}
     for org_id, org_plan in org_plan_rows:
         try:
@@ -158,9 +119,7 @@ async def ensure_token_balances_bulk(
     for org_id in unique_org_ids:
         effective_plan_by_org[org_id] = active_sub_plan_by_org.get(org_id) or org_plan_by_org.get(org_id) or PlanTier.FREE
 
-    active_plans = (
-        await session.execute(select(Plan).where(Plan.is_active.is_(True), Plan.name.in_([p.value for p in PlanTier])))
-    ).scalars().all()
+    active_plans = await repo.get_active_plans_for_tiers(plan_names=[p.value for p in PlanTier])
     plan_db_by_name = {str(p.name).lower(): p for p in active_plans}
     default_by_plan = {
         PlanTier.FREE: int(getattr(settings, "AI_MAX_TOKENS_PER_DAY_FREE", 0) or 0),
@@ -176,35 +135,12 @@ async def ensure_token_balances_bulk(
             quota = int(plan_db.ai_tokens_per_day)
         quota_by_org[org_id] = max(0, quota)
 
-    expired_rows = (
-        await session.execute(
-            select(TokenPurchase).where(
-                TokenPurchase.org_id.in_(unique_org_ids),
-                TokenPurchase.is_active.is_(True),
-                TokenPurchase.expires_at.is_not(None),
-                TokenPurchase.expires_at <= now_utc,
-            )
-        )
-    ).scalars().all()
+    expired_rows = await repo.get_expired_purchases(org_ids=unique_org_ids, now_utc=now_utc)
     for purchase in expired_rows:
         purchase.is_active = False
         purchase.tokens_remaining = 0
 
-    addon_sum_rows = (
-        await session.execute(
-            select(TokenPurchase.org_id, func.coalesce(func.sum(TokenPurchase.tokens_remaining), 0).label("addon_tokens"))
-            .where(
-                TokenPurchase.org_id.in_(unique_org_ids),
-                TokenPurchase.is_active.is_(True),
-                TokenPurchase.tokens_remaining > 0,
-                or_(
-                    TokenPurchase.expires_at.is_(None),
-                    and_(TokenPurchase.expires_at.is_not(None), TokenPurchase.expires_at > now_utc),
-                ),
-            )
-            .group_by(TokenPurchase.org_id)
-        )
-    ).all()
+    addon_sum_rows = await repo.get_addon_sum_by_org_ids(org_ids=unique_org_ids, now_utc=now_utc)
     addon_remaining_by_org: dict[uuid.UUID, int] = defaultdict(int)
     for org_id, addon_tokens in addon_sum_rows:
         addon_remaining_by_org[org_id] = int(addon_tokens or 0)
@@ -222,10 +158,10 @@ async def ensure_token_balances_bulk(
                 plan_tokens_remaining=quota,
                 addon_tokens_remaining=addon_remaining,
             )
-            session.add(balance)
+            repo.add_balance(balance)
             balances_by_org[org_id] = balance
             if quota > 0:
-                session.add(
+                repo.add_ledger(
                     TokenLedger(
                         org_id=org_id,
                         user_id=None,
@@ -248,7 +184,7 @@ async def ensure_token_balances_bulk(
             balance.plan_tokens_remaining = quota
             balance.addon_tokens_remaining = addon_remaining
             if quota > 0:
-                session.add(
+                repo.add_ledger(
                     TokenLedger(
                         org_id=org_id,
                         user_id=None,
@@ -265,7 +201,7 @@ async def ensure_token_balances_bulk(
         else:
             balance.addon_tokens_remaining = addon_remaining
 
-    await session.flush()
+    await repo.flush()
     return balances_by_org
 
 
@@ -296,11 +232,8 @@ async def purchase_addon_tokens(
     months_valid: int = 12,
     payment_id: str | None = None,
 ) -> dict:
-    package = (
-        await session.execute(
-            select(TokenPackage).where(TokenPackage.code == package_code, TokenPackage.is_active.is_(True))
-        )
-    ).scalars().first()
+    repo = TokenWalletRepository(session)
+    package = await repo.get_active_token_package(package_code=package_code)
     if package is None:
         # backward-compatible fallback
         if package_code not in DEFAULT_TOKEN_PACKAGE_CATALOG:
@@ -325,10 +258,10 @@ async def purchase_addon_tokens(
         is_active=True,
         meta={"months_valid": months_valid},
     )
-    session.add(purchase)
+    repo.add_purchase(purchase)
     balance.addon_tokens_remaining = int(balance.addon_tokens_remaining or 0) + amount
 
-    session.add(
+    repo.add_ledger(
         TokenLedger(
             org_id=org_id,
             user_id=user_id,
@@ -342,7 +275,7 @@ async def purchase_addon_tokens(
             meta={"package_code": package_code, "purchase_tokens": amount, "expires_at": expires_at.isoformat() if expires_at else None},
         )
     )
-    await session.flush()
+    await repo.flush()
     return {
         "package_code": package_code,
         "package_price_rub_cents": int(getattr(package, "price_rub_cents", 0) or 0),
@@ -376,14 +309,8 @@ async def spend_tokens(
         )
 
     if request_id:
-        existing = (
-            await session.execute(
-                select(TokenUsageIdempotency).where(
-                    TokenUsageIdempotency.org_id == org_id,
-                    TokenUsageIdempotency.request_id == request_id,
-                )
-            )
-        ).scalar_one_or_none()
+        repo = TokenWalletRepository(session)
+        existing = await repo.get_idempotency(org_id=org_id, request_id=request_id)
         if existing is not None:
             balance = await ensure_token_balance(session, org_id=org_id, lock=False)
             return TokenSpendResult(
@@ -408,22 +335,8 @@ async def spend_tokens(
 
     if remain > 0 and available_addon > 0:
         now_utc = datetime.now(UTC)
-        purchases = (
-            await session.execute(
-                select(TokenPurchase)
-                .where(
-                    TokenPurchase.org_id == org_id,
-                    TokenPurchase.is_active.is_(True),
-                    TokenPurchase.tokens_remaining > 0,
-                    or_(
-                        TokenPurchase.expires_at.is_(None),
-                        and_(TokenPurchase.expires_at.is_not(None), TokenPurchase.expires_at > now_utc),
-                    ),
-                )
-                .order_by(TokenPurchase.expires_at.asc().nulls_last(), TokenPurchase.created_at.asc())
-                .with_for_update()
-            )
-        ).scalars().all()
+        repo = TokenWalletRepository(session)
+        purchases = await repo.get_spendable_purchases_for_update(org_id=org_id, now_utc=now_utc)
 
         for purchase in purchases:
             if remain <= 0:
@@ -444,7 +357,8 @@ async def spend_tokens(
         balance.plan_tokens_remaining = int(balance.plan_tokens_remaining or 0) - spent_plan
         remain = 0
 
-    session.add(
+    repo = TokenWalletRepository(session)
+    repo.add_ledger(
         TokenLedger(
             org_id=org_id,
             user_id=user_id,
@@ -460,7 +374,7 @@ async def spend_tokens(
     )
 
     if request_id:
-        session.add(
+        repo.add_idempotency(
             TokenUsageIdempotency(
                 org_id=org_id,
                 user_id=user_id,
@@ -471,7 +385,7 @@ async def spend_tokens(
                 meta=meta or {},
             )
         )
-    await session.flush()
+    await repo.flush()
 
     return TokenSpendResult(
         spent_total=to_spend,

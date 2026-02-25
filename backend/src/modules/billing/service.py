@@ -4,10 +4,12 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import httpx
+from botocore.exceptions import BotoCoreError, ClientError
 
 from src.common.enums import NotificationStatus, NotificationType, PlanTier, SubscriptionStatus
 from src.config import settings
 from src.infrastructure.uow import UnitOfWork
+from src.modules.billing.errors import BillingModuleError
 from src.modules.billing.repository import BillingRepository
 from src.modules.billing.schemas import UsageOut
 from src.modules.billing.token_wallet import (
@@ -19,13 +21,20 @@ from src.modules.files import storage
 from src.modules.notifications.models import Notification
 
 
-class BillingOperationError(Exception):
+class BillingOperationError(BillingModuleError):
     """Бизнес-ошибка billing, которую роутер отображает в ApiResponse(ok=false)."""
 
     def __init__(self, code: str, message: str):
-        self.code = code
-        self.message = message
-        super().__init__(message)
+        status = 422
+        if code in {"PLAN_NOT_FOUND"}:
+            status = 404
+        elif code in {"PAYMENT_REQUIRED"}:
+            status = 402
+        elif code in {"BILLING_STATE_CONFLICT"}:
+            status = 409
+        elif code in {"BILLING_NOT_CONFIGURED", "PAYMENT_ERROR"}:
+            status = 503
+        super().__init__(code=code, message=message, status_code=status)
 
 
 class BillingService:
@@ -144,8 +153,8 @@ class BillingService:
                 data = resp.json()
         except httpx.HTTPStatusError as exc:
             raise BillingOperationError("PAYMENT_ERROR", f"Ошибка платежного шлюза: {exc.response.status_code}") from exc
-        except Exception as exc:
-            raise BillingOperationError("PAYMENT_ERROR", str(exc)) from exc
+        except (httpx.RequestError, httpx.TimeoutException) as exc:
+            raise BillingOperationError("PAYMENT_ERROR", "Платежный шлюз недоступен") from exc
 
         return {
             "payment_id": data.get("id"),
@@ -379,7 +388,7 @@ class BillingService:
         for f in files:
             try:
                 storage.delete_file(f.s3_key, f.s3_bucket)
-            except Exception:
+            except (ClientError, BotoCoreError):
                 # Хранилище не должно блокировать очистку SQL-данных.
                 continue
         await repo.delete_org_business_data(org_id=org_id)

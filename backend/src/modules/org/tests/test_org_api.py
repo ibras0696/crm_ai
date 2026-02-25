@@ -2,6 +2,10 @@ import uuid
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+
+from src.infrastructure.uow import UnitOfWork
+from src.modules.billing.models import Plan
 
 
 def _headers(token: str) -> dict:
@@ -23,6 +27,33 @@ async def _register(client: AsyncClient, email: str | None = None, org_name: str
     )
     assert resp.status_code == 201
     return resp.json()["data"]
+
+
+async def _set_free_plan_members_limit(limit: int) -> None:
+    async with UnitOfWork() as uow:
+        free_plan = (
+            await uow.session.execute(select(Plan).where(Plan.name == "free", Plan.is_active.is_(True)))
+        ).scalar_one_or_none()
+        if free_plan is None:
+            free_plan = Plan(
+                name="free",
+                display_name="Бесплатный",
+                price_monthly=0,
+                price_yearly=0,
+                max_members=limit,
+                max_tables=10,
+                max_records=10000,
+                max_storage_mb=500,
+                has_ai=True,
+                ai_max_tokens_per_request=2000,
+                ai_tokens_per_day=20000,
+                ai_rpm_per_user=30,
+                is_active=True,
+            )
+            uow.session.add(free_plan)
+        else:
+            free_plan.max_members = limit
+        await uow.commit()
 
 
 @pytest.mark.asyncio
@@ -164,6 +195,59 @@ async def test_create_invite_forbidden_for_employee(client: AsyncClient):
         headers=_headers(emp_token),
     )
     assert resp.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_create_invite_enforces_member_limit(client: AsyncClient):
+    owner_tokens = await _register(client, org_name="Invite Member Limit")
+    await _set_free_plan_members_limit(1)
+
+    resp = await client.post(
+        "/api/v1/orgs/invites",
+        json={"email": f"limit-{uuid.uuid4().hex[:8]}@example.com", "role": "employee"},
+        headers=_headers(owner_tokens["access_token"]),
+    )
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "MEMBER_LIMIT_REACHED"
+    await _set_free_plan_members_limit(10)
+
+
+@pytest.mark.asyncio
+async def test_register_with_invite_enforces_member_limit(client: AsyncClient):
+    owner_tokens = await _register(client, org_name="Invite Register Limit")
+    invite_email = f"invite-lim-{uuid.uuid4().hex[:8]}@example.com"
+
+    await _set_free_plan_members_limit(2)
+
+    inv = await client.post(
+        "/api/v1/orgs/invites",
+        json={"email": invite_email, "role": "employee"},
+        headers=_headers(owner_tokens["access_token"]),
+    )
+    assert inv.status_code == 201
+    invite_token = inv.json()["data"]["token"]
+
+    await _set_free_plan_members_limit(1)
+
+    reg = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": invite_email,
+            "password": "StrongPass123!",
+            "first_name": "Emp",
+            "last_name": "User",
+            "org_name": "ignored",
+            "accepted_privacy_policy": True,
+            "invite_token": invite_token,
+        },
+    )
+    assert reg.status_code == 422
+    body = reg.json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "MEMBER_LIMIT_REACHED"
+    await _set_free_plan_members_limit(10)
 
 
 @pytest.mark.asyncio

@@ -1,0 +1,21 @@
+# Temporary whitelist for legacy broad catches.
+# New files with broad except are blocked by CI.
+src/modules/access/routes.py
+src/modules/ai/internal/action_parser.py
+src/modules/ai/internal/chat_controller.py
+src/modules/ai/internal/chat_io.py
+src/modules/ai/internal/context_builder.py
+src/modules/ai/internal/handlers/misc_actions.py
+src/modules/ai/limits.py
+src/modules/billing/service_sync.py
+src/modules/billing/token_wallet.py
+src/modules/notifications/tasks.py
+src/modules/org/services/invites.py
+src/modules/schedule/models.py
+src/modules/superadmin/dependencies.py
+src/modules/superadmin/repository.py
+src/modules/superadmin/services/auth.py
+src/modules/superadmin/services/overview.py
+src/modules/superadmin/services/tables.py
+src/modules/superadmin/tests/conftest.py
+src/modules/tables/query_service.py

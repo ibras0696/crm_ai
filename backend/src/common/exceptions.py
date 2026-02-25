@@ -1,8 +1,8 @@
 from typing import Any
 
 
-class AppError(Exception):
-    """Base application error."""
+class BaseAppError(Exception):
+    """Base application error with stable API contract fields."""
 
     def __init__(self, code: str, message: str, status_code: int = 400, field: str | None = None, details: Any = None):
         self.code = code
@@ -11,6 +11,10 @@ class AppError(Exception):
         self.field = field
         self.details = details
         super().__init__(message)
+
+
+class AppError(BaseAppError):
+    """Backward-compatible app error alias used across modules."""
 
 
 class NotFoundError(AppError):

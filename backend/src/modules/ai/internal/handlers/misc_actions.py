@@ -7,6 +7,7 @@ import re
 from datetime import UTC, datetime, timezone
 from typing import Any
 
+from src.modules.ai.internal.repository import AIRepository
 from src.infrastructure.uow import UnitOfWork
 from src.modules.knowledge.models import KBPage
 from src.modules.schedule.schemas import CreateEventRequest
@@ -310,6 +311,17 @@ async def handle_create_kb_page_action(
     if not title:
         return {"action": "create_kb_page", "ok": False, "error": "title_required"}
 
+    max_kb_pages = await _resolve_kb_limit(uow, org_id=org_id)
+    if max_kb_pages > 0:
+        current_kb_pages = await AIRepository(uow.session).count_kb_pages(org_id=org_id)
+        if current_kb_pages >= max_kb_pages:
+            return {
+                "action": "create_kb_page",
+                "ok": False,
+                "error": "knowledge_limit_reached",
+                "message": "Достигнут лимит тарифа по записям базы знаний.",
+            }
+
     content = action_payload.get("content")
     if content is not None:
         content = str(content)
@@ -328,3 +340,9 @@ async def handle_create_kb_page_action(
     uow.session.add(page)
     await uow.session.flush()
     return {"action": "create_kb_page", "ok": True, "page": {"id": str(page.id), "title": page.title, "slug": page.slug}}
+
+
+async def _resolve_kb_limit(uow: UnitOfWork, *, org_id: uuid.UUID) -> int:
+    plan = await AIRepository(uow.session).resolve_effective_plan(org_id=org_id)
+    # Для KB используем общий лимит записей тарифа.
+    return int(getattr(plan, "max_records", 0) or 0)

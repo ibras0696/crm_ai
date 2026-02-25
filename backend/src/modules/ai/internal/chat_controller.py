@@ -14,18 +14,18 @@ from __future__ import annotations
 
 import logging
 import re
+import uuid
 
 import httpx
-from sqlalchemy import select
-
 from src.common.enums import UserRole
 from src.common.schemas import ApiResponse
 from src.config import settings
 from src.infrastructure.metrics_custom import AI_LIMIT_REJECTIONS_TOTAL, AI_REQUESTS_TOTAL, AI_TOKENS_TOTAL
 from src.infrastructure.uow import UnitOfWork
+from src.modules.ai.internal.repository import AIRepository
 from src.modules.ai.intent_overrides import apply_ui_intent_overrides
 from src.modules.ai.limits import check_ai_limits, is_org_ai_enabled
-from src.modules.ai.models import AIChatMessage, AIRuntimeSettings, AIUsageLog
+from src.modules.ai.models import AIChatMessage, AIUsageLog
 from src.modules.ai.schemas import ChatRequest, ChatResponse
 from src.modules.billing.token_wallet import spend_tokens
 from src.modules.ai.service import (
@@ -203,6 +203,66 @@ def _estimate_prompt_tokens(messages: list[dict]) -> int:
     return int(tokens + max(0, len(messages) * 4))
 
 
+async def _load_action_limits(uow: UnitOfWork, *, org_id: uuid.UUID) -> dict[str, int]:
+    repo = AIRepository(uow.session)
+    plan = await repo.resolve_effective_plan(org_id=org_id)
+    max_tables = int(getattr(plan, "max_tables", 0) or 0)
+    max_records = int(getattr(plan, "max_records", 0) or 0)
+    current_tables = await repo.count_tables(org_id=org_id)
+    current_records = await repo.count_records(org_id=org_id)
+    current_kb_pages = await repo.count_kb_pages(org_id=org_id)
+    return {
+        "max_tables": max_tables,
+        "max_records": max_records,
+        "current_tables": current_tables,
+        "current_records": current_records,
+        "current_kb_pages": current_kb_pages,
+    }
+
+
+def _build_limits_hint(intent: str, limits: dict[str, int]) -> str:
+    max_tables = int(limits.get("max_tables", 0))
+    max_records = int(limits.get("max_records", 0))
+    cur_tables = int(limits.get("current_tables", 0))
+    cur_records = int(limits.get("current_records", 0))
+    cur_kb = int(limits.get("current_kb_pages", 0))
+    remain_tables = max(0, max_tables - cur_tables) if max_tables > 0 else -1
+    remain_records = max(0, max_records - cur_records) if max_records > 0 else -1
+    remain_kb = max(0, max_records - cur_kb) if max_records > 0 else -1
+    if intent == "create_table":
+        return (
+            "\n\nОграничения тарифа (актуальные):\n"
+            + f"- Таблицы: {cur_tables}/{max_tables if max_tables > 0 else 'без лимита'}"
+            + (f" (осталось {remain_tables})\n" if max_tables > 0 else "\n")
+            + f"- Записи в организации: {cur_records}/{max_records if max_records > 0 else 'без лимита'}"
+            + (f" (осталось {remain_records})\n" if max_records > 0 else "\n")
+            + "Если лимит = 0, не предлагай создание. Сразу объясни, что достигнут лимит."
+        )
+    if intent == "create_kb_page":
+        return (
+            "\n\nОграничения тарифа (актуальные):\n"
+            + f"- Страницы базы знаний: {cur_kb}/{max_records if max_records > 0 else 'без лимита'}"
+            + (f" (осталось {remain_kb})\n" if max_records > 0 else "\n")
+            + "Если лимит = 0, не предлагай создание. Сразу объясни, что достигнут лимит."
+        )
+    return ""
+
+
+def _intent_limit_error(intent: str, limits: dict[str, int]) -> dict | None:
+    max_tables = int(limits.get("max_tables", 0))
+    max_records = int(limits.get("max_records", 0))
+    cur_tables = int(limits.get("current_tables", 0))
+    cur_records = int(limits.get("current_records", 0))
+    cur_kb = int(limits.get("current_kb_pages", 0))
+    if intent == "create_table" and max_tables > 0 and cur_tables >= max_tables:
+        return {"code": "TABLE_LIMIT_REACHED", "message": "Достигнут лимит тарифа по таблицам."}
+    if intent == "create_table" and max_records > 0 and cur_records >= max_records:
+        return {"code": "RECORD_LIMIT_REACHED", "message": "Достигнут лимит тарифа по записям."}
+    if intent == "create_kb_page" and max_records > 0 and cur_kb >= max_records:
+        return {"code": "KNOWLEDGE_LIMIT_REACHED", "message": "Достигнут лимит тарифа по записям базы знаний."}
+    return None
+
+
 async def _execute_action(
     uow: UnitOfWork,
     current_user: CurrentUser,
@@ -287,7 +347,7 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
 
     # Runtime-параметры модели (из superadmin AI config).
     async with UnitOfWork() as uow:
-        runtime = (await uow.session.execute(select(AIRuntimeSettings).limit(1))).scalars().first()
+        runtime = await AIRepository(uow.session).get_runtime_settings()
     effective_model = (runtime.model.strip() if runtime and runtime.model else settings.OPENAI_MODEL)
     effective_system_prompt = (runtime.system_prompt if runtime and runtime.system_prompt else settings.AI_SYSTEM_PROMPT)
     effective_max_tokens_per_request = int(
@@ -313,6 +373,13 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
             + "- Если пользователь пишет привет/спасибо/вопрос не по теме выбранного действия, просто ответь и НЕ добавляй ```crm_action```.\n"
             + "- Если действие требует уточнений, задай 1-2 вопроса вместо выполнения.\n"
         )
+        if intent in {"create_table", "create_kb_page"}:
+            async with UnitOfWork() as uow:
+                action_limits = await _load_action_limits(uow, org_id=current_user.org_id)
+            limit_error = _intent_limit_error(intent, action_limits)
+            if limit_error is not None:
+                return ApiResponse(ok=False, data=None, error=limit_error)
+            system_prompt += _build_limits_hint(intent, action_limits)
     context_options = body.context_options or {}
     request_id = (body.request_id or "").strip() or None
 
@@ -324,18 +391,12 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
         session_id = session.id
         # Сохраняем новую сессию сразу, чтобы следующий UoW гарантированно её видел.
         await uow.commit()
-        db_messages = (
-            await uow.session.execute(
-                select(AIChatMessage)
-                .where(
-                    AIChatMessage.session_id == session_id,
-                    AIChatMessage.org_id == current_user.org_id,
-                    AIChatMessage.user_id == current_user.user_id,
-                )
-                .order_by(AIChatMessage.created_at.asc())
-                .limit(60)
-            )
-        ).scalars().all()
+        db_messages = await AIRepository(uow.session).list_session_messages_for_user(
+            session_id=session_id,
+            org_id=current_user.org_id,
+            user_id=current_user.user_id,
+            limit=60,
+        )
 
     # Этап 4: сбор контекста организации (опционально).
     org_context = ""

@@ -4,12 +4,10 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import httpx
-from sqlalchemy import select
 
 from src.common.enums import NotificationStatus, NotificationType, PlanTier, SubscriptionStatus
 from src.config import settings
 from src.infrastructure.uow import UnitOfWork
-from src.modules.billing.models import TokenPackage
 from src.modules.billing.repository import BillingRepository
 from src.modules.billing.schemas import UsageOut
 from src.modules.billing.token_wallet import (
@@ -19,7 +17,6 @@ from src.modules.billing.token_wallet import (
 )
 from src.modules.files import storage
 from src.modules.notifications.models import Notification
-from src.modules.org.models import Organization
 
 
 class BillingOperationError(Exception):
@@ -58,13 +55,8 @@ class BillingService:
 
     async def list_token_packages(self) -> list[dict]:
         async with UnitOfWork() as uow:
-            rows = (
-                await uow.session.execute(
-                    select(TokenPackage)
-                    .where(TokenPackage.is_active.is_(True))
-                    .order_by(TokenPackage.sort_order.asc(), TokenPackage.created_at.asc())
-                )
-            ).scalars().all()
+            repo = BillingRepository(uow.session)
+            rows = await repo.list_active_token_packages()
         return [
             {
                 "code": row.code,
@@ -267,13 +259,8 @@ class BillingService:
         async with UnitOfWork() as uow:
             repo = BillingRepository(uow.session)
             subscriptions = await repo.list_subscriptions()
-            all_org_ids = [row[0] for row in (await uow.session.execute(select(Organization.id))).all()]
-            org_map = {}
-            if all_org_ids:
-                org_rows = (
-                    await uow.session.execute(select(Organization).where(Organization.id.in_(all_org_ids)))
-                ).scalars().all()
-                org_map = {org.id: org for org in org_rows}
+            all_org_ids = await repo.list_org_ids()
+            org_map = await repo.list_orgs_by_ids(all_org_ids)
 
             # Ротация plan-токенов по месячному циклу (без переноса остатка).
             await ensure_token_balances_bulk(uow.session, org_ids=all_org_ids, lock=False)

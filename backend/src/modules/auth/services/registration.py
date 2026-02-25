@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from src.common.enums import AuditAction, InviteStatus, PlanTier, SubscriptionStatus, UserRole
-from src.common.exceptions import ConflictError, NotFoundError, ValidationError
+from src.common.exceptions import AppError, ConflictError, NotFoundError, ValidationError
 from src.infrastructure.uow import UnitOfWork
 from src.modules.audit.repository import AuditRepository
 from src.modules.auth.models import RefreshToken, User
 from src.modules.auth.repository import RefreshTokenRepository, UserRepository
-from src.modules.auth.schemas import RegisterRequest, TokenResponse
 from src.modules.auth.security import (
     create_access_token,
     create_refresh_token,
@@ -17,13 +17,25 @@ from src.modules.auth.security import (
 )
 from src.modules.auth.services.utils import build_token_response, slugify_org_name
 from src.modules.org.models import Membership, Organization, Subscription
-from src.modules.org.repository import InviteRepository, MembershipRepository, OrganizationRepository, SubscriptionRepository
+from src.modules.org.repository import (
+    InviteRepository,
+    MembershipRepository,
+    OrganizationRepository,
+    SubscriptionRepository,
+)
+
+if TYPE_CHECKING:
+    from src.modules.auth.schemas import RegisterRequest, TokenResponse
 
 
 class AuthRegistrationService:
     """Registration use-cases: invite-based and new organization."""
 
-    async def register(self, data: RegisterRequest, ip_address: str | None = None) -> tuple[User, Organization, TokenResponse]:
+    async def register(
+        self,
+        data: RegisterRequest,
+        ip_address: str | None = None,
+    ) -> tuple[User, Organization, TokenResponse]:
         async with UnitOfWork() as uow:
             user_repo = UserRepository(uow.session)
             org_repo = OrganizationRepository(uow.session)
@@ -45,6 +57,7 @@ class AuthRegistrationService:
                     member_repo=member_repo,
                     token_repo=token_repo,
                     audit_repo=audit_repo,
+                    sub_repo=sub_repo,
                     invite_repo=InviteRepository(uow.session),
                 )
                 await uow.commit()
@@ -73,6 +86,7 @@ class AuthRegistrationService:
         member_repo: MembershipRepository,
         token_repo: RefreshTokenRepository,
         audit_repo: AuditRepository,
+        sub_repo: SubscriptionRepository,
         invite_repo: InviteRepository,
     ) -> tuple[User, Organization, TokenResponse]:
         invite = await invite_repo.get_by_token(data.invite_token)  # type: ignore[arg-type]
@@ -96,6 +110,7 @@ class AuthRegistrationService:
             last_name=data.last_name,
         )
         user = await user_repo.create(user)
+        await self._enforce_member_limit(member_repo=member_repo, sub_repo=sub_repo, org_id=org.id)
 
         membership = Membership(user_id=user.id, org_id=org.id, role=invite.role)
         await member_repo.create(membership)
@@ -123,6 +138,25 @@ class AuthRegistrationService:
         )
 
         return user, org, build_token_response(access_token=access_token, refresh_token=raw_refresh)
+
+    async def _enforce_member_limit(
+        self,
+        *,
+        member_repo: MembershipRepository,
+        sub_repo: SubscriptionRepository,
+        org_id,
+    ) -> None:
+        plan = await sub_repo.get_effective_plan(org_id)
+        limit = int(getattr(plan, "max_members", 0) or 0)
+        if limit <= 0:
+            return
+        current_members = await member_repo.count_org_members(org_id)
+        if current_members >= limit:
+            raise AppError(
+                code="MEMBER_LIMIT_REACHED",
+                message="Достигнут лимит тарифа по участникам.",
+                status_code=422,
+            )
 
     async def _register_new_org(
         self,
@@ -186,4 +220,3 @@ class AuthRegistrationService:
         )
 
         return user, org, build_token_response(access_token=access_token, refresh_token=raw_refresh)
-

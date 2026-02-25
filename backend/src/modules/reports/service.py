@@ -5,9 +5,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from src.modules.reports.models import ReportDashboard, ReportWidget
 from src.modules.reports.repository import ReportsRepository
@@ -160,49 +158,29 @@ def aggregate(agg: str, values: list[Any]) -> float | int | None:
     return None
 
 
-async def load_table(session: AsyncSession, table_id: uuid.UUID, org_id: uuid.UUID) -> Table | None:
-    stmt = select(Table).where(Table.id == table_id, Table.org_id == org_id).options(selectinload(Table.columns))
-    return (await session.execute(stmt)).scalar_one_or_none()
+async def load_table(repo: ReportsRepository, table_id: uuid.UUID, org_id: uuid.UUID) -> Table | None:
+    return await repo.get_table_with_columns(org_id, table_id)
 
 
 async def load_tables_map(
-    session: AsyncSession,
+    repo: ReportsRepository,
     *,
     org_id: uuid.UUID,
     table_ids: list[uuid.UUID],
 ) -> dict[uuid.UUID, Table]:
-    if not table_ids:
-        return {}
-    stmt = (
-        select(Table)
-        .where(Table.org_id == org_id, Table.id.in_(table_ids))
-        .options(selectinload(Table.columns))
-    )
-    rows = (await session.execute(stmt)).scalars().all()
-    return {table.id: table for table in rows}
+    return await repo.get_tables_map_by_ids(org_id=org_id, table_ids=table_ids)
 
 
 async def load_records_map(
-    session: AsyncSession,
+    repo: ReportsRepository,
     *,
     table_ids: list[uuid.UUID],
 ) -> dict[uuid.UUID, list[Record]]:
-    if not table_ids:
-        return {}
-    stmt = (
-        select(Record)
-        .where(Record.table_id.in_(table_ids))
-        .order_by(Record.table_id.asc(), Record.position.asc(), Record.created_at.desc())
-    )
-    rows = (await session.execute(stmt)).scalars().all()
-    out: dict[uuid.UUID, list[Record]] = defaultdict(list)
-    for rec in rows:
-        out[rec.table_id].append(rec)
-    return out
+    return await repo.list_records_map_by_table_ids(table_ids=table_ids)
 
 
 async def build_widget_data(
-    session: AsyncSession,
+    repo: ReportsRepository,
     org_id: uuid.UUID,
     widget: ReportWidget,
     *,
@@ -215,19 +193,14 @@ async def build_widget_data(
 
     table = (tables_map or {}).get(widget.table_id) if widget.table_id else None
     if table is None and widget.table_id:
-        table = await load_table(session, widget.table_id, org_id)
+        table = await load_table(repo, widget.table_id, org_id)
     if not table:
         return {"type": widget.widget_type, "error": "table not found"}
 
     has_prefetched_records = records_map is not None and table.id in records_map
     records = list((records_map or {}).get(table.id, []))
     if not has_prefetched_records:
-        rec_stmt = (
-            select(Record)
-            .where(Record.table_id == table.id)
-            .order_by(Record.position.asc(), Record.created_at.desc())
-        )
-        records = list((await session.execute(rec_stmt)).scalars().all())
+        records = await repo.list_records_by_table(table.id)
     filtered = apply_filters(records, cfg.filters)
 
     columns_map: dict[str, Column] = {str(c.id): c for c in table.columns}
@@ -531,12 +504,12 @@ class ReportsService:
         ordered_widgets = sorted(dash.widgets, key=lambda item: item.position)
         table_ids = [w.table_id for w in ordered_widgets if w.table_id is not None]
         unique_table_ids = list(dict.fromkeys(table_ids))
-        tables_map = await load_tables_map(self.session, org_id=org_id, table_ids=unique_table_ids)
-        records_map = await load_records_map(self.session, table_ids=unique_table_ids)
+        tables_map = await load_tables_map(self.repo, org_id=org_id, table_ids=unique_table_ids)
+        records_map = await load_records_map(self.repo, table_ids=unique_table_ids)
         items: list[WidgetDataOut] = []
         for widget in ordered_widgets:
             data = await build_widget_data(
-                self.session,
+                self.repo,
                 org_id,
                 widget,
                 tables_map=tables_map,

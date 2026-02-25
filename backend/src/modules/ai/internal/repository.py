@@ -7,19 +7,18 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.modules.ai.models import AIChatMessage, AIChatSession, AIUsageLog
+from src.common.enums import SubscriptionStatus
+from src.modules.ai.models import AIChatMessage, AIChatSession, AIRuntimeSettings, AIUsageLog
 from src.modules.billing.models import Plan
 from src.modules.knowledge.models import KBPage
+from src.modules.org.models import Organization, Subscription
 from src.modules.schedule.models import Event
 from src.modules.tables.models import Table
+from src.modules.tables.records import Record
 
 
 class AIRepository:
-    """Репозиторий AI: только запросы к БД, без бизнес-логики.
-
-    Правило: никаких бизнес-решений (например, "какой тариф эффективный") и никакой
-    сетевой логики. Только чтение/запись БД.
-    """
+    """Репозиторий AI: только запросы к БД"""
 
     def __init__(self, session: AsyncSession):
         """Создать репозиторий для работы с AI-данными.
@@ -46,6 +45,55 @@ class AIRepository:
             .scalars()
             .first()
         )
+
+    async def resolve_effective_plan_name(self, *, org_id: uuid.UUID) -> str:
+        sub = (
+            await self.session.execute(select(Subscription).where(Subscription.org_id == org_id).limit(1))
+        ).scalar_one_or_none()
+        if sub and str(getattr(sub.status, "value", sub.status)) in {
+            SubscriptionStatus.ACTIVE.value,
+            SubscriptionStatus.PAST_DUE.value,
+        }:
+            return str(getattr(sub.plan, "value", sub.plan)).lower()
+
+        org_plan = (
+            await self.session.execute(select(Organization.plan).where(Organization.id == org_id).limit(1))
+        ).scalar_one_or_none()
+        return str(getattr(org_plan, "value", org_plan or "free")).lower()
+
+    async def resolve_effective_plan(self, *, org_id: uuid.UUID) -> Plan | None:
+        plan_name = await self.resolve_effective_plan_name(org_id=org_id)
+        return await self.get_active_plan(name=plan_name)
+
+    async def count_tables(self, *, org_id: uuid.UUID) -> int:
+        result = await self.session.execute(select(func.count(Table.id)).where(Table.org_id == org_id))
+        return int(result.scalar() or 0)
+
+    async def count_records(self, *, org_id: uuid.UUID) -> int:
+        result = await self.session.execute(select(func.count(Record.id)).where(Record.org_id == org_id))
+        return int(result.scalar() or 0)
+
+    async def count_kb_pages(self, *, org_id: uuid.UUID) -> int:
+        result = await self.session.execute(select(func.count(KBPage.id)).where(KBPage.org_id == org_id))
+        return int(result.scalar() or 0)
+
+    async def list_active_tables_with_columns(self, *, org_id: uuid.UUID) -> list[Table]:
+        return (
+            await self.session.execute(
+                select(Table)
+                .where(Table.org_id == org_id, Table.is_archived.is_(False))
+                .options(selectinload(Table.columns))
+            )
+        ).scalars().all()
+
+    async def lock_table(self, *, table_id: uuid.UUID) -> None:
+        await self.session.execute(select(Table.id).where(Table.id == table_id).with_for_update())
+
+    async def get_max_record_position(self, *, table_id: uuid.UUID) -> int:
+        result = await self.session.execute(
+            select(func.coalesce(func.max(Record.position), -1)).where(Record.table_id == table_id)
+        )
+        return int(result.scalar_one() or -1)
 
     async def usage_stats(self, *, org_id: uuid.UUID, since: datetime | None = None) -> tuple[int, int, int, int]:
         """Агрегаты использования AI по организации.
@@ -227,6 +275,30 @@ class AIRepository:
             .scalars()
             .all()
         )
+
+    async def list_session_messages_for_user(
+        self,
+        *,
+        session_id: uuid.UUID,
+        org_id: uuid.UUID,
+        user_id: uuid.UUID,
+        limit: int = 60,
+    ) -> list[AIChatMessage]:
+        return (
+            await self.session.execute(
+                select(AIChatMessage)
+                .where(
+                    AIChatMessage.session_id == session_id,
+                    AIChatMessage.org_id == org_id,
+                    AIChatMessage.user_id == user_id,
+                )
+                .order_by(AIChatMessage.created_at.asc())
+                .limit(limit)
+            )
+        ).scalars().all()
+
+    async def get_runtime_settings(self) -> AIRuntimeSettings | None:
+        return (await self.session.execute(select(AIRuntimeSettings).limit(1))).scalars().first()
 
     async def list_kb_pages(self, *, org_id: uuid.UUID, limit: int = 300) -> list[KBPage]:
         """Получить опубликованные страницы базы знаний.

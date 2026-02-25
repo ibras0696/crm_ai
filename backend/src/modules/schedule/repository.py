@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.modules.org.models import Membership
 from src.modules.schedule.models import Event
 
 
@@ -77,6 +78,16 @@ class ScheduleRepository:
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_existing_org_users(self, *, org_id: uuid.UUID, user_ids: list[uuid.UUID]) -> set[uuid.UUID]:
+        if not user_ids:
+            return set()
+        stmt = select(Membership.user_id).where(
+            Membership.org_id == org_id,
+            Membership.user_id.in_(user_ids),
+        )
+        result = await self.session.execute(stmt)
+        return {row[0] for row in result.all()}
 
     async def delete(self, event: Event) -> None:
         """Delete event row."""

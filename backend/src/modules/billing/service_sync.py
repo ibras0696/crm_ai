@@ -1,30 +1,23 @@
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
-from sqlalchemy import delete, func, select
-from sqlalchemy.orm import Session
-
-from src.common.enums import NotificationStatus, NotificationType, PlanTier, SubscriptionStatus, UserRole
+from src.common.enums import PlanTier, SubscriptionStatus
 from src.config import settings
-from src.modules.ai.models import AIChatMessage, AIChatSession, AIUsageLog
-from src.modules.audit.models import AuditLog
-from src.modules.billing.models import Plan, TokenBalance, TokenPurchase
+from src.modules.billing.repository_sync import BillingSyncRepository
 from src.modules.files import storage
-from src.modules.files.models import File
-from src.modules.knowledge.models import KBPage
-from src.modules.notifications.models import Notification
-from src.modules.org.models import Membership, Organization, Subscription
-from src.modules.reports.models import ReportDashboard
-from src.modules.schedule.models import Event
-from src.modules.tables.models import Table, TableFolder
-from src.modules.tables.records import Record
+
+if TYPE_CHECKING:
+    import uuid
+
+    from sqlalchemy.orm import Session
 
 
 class BillingServiceSync:
     def __init__(self, session: Session):
         self.session = session
+        self.repo = BillingSyncRepository(session)
 
     def process_subscription_lifecycle(self, *, now: datetime | None = None) -> dict[str, int]:
         now_utc = now or datetime.now(UTC)
@@ -44,16 +37,9 @@ class BillingServiceSync:
 
         self._rotate_monthly_plan_tokens_for_all_orgs(now_utc=now_utc)
 
-        subscriptions = list(self.session.execute(select(Subscription)).scalars().all())
+        subscriptions = self.repo.list_subscriptions()
         org_ids = [sub.org_id for sub in subscriptions]
-        org_map: dict[uuid.UUID, Organization] = {}
-        if org_ids:
-            org_rows = list(
-                self.session.execute(
-                    select(Organization).where(Organization.id.in_(org_ids)),
-                ).scalars().all(),
-            )
-            org_map = {org.id: org for org in org_rows}
+        org_map = self.repo.list_organizations_by_ids(org_ids)
 
         for sub in subscriptions:
             org = org_map.get(sub.org_id)
@@ -75,7 +61,10 @@ class BillingServiceSync:
                 created = self._create_billing_notification(
                     org_id=sub.org_id,
                     title="Подписка скоро закончится",
-                    body="Срок тарифа заканчивается в течение 24 часов. Продлите подписку, чтобы не потерять доступ к платным возможностям.",
+                    body=(
+                        "Срок тарифа заканчивается в течение 24 часов. "
+                        "Продлите подписку, чтобы не потерять доступ к платным возможностям."
+                    ),
                     meta={"kind": "subscription_pre_expiry", "period_end": period_end.isoformat()},
                 )
                 if created > 0:
@@ -115,65 +104,25 @@ class BillingServiceSync:
                 sub.data_purged_at = now_utc
                 stats["purged_orgs"] += 1
 
-        self.session.commit()
+        self.repo.commit()
         return stats
 
     def _rotate_monthly_plan_tokens_for_all_orgs(self, *, now_utc: datetime) -> None:
         cycle = f"{now_utc.year:04d}-{now_utc.month:02d}"
-        org_ids = [row[0] for row in self.session.execute(select(Organization.id)).all()]
+        org_ids = self.repo.list_all_org_ids()
         if not org_ids:
             return
 
-        expired = list(
-            self.session.execute(
-                select(TokenPurchase).where(
-                    TokenPurchase.org_id.in_(org_ids),
-                    TokenPurchase.is_active.is_(True),
-                    TokenPurchase.expires_at.is_not(None),
-                    TokenPurchase.expires_at <= now_utc,
-                )
-            ).scalars().all()
-        )
+        expired = self.repo.list_expired_active_purchases(org_ids=org_ids, now_utc=now_utc)
         for purchase in expired:
             purchase.is_active = False
             purchase.tokens_remaining = 0
 
-        addon_sum_rows = self.session.execute(
-            select(TokenPurchase.org_id, func.coalesce(func.sum(TokenPurchase.tokens_remaining), 0))
-            .where(
-                TokenPurchase.org_id.in_(org_ids),
-                TokenPurchase.is_active.is_(True),
-                TokenPurchase.tokens_remaining > 0,
-            )
-            .group_by(TokenPurchase.org_id)
-        ).all()
-        addon_total_by_org = {org_id: int(total or 0) for org_id, total in addon_sum_rows}
-
-        active_sub_rows = self.session.execute(
-            select(Subscription.org_id, Subscription.plan).where(
-                Subscription.org_id.in_(org_ids),
-                Subscription.status == SubscriptionStatus.ACTIVE,
-            )
-        ).all()
-        sub_plan_by_org = {}
-        for org_id, plan in active_sub_rows:
-            if plan is not None:
-                sub_plan_by_org[org_id] = plan.value if hasattr(plan, "value") else str(plan)
-
-        org_plan_rows = self.session.execute(select(Organization.id, Organization.plan).where(Organization.id.in_(org_ids))).all()
-        org_plan_by_org = {
-            org_id: (plan.value if hasattr(plan, "value") else str(plan or "free"))
-            for org_id, plan in org_plan_rows
-        }
-
-        plans = self.session.execute(select(Plan).where(Plan.is_active.is_(True))).scalars().all()
-        quota_by_plan_name = {
-            str(plan.name).lower(): int(getattr(plan, "ai_tokens_per_day", 0) or 0)
-            for plan in plans
-        }
-
-        balances = self.session.execute(select(TokenBalance).where(TokenBalance.org_id.in_(org_ids))).scalars().all()
-        balance_by_org = {b.org_id: b for b in balances}
+        addon_total_by_org = self.repo.sum_active_addon_tokens_by_org(org_ids=org_ids)
+        sub_plan_by_org = self.repo.list_active_subscription_plans_by_org(org_ids=org_ids)
+        org_plan_by_org = self.repo.list_org_plans(org_ids=org_ids)
+        quota_by_plan_name = self.repo.list_active_plan_ai_quota_by_name()
+        balance_by_org = self.repo.list_token_balances_by_org(org_ids=org_ids)
 
         for org_id in org_ids:
             plan_name = str(sub_plan_by_org.get(org_id) or org_plan_by_org.get(org_id) or "free").lower()
@@ -182,14 +131,11 @@ class BillingServiceSync:
 
             balance = balance_by_org.get(org_id)
             if balance is None:
-                self.session.add(
-                    TokenBalance(
-                        org_id=org_id,
-                        plan_cycle_key=cycle,
-                        plan_tokens_monthly_quota=quota,
-                        plan_tokens_remaining=quota,
-                        addon_tokens_remaining=addon_total,
-                    )
+                self.repo.add_token_balance(
+                    org_id=org_id,
+                    cycle=cycle,
+                    quota=quota,
+                    addon_total=addon_total,
                 )
                 continue
 
@@ -200,51 +146,27 @@ class BillingServiceSync:
             balance.addon_tokens_remaining = addon_total
 
     def _create_billing_notification(self, *, org_id: uuid.UUID, title: str, body: str, meta: dict) -> int:
-        recipients = [
-            row[0]
-            for row in self.session.execute(
-                select(Membership.user_id).where(
-                    Membership.org_id == org_id,
-                    Membership.role.in_([UserRole.OWNER, UserRole.ADMIN]),
-                )
-            ).all()
-        ]
-        if not recipients:
-            recipients = [row[0] for row in self.session.execute(select(Membership.user_id).where(Membership.org_id == org_id)).all()]
+        recipients = self.repo.get_notification_recipients(org_id=org_id)
         if not recipients:
             return 0
 
         for user_id in recipients:
-            self.session.add(Notification(
+            self.repo.add_in_app_notification(
                 org_id=org_id,
                 user_id=user_id,
-                type=NotificationType.IN_APP,
-                status=NotificationStatus.PENDING,
                 title=title,
                 body=body,
                 meta=meta,
-            ))
-        self.session.flush()
+            )
+        self.repo.flush()
         return len(recipients)
 
     def _purge_org_data(self, *, org_id: uuid.UUID) -> None:
-        files = list(self.session.execute(select(File).where(File.org_id == org_id)).scalars().all())
+        files = self.repo.list_files_by_org(org_id=org_id)
         for f in files:
             try:
                 storage.delete_file(f.s3_key, f.s3_bucket)
             except Exception:
                 continue
 
-        self.session.execute(delete(AIChatMessage).where(AIChatMessage.org_id == org_id))
-        self.session.execute(delete(AIChatSession).where(AIChatSession.org_id == org_id))
-        self.session.execute(delete(AIUsageLog).where(AIUsageLog.org_id == org_id))
-        self.session.execute(delete(Notification).where(Notification.org_id == org_id))
-        self.session.execute(delete(AuditLog).where(AuditLog.org_id == org_id))
-        self.session.execute(delete(Event).where(Event.org_id == org_id))
-        self.session.execute(delete(KBPage).where(KBPage.org_id == org_id))
-        self.session.execute(delete(Record).where(Record.org_id == org_id))
-        self.session.execute(delete(Table).where(Table.org_id == org_id))
-        self.session.execute(delete(TableFolder).where(TableFolder.org_id == org_id))
-        self.session.execute(delete(ReportDashboard).where(ReportDashboard.org_id == org_id))
-        self.session.execute(delete(File).where(File.org_id == org_id))
-        self.session.flush()
+        self.repo.delete_org_data_rows(org_id=org_id)

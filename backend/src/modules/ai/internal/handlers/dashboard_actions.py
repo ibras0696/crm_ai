@@ -5,9 +5,6 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import selectinload
-
 from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.internal.resolution import normalize_name, resolve_column_id, resolve_table_by_ref
 from src.modules.ai.internal.widget_inference import (
@@ -21,10 +18,10 @@ from src.modules.ai.internal.widget_inference import (
     should_use_inferred_widgets,
 )
 from src.modules.reports.models import ReportDashboard, ReportWidget
+from src.modules.reports.repository import ReportsRepository
 from src.modules.reports.schemas import WidgetConfig
 from src.modules.reports.service import build_widget_data
 from src.modules.tables.models import Table
-from src.modules.tables.records import Record
 
 
 async def handle_create_dashboard_action(
@@ -43,19 +40,12 @@ async def handle_create_dashboard_action(
     uow.session.add(dash)
     await uow.session.flush()
 
-    tables = (
-        await uow.session.execute(
-            select(Table).where(Table.org_id == org_id, Table.is_archived.is_(False)).options(selectinload(Table.columns))
-        )
-    ).scalars().all()
+    reports_repo = ReportsRepository(uow.session)
+    tables = await reports_repo.list_org_tables_with_columns(org_id)
     table_record_counts: dict[str, int] = {}
     if tables:
-        cnt_rows = (
-            await uow.session.execute(
-                select(Record.table_id, func.count(Record.id)).where(Record.table_id.in_([t.id for t in tables])).group_by(Record.table_id)
-            )
-        ).all()
-        table_record_counts = {str(table_id): int(cnt or 0) for table_id, cnt in cnt_rows}
+        counts = await reports_repo.count_records_by_table_ids([t.id for t in tables])
+        table_record_counts = {str(table_id): int(cnt or 0) for table_id, cnt in counts.items()}
         for t in tables:
             table_record_counts.setdefault(str(t.id), 0)
 
@@ -197,8 +187,7 @@ async def handle_create_dashboard_action(
                 "widget_type": widget.widget_type,
                 "table_id": str(widget.table_id) if widget.table_id else None,
                 "config": widget.config or {},
-                "data": await build_widget_data(uow.session, org_id, widget),
+                "data": await build_widget_data(reports_repo, org_id, widget),
             }
         )
     return {"action": "create_dashboard", "dashboard": {"id": str(dash.id), "name": dash.name, "description": dash.description}, "items": preview_items, "skipped": skipped}
-

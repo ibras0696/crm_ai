@@ -3,12 +3,10 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.enums import NotificationStatus, NotificationType
 from src.modules.notifications.models import Notification
-from src.modules.org.models import Membership
 from src.modules.schedule.models import Event
 from src.modules.schedule.repository import ScheduleRepository
 from src.modules.schedule.schemas import CreateEventRequest, UpdateEventRequest
@@ -227,12 +225,7 @@ class ScheduleService:
         unique_ids = {uid for uid in user_ids}
         if not unique_ids:
             return
-        stmt = select(Membership.user_id).where(
-            Membership.org_id == org_id,
-            Membership.user_id.in_(unique_ids),
-        )
-        result = await self.session.execute(stmt)
-        existing = {row[0] for row in result.all()}
+        existing = await self.repo.list_existing_org_users(org_id=org_id, user_ids=list(unique_ids))
         missing = unique_ids - existing
         if missing:
             raise ScheduleServiceError(code="INVALID_PARTICIPANT", message="Выбранный участник не найден в организации")

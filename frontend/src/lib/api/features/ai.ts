@@ -89,7 +89,7 @@ export const aiApi = {
     chat_id?: string
     request_id?: string
     context_options?: AIContextOptions
-  }) => api.post<ApiResponse<AIChatResponse>>('/ai/chat', data),
+  }) => api.post<ApiResponse<AIChatResponse>>('/ai/chat', data, { timeout: 65000 }),
   status: () =>
     api.get<
       ApiResponse<{

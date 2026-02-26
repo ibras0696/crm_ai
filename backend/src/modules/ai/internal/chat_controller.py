@@ -36,6 +36,7 @@ from src.modules.ai.internal.prompts import (
     build_repair_user_prompt,
     build_synthesis_user_prompt,
 )
+from src.modules.ai.internal.prompt_manager import build_turn_system_prompt
 from src.modules.ai.internal.chat_policy import (
     build_intent_decision,
     extract_requested_record_count,
@@ -831,7 +832,8 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
     effective_temperature = float(runtime.temperature if runtime else 0.3)
 
     # Этап 2: подготовка system_prompt (UI intent = подсказка, не приказ).
-    system_prompt = body.system_prompt or effective_system_prompt
+    base_system_prompt = body.system_prompt or effective_system_prompt
+    system_prompt = base_system_prompt
     intent_decision = build_intent_decision(body.message, body.ui_intent)
     requested_records_target = extract_requested_record_count(body.message)
     is_table_create_request = looks_like_table_create_request(body.message)
@@ -974,6 +976,14 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
             )
         )
 
+    first_turn = len(db_messages) == 0
+    turn_system_prompt = build_turn_system_prompt(
+        base_system_prompt=system_prompt,
+        first_turn=first_turn,
+        intent_decision=intent_decision,
+        has_selected_context=has_selected_context(context_options),
+    )
+
     # Этап 4: сбор контекста организации (опционально).
     org_context = ""
     context_meta: dict | None = None
@@ -1022,14 +1032,12 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
     # - в timeweb_native цепочка идет через parent_message_id на стороне провайдера;
     # - в openai-compatible работаем как stateless turn (без локального history-tail).
     history_rows: list[dict[str, str]] = []
-    # Первоначальный prompt отправляем только один раз на чат-сессию.
-    first_turn = len(db_messages) == 0
-    include_system_prompt = bool(first_turn)
-    # Action-инструкции считаем частью начального контракта чата:
-    # отправляем только на первом сообщении сессии.
-    action_mode = bool(first_turn)
+    # На каждом ходу отправляем system prompt: на 1-м полный, далее компактный.
+    include_system_prompt = True
+    # Тяжелые action-инструкции включаем на первом ходу и на action-запросах.
+    action_mode = bool(first_turn) or should_enable_action_mode(user_message=body.message, ui_intent=body.ui_intent)
     messages = build_messages(
-        system_prompt,
+        turn_system_prompt,
         org_context,
         [],
         history_rows,
@@ -1138,7 +1146,7 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 raise
             # Fallback-retry only for non-strict mode.
             retry_messages = build_messages(
-                system_prompt=system_prompt,
+                system_prompt=turn_system_prompt,
                 org_context="",
                 db_messages=[],
                 history=[],

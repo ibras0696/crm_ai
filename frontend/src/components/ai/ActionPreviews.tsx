@@ -153,3 +153,53 @@ export function ActionErrorPreview({ result }: { result: Record<string, unknown>
     </div>
   )
 }
+
+export function PendingActionPreview({
+  result,
+  onConfirm,
+  onCancel,
+  disabled = false,
+}: {
+  result: Record<string, unknown>
+  onConfirm: () => void
+  onCancel: () => void
+  disabled?: boolean
+}) {
+  if (result.needs_confirmation !== true) return null
+  const action = asString(result.action)
+  const rowsCount = Number(result.rows_count ?? 0) || 0
+  const colsCount = Number(result.columns_count ?? 0) || 0
+  const tableRef = asString(result.table_ref)
+  const titleByAction: Record<string, string> = {
+    create_records: 'Заполнение таблицы',
+    create_columns: 'Изменение структуры таблицы',
+  }
+  const title = titleByAction[action] || 'Изменение таблицы'
+  return (
+    <div className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3">
+      <p className="text-xs text-muted-foreground">Требуется подтверждение</p>
+      <p className="text-sm font-semibold mt-1">{title}</p>
+      <p className="text-xs text-muted-foreground mt-1">
+        {tableRef ? `Таблица: ${tableRef}. ` : ''}
+        {rowsCount > 0 ? `Строк: ${rowsCount}. ` : ''}
+        {colsCount > 0 ? `Колонок: ${colsCount}.` : ''}
+      </p>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button
+          onClick={onConfirm}
+          disabled={disabled}
+          className="h-8 rounded-md bg-primary text-white text-xs hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Подтвердить
+        </button>
+        <button
+          onClick={onCancel}
+          disabled={disabled}
+          className="h-8 rounded-md border border-border text-xs hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Отменить
+        </button>
+      </div>
+    </div>
+  )
+}

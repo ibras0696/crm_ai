@@ -227,6 +227,9 @@ class Settings(BaseSettings):
     AI_RPM_PER_USER_BUSINESS: int = 60
     AI_BASE_URL: str = "https://agent.timeweb.cloud/api/v1/cloud-ai/agents/289156bc-4adc-4be8-94cf-6767a704a80c/v1"
     AI_PROVIDER_MODE: str = "openai_compatible"  # openai_compatible | timeweb_native
+    AI_ENFORCE_EXACT_USAGE: bool = True
+    AI_SEND_SYSTEM_PROMPT_ONCE_PER_CHAT: bool = True
+    AI_PROVIDER_TIMEOUT_S: float = 90.0
     AI_SYSTEM_PROMPT: str = "You are an AI assistant for the CRM platform. Reply in Russian."
 
     @model_validator(mode="after")

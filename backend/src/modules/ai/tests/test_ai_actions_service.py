@@ -4,6 +4,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
+from src.common.enums import UserRole
 
 def _headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
@@ -41,6 +42,32 @@ async def test_extract_action_payload_from_codeblock_and_plain_json():
     assert isinstance(payload2, dict)
     assert payload2["action"] == "create_dashboard"
     assert "create_dashboard" not in cleaned2 or cleaned2 != reply2
+
+    reply3 = (
+        "Ок\n```crm_action\n"
+        "["
+        "{\"action\":\"create_schedule_event\",\"title\":\"A\",\"start_at\":\"2026-02-27T10:00:00Z\"},"
+        "{\"action\":\"create_schedule_event\",\"title\":\"B\",\"start_at\":\"2026-02-27T11:00:00Z\"}"
+        "]\n```"
+    )
+    payload3, cleaned3 = extract_action_payload(reply3)
+    assert isinstance(payload3, dict)
+    assert payload3["action"] == "create_schedule_event"
+    assert isinstance(payload3.get("events"), list)
+    assert len(payload3["events"]) == 2
+    assert "crm_action" not in cleaned3
+
+    reply4 = (
+        "Список:\n"
+        "["
+        "{\"action\":\"create_schedule_event\",\"title\":\"A\",\"start_at\":\"2026-02-27T10:00:00Z\"},"
+        "{\"action\":\"create_schedule_event\",\"title\":\"B\",\"start_at\":\"2026-02-27T11:00:00Z\"}"
+        "]"
+    )
+    payload4, _ = extract_action_payload(reply4)
+    assert isinstance(payload4, dict)
+    assert payload4["action"] == "create_schedule_event"
+    assert len(payload4.get("events") or []) == 2
 
 
 def test_extract_action_payload_strips_broken_raw_action_blob():
@@ -211,6 +238,154 @@ async def test_ai_service_can_create_table_columns_records_and_event(client: Asy
         assert e.start_at.hour == 9
         assert e.end_at is not None
         assert e.end_at.hour == 10
+
+
+@pytest.mark.asyncio
+async def test_ai_schedule_batch_strict_day_limit_precheck(client: AsyncClient):
+    token, email = await _register_owner(client, org_name="AI Schedule Limits")
+    assert token
+
+    from datetime import UTC, datetime
+
+    from src.infrastructure.uow import UnitOfWork
+    from src.modules.ai.service import handle_create_schedule_event_action
+    from src.modules.auth.models import User
+    from src.modules.org.models import Membership
+    from src.modules.schedule.models import Event
+
+    async with UnitOfWork() as uow:
+        user = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
+        assert user is not None
+        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        assert membership is not None
+        org_id = membership.org_id
+        user_id = user.id
+
+        base_dt = datetime(2026, 2, 26, 9, 0, tzinfo=UTC)
+        for idx in range(9):
+            event = Event(
+                org_id=org_id,
+                created_by=user_id,
+                assigned_to=user_id,
+                title=f"E{idx}",
+                start_at=base_dt.replace(hour=9 + idx),
+                end_at=base_dt.replace(hour=10 + idx),
+                all_day=False,
+                color="#3b82f6",
+            )
+            uow.session.add(event)
+        await uow.commit()
+
+    async with UnitOfWork() as uow:
+        user = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
+        assert user is not None
+        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        assert membership is not None
+        org_id = membership.org_id
+        user_id = user.id
+
+        res = await handle_create_schedule_event_action(
+            uow,
+            org_id,
+            user_id,
+            {
+                "action": "create_schedule_event",
+                "events": [
+                    {
+                        "title": "Batch A",
+                        "start_at": "2026-02-26T21:00:00Z",
+                        "end_at": "2026-02-26T22:00:00Z",
+                    },
+                    {
+                        "title": "Batch B",
+                        "start_at": "2026-02-26T22:00:00Z",
+                        "end_at": "2026-02-26T23:00:00Z",
+                    },
+                ],
+            },
+            user_message="создай 2 события",
+        )
+        assert res["ok"] is False
+        assert res["error"] == "DAY_LIMIT_EXCEEDED"
+        await uow.rollback()
+
+    async with UnitOfWork() as uow:
+        events = (await uow.session.execute(select(Event).where(Event.org_id == org_id))).scalars().all()
+        # Должны остаться только исходные 9, без частичного добавления.
+        assert len(events) == 9
+
+
+@pytest.mark.asyncio
+async def test_ai_schedule_resolves_participants_and_defaults(client: AsyncClient):
+    token, email = await _register_owner(client, org_name="AI Schedule Participants")
+    assert token
+
+    from src.infrastructure.uow import UnitOfWork
+    from src.modules.ai.service import handle_create_schedule_event_action
+    from src.modules.auth.models import User
+    from src.modules.org.models import Membership
+    from src.modules.schedule.models import Event
+
+    async with UnitOfWork() as uow:
+        owner = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
+        assert owner is not None
+        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == owner.id))).scalars().first()
+        assert membership is not None
+        org_id = membership.org_id
+
+        member = User(
+            email=f"member-{uuid.uuid4().hex[:8]}@example.com",
+            hashed_password="x",
+            first_name="Ислам",
+            last_name="Хуцаев",
+        )
+        uow.session.add(member)
+        await uow.session.flush()
+        uow.session.add(
+            Membership(
+                user_id=member.id,
+                org_id=org_id,
+                role=UserRole.EMPLOYEE,
+            )
+        )
+        await uow.commit()
+        member_id = member.id
+        member_email = member.email
+
+    async with UnitOfWork() as uow:
+        owner = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
+        assert owner is not None
+        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == owner.id))).scalars().first()
+        assert membership is not None
+        org_id = membership.org_id
+
+        result = await handle_create_schedule_event_action(
+            uow,
+            org_id,
+            owner.id,
+            {
+                "action": "create_schedule_event",
+                "title": "Урок английского",
+                "start_at": "2026-02-27T21:00:00Z",
+                "end_at": "2026-02-27T22:00:00Z",
+                "participants": [member_email, "Ислам Хуцаев"],
+            },
+            user_message="поставь красный цвет и напоминание за 2 часа",
+        )
+        assert result["ok"] is True
+        await uow.commit()
+        created_id = uuid.UUID(result["event"]["id"])
+
+    async with UnitOfWork() as uow:
+        event = await uow.session.get(Event, created_id)
+        assert event is not None
+        assert event.color == "#ef4444"
+        assert event.reminder_offsets_minutes == [120]
+        assert member_id in event.participant_ids
+        # По дефолту создатель тоже должен быть участником.
+        owner = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
+        assert owner is not None
+        assert owner.id in event.participant_ids
 
 
 @pytest.mark.asyncio

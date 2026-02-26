@@ -16,8 +16,11 @@ import logging
 import uuid
 import json
 import re
+import asyncio
+from datetime import UTC, datetime
 
 import httpx
+
 from src.common.enums import UserRole
 from src.common.schemas import ApiResponse
 from src.config import settings
@@ -26,6 +29,14 @@ from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.errors import AIModuleError
 from src.modules.ai.internal.repository import AIRepository
 from src.modules.ai.intent_overrides import apply_ui_intent_overrides
+from src.modules.ai.internal.prompts import (
+    ACTION_NOT_EXECUTED_MESSAGE,
+    ACTION_SYNTH_SYSTEM_PROMPT,
+    CONFIRM_TABLE_CHANGE_MESSAGE,
+    JSON_REPAIR_SYSTEM_PROMPT,
+    build_repair_user_prompt,
+    build_synthesis_user_prompt,
+)
 from src.modules.ai.limits import check_ai_limits, is_org_ai_enabled
 from src.modules.ai.models import AIChatMessage, AIUsageLog
 from src.modules.ai.schemas import ChatRequest, ChatResponse
@@ -70,6 +81,14 @@ ACTION_ALLOWED_ROLES = {
     "create_schedule_event": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.EMPLOYEE.value},
     "create_kb_page": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value},
 }
+
+CONFIRMABLE_ACTIONS = {"create_columns", "create_records"}
+CONFIRM_WORDS = {"подтверждаю", "подтвердить", "confirm", "ok", "ок", "да, применить", "применить"}
+CANCEL_WORDS = {"отмена", "cancel", "не применять", "стоп", "отклонить"}
+
+
+async def _await_with_deadline(coro, timeout_s: float):
+    return await asyncio.wait_for(coro, timeout=max(1.0, float(timeout_s)))
 
 def _record_metric(status: str, tokens: int | None = None) -> None:
     """Безопасно записать метрики AI-запроса.
@@ -253,6 +272,186 @@ def _looks_like_broken_action(reply_raw: str) -> bool:
     return ("action" in text and "{" in text) or "crm_action" in text
 
 
+def _looks_like_action_request(text: str) -> bool:
+    t = (text or "").lower()
+    verbs = (
+        "созд",
+        "добав",
+        "измени",
+        "обнов",
+        "удал",
+        "запол",
+        "настрой",
+        "create",
+        "add",
+        "update",
+        "delete",
+        "fill",
+        "schedule",
+        "dashboard",
+    )
+    entities = ("таблиц", "дашборд", "расписан", "событи", "база знаний", "колон", "запис")
+    return any(v in t for v in verbs) and any(e in t for e in entities)
+
+
+def _has_selected_context(context_options: dict | None) -> bool:
+    opts = context_options if isinstance(context_options, dict) else {}
+    selected_tables = opts.get("selected_table_ids") or []
+    selected_kb = opts.get("selected_kb_page_ids") or []
+    return bool(selected_tables or selected_kb)
+
+
+def _should_attach_context(*, include_context: bool, ui_intent: str | None, context_options: dict | None) -> bool:
+    if not include_context:
+        return False
+    if ui_intent:
+        return True
+    if _has_selected_context(context_options):
+        return True
+    return True
+
+
+def _extract_usage_dict(data: dict) -> dict[str, int]:
+    def _to_int(value: object) -> int:
+        if isinstance(value, bool):
+            return 0
+        if isinstance(value, int):
+            return value
+        if isinstance(value, float):
+            return int(value)
+        if isinstance(value, str):
+            text = value.strip()
+            if text.isdigit():
+                return int(text)
+        return 0
+
+    def _as_usage(obj: dict | None) -> dict[str, int] | None:
+        if not isinstance(obj, dict):
+            return None
+        prompt = _to_int(
+            obj.get("prompt_tokens")
+            or obj.get("promptTokens")
+            or obj.get("input_tokens")
+            or obj.get("inputTokens")
+        )
+        completion = _to_int(
+            obj.get("completion_tokens")
+            or obj.get("completionTokens")
+            or obj.get("output_tokens")
+            or obj.get("outputTokens")
+        )
+        total = _to_int(obj.get("total_tokens") or obj.get("totalTokens")) or (prompt + completion)
+        if prompt > 0 or completion > 0 or total > 0:
+            return {
+                "prompt_tokens": prompt,
+                "completion_tokens": completion,
+                "total_tokens": total,
+            }
+        return None
+
+    usage_paths = [
+        data.get("usage"),
+        (data.get("data") or {}).get("usage") if isinstance(data.get("data"), dict) else None,
+        (data.get("response") or {}).get("usage") if isinstance(data.get("response"), dict) else None,
+        ((data.get("data") or {}).get("response") or {}).get("usage")
+        if isinstance(data.get("data"), dict) and isinstance((data.get("data") or {}).get("response"), dict)
+        else None,
+    ]
+    for item in usage_paths:
+        usage = _as_usage(item if isinstance(item, dict) else None)
+        if usage is not None:
+            return usage
+
+    token_sources = [
+        data,
+        data.get("data") if isinstance(data.get("data"), dict) else {},
+        data.get("response") if isinstance(data.get("response"), dict) else {},
+        (data.get("data") or {}).get("response")
+        if isinstance(data.get("data"), dict) and isinstance((data.get("data") or {}).get("response"), dict)
+        else {},
+    ]
+    for source in token_sources:
+        if not isinstance(source, dict):
+            continue
+        in_tokens = _to_int(source.get("input_tokens") or source.get("inputTokens"))
+        out_tokens = _to_int(source.get("output_tokens") or source.get("outputTokens"))
+        if in_tokens > 0 or out_tokens > 0:
+            prompt = in_tokens
+            completion = out_tokens
+            return {
+                "prompt_tokens": prompt,
+                "completion_tokens": completion,
+                "total_tokens": prompt + completion,
+            }
+    return {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+
+
+def _normalize_user_command(text: str) -> str:
+    return " ".join((text or "").strip().lower().split())
+
+
+def _is_confirmation_message(text: str) -> bool:
+    t = _normalize_user_command(text)
+    return any(t == word or t.startswith(f"{word} ") for word in CONFIRM_WORDS)
+
+
+def _is_cancel_message(text: str) -> bool:
+    t = _normalize_user_command(text)
+    return any(t == word or t.startswith(f"{word} ") for word in CANCEL_WORDS)
+
+
+def _get_last_pending_action(db_messages: list[AIChatMessage]) -> dict | None:
+    for msg in reversed(db_messages):
+        if msg.role != "assistant":
+            user_meta = msg.meta or {}
+            if isinstance(user_meta, dict) and (
+                user_meta.get("pending_action_confirmed") is True
+                or user_meta.get("pending_action_cancelled") is True
+            ):
+                return None
+            continue
+        meta = msg.meta or {}
+        if not isinstance(meta, dict):
+            continue
+        # Если после pending уже был финальный assistant-ответ по нему,
+        # не позволяем повторно подтверждать/отменять старую операцию.
+        action_result = meta.get("action_result")
+        if isinstance(action_result, dict):
+            if action_result.get("cancelled") is True or action_result.get("ok") is True:
+                return None
+        pending = meta.get("pending_action")
+        if isinstance(pending, dict) and str(pending.get("action") or "").strip():
+            return pending
+    return None
+
+
+def _estimate_rows_count(action_payload: dict) -> int:
+    src = action_payload.get("records")
+    if isinstance(src, list):
+        return len(src)
+    if isinstance(src, dict) and isinstance(src.get("rows"), list):
+        return len(src.get("rows"))
+    return 0
+
+
+def _build_pending_action_result(action_payload: dict) -> dict:
+    action_name = str(action_payload.get("action") or "").strip()
+    table_ref = str(action_payload.get("table_name") or action_payload.get("table_id") or "").strip()
+    rows_count = _estimate_rows_count(action_payload)
+    cols = action_payload.get("columns")
+    cols_count = len(cols) if isinstance(cols, list) else 0
+    return {
+        "action": action_name,
+        "ok": False,
+        "needs_confirmation": True,
+        "table_ref": table_ref or None,
+        "rows_count": rows_count,
+        "columns_count": cols_count,
+        "message": "Нужно подтверждение пользователя перед изменением таблицы.",
+        "confirm_hint": "Напишите «подтверждаю» для применения или «отмена» для отмены.",
+    }
+
+
 def _claims_action_completed(reply_text: str) -> bool:
     text = (reply_text or "").lower()
     markers = [
@@ -275,24 +474,16 @@ async def _repair_action_payload_with_model(
     bearer_token: str,
     model: str,
     broken_reply: str,
-) -> dict | None:
+) -> tuple[dict | None, dict[str, int]]:
     """Попробовать восстановить валидный action JSON из битого ответа модели."""
     repair_messages = [
         {
             "role": "system",
-            "content": (
-                "Ты валидатор JSON-действий CRM. "
-                "Верни только один валидный JSON-объект действия. "
-                "Без комментариев, без markdown, без лишнего текста."
-            ),
+            "content": JSON_REPAIR_SYSTEM_PROMPT,
         },
         {
             "role": "user",
-            "content": (
-                "Преобразуй это в валидный JSON действия. "
-                "Если действия нет или нельзя восстановить, верни {}.\n\n"
-                f"{broken_reply}"
-            ),
+            "content": build_repair_user_prompt(broken_reply),
         },
     ]
     try:
@@ -306,19 +497,19 @@ async def _repair_action_payload_with_model(
         )
         raw = _extract_provider_reply(data).strip()
         if not raw:
-            return None
+            return None, _extract_usage_dict(data)
         try:
             obj = json.loads(raw)
             if isinstance(obj, dict) and str(obj.get("action") or "").strip():
-                return obj
-            return None
+                return obj, _extract_usage_dict(data)
+            return None, _extract_usage_dict(data)
         except Exception:
             payload, _ = extract_action_payload(raw)
             if isinstance(payload, dict) and str(payload.get("action") or "").strip():
-                return payload
-            return None
+                return payload, _extract_usage_dict(data)
+            return None, _extract_usage_dict(data)
     except Exception:
-        return None
+        return None, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
 
 async def _synthesize_missing_action_with_model(
@@ -328,27 +519,16 @@ async def _synthesize_missing_action_with_model(
     model: str,
     user_message: str,
     assistant_reply: str,
-) -> dict | None:
+) -> tuple[dict | None, dict[str, int]]:
     """Если модель не отдала crm_action, попросить ее вернуть только action-JSON или {}."""
     synth_messages = [
         {
             "role": "system",
-            "content": (
-                "Ты арбитр действий CRM. "
-                "Проанализируй сообщение пользователя и ответ ассистента. "
-                "Если действительно нужно выполнить действие CRM (создать/изменить сущность), "
-                "верни ОДИН валидный JSON-объект действия с полем action. "
-                "Если действия не требуется, верни пустой объект {}. "
-                "Никакого markdown и пояснений."
-            ),
+            "content": ACTION_SYNTH_SYSTEM_PROMPT,
         },
         {
             "role": "user",
-            "content": (
-                f"Сообщение пользователя:\n{user_message}\n\n"
-                f"Ответ ассистента:\n{assistant_reply}\n\n"
-                "Верни только JSON."
-            ),
+            "content": build_synthesis_user_prompt(user_message, assistant_reply),
         },
     ]
     try:
@@ -362,19 +542,19 @@ async def _synthesize_missing_action_with_model(
         )
         raw = _extract_provider_reply(data).strip()
         if not raw:
-            return None
+            return None, _extract_usage_dict(data)
         try:
             obj = json.loads(raw)
             if isinstance(obj, dict) and str(obj.get("action") or "").strip():
-                return obj
-            return None
+                return obj, _extract_usage_dict(data)
+            return None, _extract_usage_dict(data)
         except Exception:
             payload, _ = extract_action_payload(raw)
             if isinstance(payload, dict) and str(payload.get("action") or "").strip():
-                return payload
-            return None
+                return payload, _extract_usage_dict(data)
+            return None, _extract_usage_dict(data)
     except Exception:
-        return None
+        return None, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
 
 async def _load_action_limits(uow: UnitOfWork, *, org_id: uuid.UUID) -> dict[str, int]:
@@ -570,10 +750,99 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
             limit=60,
         )
 
+    pending_action = _get_last_pending_action(db_messages)
+    if pending_action and _is_cancel_message(body.message):
+        action_name = str(pending_action.get("action") or "")
+        action_result = {
+            "action": action_name,
+            "ok": False,
+            "cancelled": True,
+            "message": "Операция отменена пользователем.",
+        }
+        assistant_reply = "Операция отменена. Изменения в таблицу не внесены."
+        async with UnitOfWork() as uow:
+            user_msg = AIChatMessage(
+                session_id=session_id,
+                org_id=current_user.org_id,
+                user_id=current_user.user_id,
+                role="user",
+                content=body.message,
+                token_count=None,
+                meta={"pending_action_cancelled": True},
+            )
+            assistant_msg = AIChatMessage(
+                session_id=session_id,
+                org_id=current_user.org_id,
+                user_id=current_user.user_id,
+                role="assistant",
+                content=assistant_reply,
+                token_count=0,
+                meta={"action_requested": True, "action_result": action_result},
+            )
+            uow.session.add(user_msg)
+            uow.session.add(assistant_msg)
+            await uow.commit()
+        return ApiResponse(
+            data=ChatResponse(
+                reply=assistant_reply,
+                model=effective_model,
+                usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                chat_id=str(session_id),
+                context_estimate=None,
+                action_result=action_result,
+            )
+        )
+
+    if pending_action and _is_confirmation_message(body.message):
+        async with UnitOfWork() as uow:
+            action_result = await _execute_action(
+                uow,
+                current_user,
+                pending_action,
+                body.message,
+            )
+            assistant_reply = "Подтверждение получено. Изменения в таблице применены."
+            user_msg = AIChatMessage(
+                session_id=session_id,
+                org_id=current_user.org_id,
+                user_id=current_user.user_id,
+                role="user",
+                content=body.message,
+                token_count=None,
+                meta={"pending_action_confirmed": True},
+            )
+            assistant_msg = AIChatMessage(
+                session_id=session_id,
+                org_id=current_user.org_id,
+                user_id=current_user.user_id,
+                role="assistant",
+                content=assistant_reply,
+                token_count=0,
+                meta={"action_requested": True, "action_result": action_result},
+            )
+            uow.session.add(user_msg)
+            uow.session.add(assistant_msg)
+            await uow.commit()
+        return ApiResponse(
+            data=ChatResponse(
+                reply=assistant_reply,
+                model=effective_model,
+                usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                chat_id=str(session_id),
+                context_estimate=None,
+                action_result=action_result,
+            )
+        )
+
     # Этап 4: сбор контекста организации (опционально).
     org_context = ""
     context_meta: dict | None = None
-    if body.include_context:
+    attach_context = _should_attach_context(
+        include_context=bool(body.include_context),
+        ui_intent=body.ui_intent,
+        context_options=context_options,
+    )
+    if attach_context:
         org_context, context_meta = await build_org_context_for_user(current_user.org_id, current_user.user_id, context_options)
 
     # Этап 5: предварительная оценка токенов и проверка лимитов.
@@ -597,12 +866,34 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
             return ApiResponse(ok=False, data=None, error=err)
 
     # Этап 6: сбор сообщений для провайдера.
-    history_rows = _sanitize_client_history(body.history)
-    messages = build_messages(system_prompt, org_context, db_messages, history_rows, body.message)
-    use_timeweb_native = (
+    configured_timeweb_native = (
         str(getattr(settings, "AI_PROVIDER_MODE", "openai_compatible")).strip().lower() == "timeweb_native"
         and resolve_timeweb_agent_id(settings.AI_BASE_URL) is not None
     )
+    enforce_exact_usage = bool(getattr(settings, "AI_ENFORCE_EXACT_USAGE", True))
+    # Если включен timeweb_native, всегда используем нативный /call:
+    # провайдер ведет собственную историю по parent_message_id.
+    use_timeweb_native = bool(configured_timeweb_native)
+    # Для native-памяти историю не шлем (цепочка через parent_message_id).
+    # Для openai-compatible отправляем компактный хвост истории из БД.
+    history_rows = [] if use_timeweb_native else db_messages
+    # Action-mode всегда включен: решение о действии принимает модель на основании контекста/сообщения.
+    action_mode = True
+    first_turn = len(db_messages) == 0
+    include_system_prompt = True if not use_timeweb_native else bool(
+        getattr(settings, "AI_SEND_SYSTEM_PROMPT_ONCE_PER_CHAT", True) is False or first_turn
+    )
+    messages = build_messages(
+        system_prompt,
+        org_context,
+        [],
+        history_rows,
+        body.message,
+        include_system_prompt=include_system_prompt,
+        include_action_instructions=action_mode,
+        compact_history=True,
+    )
+    
     provider_parent_message_id: str | None = None
     if use_timeweb_native:
         for msg in reversed(db_messages):
@@ -618,12 +909,18 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
     direct_action_payload, cleaned_direct_reply = extract_action_payload(body.message)
     if direct_action_payload:
         async with UnitOfWork() as uow:
-            action_result = await _execute_action(
-                uow,
-                current_user,
-                direct_action_payload,
-                body.message,
-            )
+            action_name = str(direct_action_payload.get("action") or "").strip()
+            if action_name in CONFIRMABLE_ACTIONS:
+                action_result = _build_pending_action_result(direct_action_payload)
+                assistant_reply = CONFIRM_TABLE_CHANGE_MESSAGE
+            else:
+                action_result = await _execute_action(
+                    uow,
+                    current_user,
+                    direct_action_payload,
+                    body.message,
+                )
+                assistant_reply = cleaned_direct_reply or "Команда выполнена."
 
             user_msg = AIChatMessage(
                 session_id=session_id,
@@ -634,7 +931,10 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 token_count=None,
                 meta={"include_context": body.include_context, "context_options": context_options, "direct_action": True},
             )
-            assistant_reply = cleaned_direct_reply or "Команда выполнена."
+            assistant_meta = {"action_requested": True, "action_result": action_result, "direct_action": True}
+            if action_name in CONFIRMABLE_ACTIONS:
+                assistant_meta["pending_action"] = direct_action_payload
+                assistant_meta["pending_action_created_at"] = datetime.now(UTC).isoformat()
             assistant_msg = AIChatMessage(
                 session_id=session_id,
                 org_id=current_user.org_id,
@@ -642,7 +942,7 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 role="assistant",
                 content=assistant_reply,
                 token_count=0,
-                meta={"action_requested": True, "action_result": action_result, "direct_action": True},
+                meta=assistant_meta,
             )
             uow.session.add(user_msg)
             uow.session.add(assistant_msg)
@@ -661,73 +961,157 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
 
     # Этап 8: вызов провайдера, парсинг ответа и запись в БД.
     try:
-        if use_timeweb_native:
-            provider_message = _build_native_provider_message(
-                messages=messages,
+        provider_deadline_s = float(getattr(settings, "AI_PROVIDER_TIMEOUT_S", 35.0) or 35.0) + 3.0
+        try:
+            if use_timeweb_native:
+                provider_message = _build_native_provider_message(
+                    messages=messages,
+                    user_message=body.message,
+                    has_parent=provider_parent_message_id is not None,
+                )
+                data = await _await_with_deadline(
+                    call_timeweb_native_api(
+                        base_url=settings.AI_BASE_URL,
+                        bearer_token=bearer_token,
+                        message=provider_message,
+                        parent_message_id=provider_parent_message_id,
+                    ),
+                    provider_deadline_s,
+                )
+            else:
+                data = await _await_with_deadline(
+                    call_openai_compatible_api(
+                        settings.AI_BASE_URL,
+                        bearer_token,
+                        effective_model,
+                        messages,
+                        max_tokens=provider_max_tokens,
+                        temperature=effective_temperature,
+                    ),
+                    provider_deadline_s,
+                )
+        except (asyncio.TimeoutError, httpx.TimeoutException, httpx.RequestError, httpx.HTTPStatusError):
+            # В строгом режиме не делаем повторный запрос:
+            # он удваивает latency и расход, а пользователь видит "зависание".
+            if enforce_exact_usage:
+                raise
+            # Fallback-retry only for non-strict mode.
+            retry_messages = build_messages(
+                system_prompt=system_prompt,
+                org_context="",
+                db_messages=[],
+                history=[],
                 user_message=body.message,
-                has_parent=provider_parent_message_id is not None,
+                include_system_prompt=include_system_prompt,
+                include_action_instructions=action_mode,
+                compact_history=True,
             )
-            data = await call_timeweb_native_api(
-                base_url=settings.AI_BASE_URL,
-                bearer_token=bearer_token,
-                message=provider_message,
-                parent_message_id=provider_parent_message_id,
-            )
-        else:
-            data = await call_openai_compatible_api(
-                settings.AI_BASE_URL,
-                bearer_token,
-                effective_model,
-                messages,
-                max_tokens=provider_max_tokens,
-                temperature=effective_temperature,
-            )
+            if use_timeweb_native:
+                provider_message = _build_native_provider_message(
+                    messages=retry_messages,
+                    user_message=body.message,
+                    has_parent=False,
+                )
+                data = await _await_with_deadline(
+                    call_timeweb_native_api(
+                        base_url=settings.AI_BASE_URL,
+                        bearer_token=bearer_token,
+                        message=provider_message,
+                        parent_message_id=None,
+                    ),
+                    provider_deadline_s,
+                )
+            else:
+                data = await _await_with_deadline(
+                    call_openai_compatible_api(
+                        settings.AI_BASE_URL,
+                        bearer_token,
+                        effective_model,
+                        retry_messages,
+                        max_tokens=max(1200, min(provider_max_tokens, 3200)),
+                        temperature=effective_temperature,
+                    ),
+                    provider_deadline_s,
+                )
         reply_raw = _extract_provider_reply(data)
         provider_message_id = _extract_provider_message_id(data)
+        auxiliary_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         action_payload, reply = extract_action_payload(reply_raw)
         if action_payload is None and _looks_like_broken_action(reply_raw):
-            repaired_payload = await _repair_action_payload_with_model(
-                base_url=settings.AI_BASE_URL,
-                bearer_token=bearer_token,
-                model=effective_model,
-                broken_reply=reply_raw,
+            repaired_payload, repaired_usage = await _await_with_deadline(
+                _repair_action_payload_with_model(
+                    base_url=settings.AI_BASE_URL,
+                    bearer_token=bearer_token,
+                    model=effective_model,
+                    broken_reply=reply_raw,
+                ),
+                provider_deadline_s,
             )
+            auxiliary_usage = {
+                "prompt_tokens": auxiliary_usage["prompt_tokens"] + int(repaired_usage.get("prompt_tokens", 0) or 0),
+                "completion_tokens": auxiliary_usage["completion_tokens"] + int(repaired_usage.get("completion_tokens", 0) or 0),
+                "total_tokens": auxiliary_usage["total_tokens"] + int(repaired_usage.get("total_tokens", 0) or 0),
+            }
             if repaired_payload is not None:
                 action_payload = repaired_payload
                 if not reply.strip():
                     reply = "Готово, выполняю."
-        if action_payload is None:
-            synthesized_payload = await _synthesize_missing_action_with_model(
-                base_url=settings.AI_BASE_URL,
-                bearer_token=bearer_token,
-                model=effective_model,
-                user_message=body.message,
-                assistant_reply=reply,
+        should_try_synthesis = (
+            action_payload is None
+            and (
+                bool(body.ui_intent)
+                or _has_selected_context(context_options)
+                or _claims_action_completed(reply)
+                or _looks_like_broken_action(reply_raw)
             )
+        )
+        if should_try_synthesis:
+            synthesized_payload, synth_usage = await _await_with_deadline(
+                _synthesize_missing_action_with_model(
+                    base_url=settings.AI_BASE_URL,
+                    bearer_token=bearer_token,
+                    model=effective_model,
+                    user_message=body.message,
+                    assistant_reply=reply,
+                ),
+                provider_deadline_s,
+            )
+            auxiliary_usage = {
+                "prompt_tokens": auxiliary_usage["prompt_tokens"] + int(synth_usage.get("prompt_tokens", 0) or 0),
+                "completion_tokens": auxiliary_usage["completion_tokens"] + int(synth_usage.get("completion_tokens", 0) or 0),
+                "total_tokens": auxiliary_usage["total_tokens"] + int(synth_usage.get("total_tokens", 0) or 0),
+            }
             if synthesized_payload is not None:
                 action_payload = synthesized_payload
                 if not reply.strip():
                     reply = "Готово, выполняю."
         if action_payload is None and _claims_action_completed(reply):
-            reply = (
-                "Действие не выполнено: модель не сформировала структурированную команду для системы. "
-                "Повторите запрос в формате: «создай таблицу ... и добавь N записей»."
-            )
+            reply = ACTION_NOT_EXECUTED_MESSAGE
         action_payload = apply_ui_intent_overrides(action_payload, body.ui_intent, body.ui_intent_params)
-        usage = data.get("usage") if isinstance(data.get("usage"), dict) else {}
-        if use_timeweb_native and provider_parent_message_id is not None:
-            prompt_tokens_est = int(estimate_tokens(body.message) + 20)
-            completion_tokens_est = int(estimate_tokens(reply_raw))
-            usage = {
-                "prompt_tokens": prompt_tokens_est,
-                "completion_tokens": completion_tokens_est,
-                "total_tokens": prompt_tokens_est + completion_tokens_est,
-                "estimated": True,
-                "estimation_mode": "native_followup_message_only",
-            }
+        usage = _extract_usage_dict(data)
+        # Нормализация usage для провайдеров, которые кладут токены в root-поля.
+        if not usage:
+            in_tokens = data.get("input_tokens")
+            out_tokens = data.get("output_tokens")
+            if isinstance(in_tokens, int) or isinstance(out_tokens, int):
+                prompt_tokens = int(in_tokens or 0)
+                completion_tokens = int(out_tokens or 0)
+                usage = {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens,
+                }
+        # Fallback-оценка только если разрешен нестрогий режим.
         if not usage or not int(usage.get("total_tokens", 0) or 0):
-            if use_timeweb_native and provider_parent_message_id is not None:
-                prompt_tokens_est = int(estimate_tokens(body.message) + 20)
+            if use_timeweb_native:
+                # В native режиме фактически отправляется строка `provider_message`.
+                # Для продолжения цепочки (parent_message_id) это обычно только текущее user-сообщение.
+                provider_payload_text = ""
+                try:
+                    provider_payload_text = str(provider_message)  # type: ignore[name-defined]
+                except Exception:
+                    provider_payload_text = body.message
+                prompt_tokens_est = int(estimate_tokens(provider_payload_text) + 12)
             else:
                 prompt_tokens_est = _estimate_prompt_tokens(messages)
             completion_tokens_est = int(estimate_tokens(reply_raw))
@@ -736,7 +1120,19 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 "completion_tokens": completion_tokens_est,
                 "total_tokens": prompt_tokens_est + completion_tokens_est,
                 "estimated": True,
+                "estimation_mode": "fallback_full_context",
             }
+        # Учитываем токены скрытых helper-вызовов (repair/synthesis), чтобы UI и списание
+        # совпадали с фактическим расходом у провайдера.
+        usage = {
+            **usage,
+            "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0) + auxiliary_usage["prompt_tokens"],
+            "completion_tokens": int(usage.get("completion_tokens", 0) or 0) + auxiliary_usage["completion_tokens"],
+            "total_tokens": int(usage.get("total_tokens", 0) or 0) + auxiliary_usage["total_tokens"],
+            "auxiliary_prompt_tokens": auxiliary_usage["prompt_tokens"],
+            "auxiliary_completion_tokens": auxiliary_usage["completion_tokens"],
+            "auxiliary_total_tokens": auxiliary_usage["total_tokens"],
+        }
 
         async with UnitOfWork() as uow:
             usage_total = int(usage.get("total_tokens", 0) or 0)
@@ -778,10 +1174,8 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 content=reply,
                 token_count=usage_total,
                 meta={
-                    "action_requested": bool(action_payload),
-                    "provider_message_id": provider_message_id,
-                    "provider_parent_message_id": provider_parent_message_id,
-                    "provider_mode": "timeweb_native_call" if use_timeweb_native else "openai_compatible",
+                    "usage_estimated": bool(usage.get("estimated")),
+                    "usage_source": "estimated_native" if use_timeweb_native and bool(usage.get("estimated")) else "provider",
                 },
             )
             uow.session.add(user_msg)
@@ -799,15 +1193,33 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
             )
 
             action_result = None
+            assistant_meta = {
+                **(assistant_msg.meta or {}),
+                "action_requested": bool(action_payload),
+                "provider_message_id": provider_message_id,
+                "provider_parent_message_id": provider_parent_message_id,
+                "provider_mode": "timeweb_native_call" if use_timeweb_native else "openai_compatible",
+            }
             if action_payload:
-                action_result = await _execute_action(
-                    uow,
-                    current_user,
-                    action_payload,
-                    body.message,
-                )
+                action_name = str(action_payload.get("action") or "").strip()
+                if action_name in CONFIRMABLE_ACTIONS:
+                    action_result = _build_pending_action_result(action_payload)
+                    assistant_meta["pending_action"] = action_payload
+                    assistant_meta["pending_action_created_at"] = datetime.now(UTC).isoformat()
+                    reply = (
+                        f"{reply}\n\n{CONFIRM_TABLE_CHANGE_MESSAGE}"
+                    ).strip()
+                    assistant_msg.content = reply
+                else:
+                    action_result = await _execute_action(
+                        uow,
+                        current_user,
+                        action_payload,
+                        body.message,
+                    )
                 if action_result is not None:
-                    assistant_msg.meta = {"action_requested": True, "action_result": action_result}
+                    assistant_meta["action_result"] = action_result
+            assistant_msg.meta = assistant_meta
 
             usage = {
                 **usage,
@@ -838,19 +1250,19 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
             data=None,
             error={"code": "AI_BAD_PROVIDER_RESPONSE", "message": "AI provider returned an invalid response format."},
         )
-    except httpx.TimeoutException:
+    except (asyncio.TimeoutError, httpx.TimeoutException):
         _record_metric("error")
         return ApiResponse(
             ok=False,
             data=None,
-            error={"code": "AI_PROVIDER_TIMEOUT", "message": "AI provider timeout. Please try again later."},
+            error={"code": "AI_PROVIDER_TIMEOUT", "message": "Провайдер AI не ответил вовремя. Повторите запрос."},
         )
     except httpx.RequestError:
         _record_metric("error")
         return ApiResponse(
             ok=False,
             data=None,
-            error={"code": "AI_PROVIDER_UNAVAILABLE", "message": "AI provider unavailable. Please try again later."},
+            error={"code": "AI_PROVIDER_UNAVAILABLE", "message": "Провайдер AI сейчас недоступен. Повторите запрос позже."},
         )
     except httpx.HTTPStatusError as e:
         if e.response.status_code in (401, 403):
@@ -860,14 +1272,14 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 data=None,
                 error={
                     "code": "AI_PROVIDER_UNAUTHORIZED",
-                    "message": "AI provider authentication failed. Check provider credentials in server configuration.",
+                    "message": "Ошибка авторизации провайдера AI. Проверьте ключи доступа на сервере.",
                 },
             )
         _record_metric("error")
         return ApiResponse(
             ok=False,
             data=None,
-            error={"code": "AI_ERROR", "message": "AI provider error. Please try again later."},
+            error={"code": "AI_ERROR", "message": "Ошибка провайдера AI. Повторите запрос позже."},
         )
     except Exception as exc:
         _record_metric("error")

@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import uuid
 import re
-from datetime import UTC, datetime, timezone
+from collections import Counter
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
 from src.modules.ai.internal.repository import AIRepository
 from src.infrastructure.uow import UnitOfWork
 from src.modules.knowledge.models import KBPage
+from src.modules.schedule.models import Event
 from src.modules.schedule.schemas import CreateEventRequest
 from src.modules.schedule.service import ScheduleService, ScheduleServiceError
 
@@ -81,6 +83,45 @@ def _normalize_color(value: str | None) -> str | None:
     if re.fullmatch(r"#[0-9a-f]{6}", s):
         return s
     return None
+
+
+def _extract_color_from_text(text: str | None) -> str | None:
+    if not text:
+        return None
+    lowered = str(text).lower()
+    aliases = [
+        "синий",
+        "blue",
+        "зеленый",
+        "зелёный",
+        "green",
+        "оранжевый",
+        "orange",
+        "красный",
+        "red",
+        "фиолетовый",
+        "purple",
+        "бирюзовый",
+        "cyan",
+    ]
+    for token in aliases:
+        if token in lowered:
+            return _normalize_color(token)
+    return None
+
+
+def _default_color_by_weekday(start_at: datetime) -> str:
+    palette = [
+        "#3b82f6",  # mon
+        "#8b5cf6",  # tue
+        "#10b981",  # wed
+        "#06b6d4",  # thu
+        "#f59e0b",  # fri
+        "#ef4444",  # sat
+        "#6366f1",  # sun
+    ]
+    target = start_at if start_at.tzinfo is not None else start_at.replace(tzinfo=UTC)
+    return palette[target.weekday() % len(palette)]
 
 
 def _normalize_recurrence(value: str | None) -> str | None:
@@ -187,12 +228,80 @@ def _extract_reminders(payload: dict[str, Any]) -> list[int]:
             continue
         if s in alias:
             result.append(alias[s])
+            continue
+        if ("2" in s and "час" in s) or ("два" in s and "час" in s):
+            result.append(120)
+            continue
+        if "день" in s or "сутк" in s:
+            result.append(1440)
+            continue
+        if "час" in s:
+            result.append(60)
+            continue
+        for marker, marker_value in alias.items():
+            if marker in s:
+                result.append(marker_value)
+                break
     # uniq + stable order
     out: list[int] = []
     for x in result:
         if x not in out:
             out.append(x)
     return out
+
+
+def _extract_participant_refs(payload: dict[str, Any]) -> tuple[list[uuid.UUID], list[str]]:
+    raw = (
+        payload.get("participant_ids")
+        or payload.get("participants")
+        or payload.get("participantIds")
+        or payload.get("участники")
+        or payload.get("participants_refs")
+        or []
+    )
+    if not isinstance(raw, list):
+        raw = [raw]
+    ids: list[uuid.UUID] = []
+    refs: list[str] = []
+    for value in raw:
+        if isinstance(value, dict):
+            id_value = value.get("id") or value.get("user_id")
+            if id_value:
+                try:
+                    ids.append(uuid.UUID(str(id_value)))
+                    continue
+                except Exception:
+                    pass
+            name_value = value.get("name") or value.get("full_name")
+            email_value = value.get("email")
+            if email_value:
+                refs.append(str(email_value).strip())
+            elif name_value:
+                refs.append(str(name_value).strip())
+            continue
+        text = str(value or "").strip()
+        if not text:
+            continue
+        try:
+            ids.append(uuid.UUID(text))
+            continue
+        except Exception:
+            refs.append(text)
+    return ids, refs
+
+
+def _normalize_schedule_items(action_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    items_raw = action_payload.get("events")
+    if isinstance(items_raw, list) and items_raw:
+        items: list[dict[str, Any]] = []
+        for item in items_raw:
+            if isinstance(item, dict):
+                merged = dict(action_payload)
+                merged.update(item)
+                merged.pop("events", None)
+                items.append(merged)
+        return items
+    return [action_payload]
 
 
 async def handle_create_schedule_event_action(
@@ -202,73 +311,99 @@ async def handle_create_schedule_event_action(
     action_payload: dict[str, Any],
     user_message: str | None = None,
 ) -> dict[str, Any]:
-    """Создать событие в расписании."""
-    title = str(action_payload.get("title") or action_payload.get("name") or "").strip()[:500]
-    if not title:
-        return {"action": "create_schedule_event", "ok": False, "error": "title_required"}
-
-    start_at, end_at = _extract_start_end(action_payload)
-    if start_at is None:
-        return {"action": "create_schedule_event", "ok": False, "error": "start_at_required"}
-
-    description = str(action_payload.get("description") or action_payload.get("описание") or "").strip() or None
-    color = _normalize_color(
-        str(
-            action_payload.get("color")
-            or action_payload.get("color_hex")
-            or action_payload.get("цвет")
-            or ""
-        ).strip()
-        or None
-    ) or "#3b82f6"
-    recurrence = _normalize_recurrence(
-        str(action_payload.get("recurrence") or action_payload.get("repeat") or action_payload.get("повтор") or "").strip() or None
-    )
-    all_day = bool(action_payload.get("all_day") or action_payload.get("весь_день") or False)
-    reminders = _extract_reminders(action_payload)
-
-    assigned_to_raw = (
-        action_payload.get("assigned_to")
-        or action_payload.get("assignedTo")
-        or action_payload.get("assignee_id")
-        or action_payload.get("исполнитель")
-    )
-    assigned_to: uuid.UUID | None = None
-    try:
-        if assigned_to_raw:
-            assigned_to = uuid.UUID(str(assigned_to_raw))
-    except Exception:
-        assigned_to = None
-    if assigned_to is None:
-        assigned_to = user_id
-
-    participant_ids_raw = (
-        action_payload.get("participant_ids")
-        or action_payload.get("participants")
-        or action_payload.get("participantIds")
-        or action_payload.get("участники")
-        or []
-    )
-    participant_ids: list[uuid.UUID] = []
-    if isinstance(participant_ids_raw, list):
-        for value in participant_ids_raw:
-            try:
-                participant_ids.append(uuid.UUID(str(value)))
-            except Exception:
-                continue
-    if assigned_to and assigned_to not in participant_ids:
-        participant_ids.append(assigned_to)
-    if user_id not in participant_ids:
-        participant_ids.append(user_id)
-
+    """Создать одно или несколько событий в расписании."""
+    repo = AIRepository(uow.session)
     service = ScheduleService(uow.session)
-    try:
-        event = await service.create_event(
-            org_id=org_id,
-            user_id=user_id,
-            body=CreateEventRequest(
+    normalized_items = _normalize_schedule_items(action_payload)
+
+    event_payloads: list[CreateEventRequest] = []
+    day_buckets: Counter[datetime] = Counter()
+    unresolved_participants: set[str] = set()
+    org_users = await repo.list_org_users(org_id=org_id)
+
+    for item in normalized_items:
+        title = str(item.get("title") or item.get("name") or "").strip()[:500]
+        if not title:
+            return {"action": "create_schedule_event", "ok": False, "error": "title_required"}
+
+        start_at, end_at = _extract_start_end(item)
+        if start_at is None:
+            return {"action": "create_schedule_event", "ok": False, "error": "start_at_required"}
+
+        explicit_color = _normalize_color(
+            str(item.get("color") or item.get("color_hex") or item.get("цвет") or "").strip() or None
+        )
+        inferred_color = _extract_color_from_text(user_message)
+        color = explicit_color or inferred_color or _default_color_by_weekday(start_at)
+
+        recurrence = _normalize_recurrence(
+            str(item.get("recurrence") or item.get("repeat") or item.get("повтор") or "").strip() or None
+        )
+        all_day = bool(item.get("all_day") or item.get("весь_день") or False)
+        reminders = _extract_reminders(item)
+        if not reminders:
+            reminders = _extract_reminders({"напомнить_за": user_message})
+
+        assigned_to_raw = (
+            item.get("assigned_to")
+            or item.get("assignedTo")
+            or item.get("assignee_id")
+            or item.get("исполнитель")
+        )
+        assigned_to: uuid.UUID | None = None
+        try:
+            if assigned_to_raw:
+                assigned_to = uuid.UUID(str(assigned_to_raw))
+        except Exception:
+            assigned_to = None
+        if assigned_to is None:
+            assigned_to = user_id
+
+        participant_ids, participant_refs = _extract_participant_refs(item)
+        if participant_refs:
+            for ref in participant_refs:
+                clean_ref = str(ref or "").strip().lower()
+                if not clean_ref:
+                    continue
+                matched_id: uuid.UUID | None = None
+                for candidate_id, email, first_name, last_name in org_users:
+                    full_name = f"{first_name} {last_name}".strip().lower()
+                    rev_name = f"{last_name} {first_name}".strip().lower()
+                    if (
+                        clean_ref == email.lower()
+                        or clean_ref == first_name.lower()
+                        or clean_ref == last_name.lower()
+                        or clean_ref == full_name
+                        or clean_ref == rev_name
+                    ):
+                        matched_id = candidate_id
+                        break
+                if matched_id is None:
+                    unresolved_participants.add(ref)
+                elif matched_id not in participant_ids:
+                    participant_ids.append(matched_id)
+
+        if unresolved_participants:
+            missing = ", ".join(sorted(unresolved_participants))
+            return {
+                "action": "create_schedule_event",
+                "ok": False,
+                "error": "participants_not_found",
+                "message": f"Не нашли участников в организации: {missing}",
+            }
+
+        if assigned_to and assigned_to not in participant_ids:
+            participant_ids.append(assigned_to)
+        if user_id not in participant_ids:
+            participant_ids.append(user_id)
+
+        day_start, _ = service._day_bounds_utc(start_at)
+        day_buckets[day_start] += 1
+
+        event_payloads.append(
+            CreateEventRequest(
                 title=title,
-                description=description,
+                description=str(item.get("description") or item.get("описание") or "").strip() or None,
                 start_at=start_at,
                 end_at=end_at,
                 all_day=all_day,
@@ -277,8 +412,41 @@ async def handle_create_schedule_event_action(
                 participant_ids=participant_ids,
                 reminder_offsets_minutes=reminders,
                 recurrence=recurrence,
-            ),
+            )
         )
+
+    # Strict pre-check: если пользователь запросил пачку событий, проверяем вместимость
+    # по каждому дню заранее и не создаем ничего при переполнении.
+    for day_start, requested_count in day_buckets.items():
+        day_end = day_start + timedelta(days=1)
+        existing_count = await service.repo.count_events_in_day(
+            org_id=org_id,
+            day_start=day_start,
+            day_end=day_end,
+            exclude_event_id=None,
+        )
+        remaining = max(0, service.MAX_EVENTS_PER_DAY - int(existing_count))
+        if requested_count > remaining:
+            return {
+                "action": "create_schedule_event",
+                "ok": False,
+                "error": "DAY_LIMIT_EXCEEDED",
+                "message": (
+                    f"Нельзя создать {requested_count} событий на {day_start.date().isoformat()}: "
+                    f"осталось слотов {remaining} из {service.MAX_EVENTS_PER_DAY}."
+                ),
+            }
+
+    created_events: list[Event] = []
+    try:
+        async with uow.session.begin_nested():
+            for payload in event_payloads:
+                event = await service.create_event(
+                    org_id=org_id,
+                    user_id=user_id,
+                    body=payload,
+                )
+                created_events.append(event)
     except ScheduleServiceError as exc:
         return {
             "action": "create_schedule_event",
@@ -286,16 +454,32 @@ async def handle_create_schedule_event_action(
             "error": exc.code,
             "message": exc.message,
         }
+
+    first = created_events[0]
     return {
         "action": "create_schedule_event",
         "ok": True,
         "event": {
-            "id": str(event.id),
-            "title": event.title,
-            "start_at": event.start_at.isoformat(),
-            "end_at": event.end_at.isoformat() if event.end_at else None,
-            "recurrence": event.recurrence,
+            "id": str(first.id),
+            "title": first.title,
+            "start_at": first.start_at.isoformat(),
+            "end_at": first.end_at.isoformat() if first.end_at else None,
+            "recurrence": first.recurrence,
         },
+        "events": [
+            {
+                "id": str(event.id),
+                "title": event.title,
+                "start_at": event.start_at.isoformat(),
+                "end_at": event.end_at.isoformat() if event.end_at else None,
+                "recurrence": event.recurrence,
+                "color": event.color,
+                "participant_ids": [str(x) for x in event.participant_ids],
+                "reminder_offsets_minutes": event.reminder_offsets_minutes,
+            }
+            for event in created_events
+        ],
+        "events_created": len(created_events),
     }
 
 

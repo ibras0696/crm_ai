@@ -9,9 +9,10 @@ from sqlalchemy.orm import selectinload
 
 from src.common.enums import SubscriptionStatus
 from src.modules.ai.models import AIChatMessage, AIChatSession, AIRuntimeSettings, AIUsageLog
+from src.modules.auth.models import User
 from src.modules.billing.models import Plan
 from src.modules.knowledge.models import KBPage
-from src.modules.org.models import Organization, Subscription
+from src.modules.org.models import Membership, Organization, Subscription
 from src.modules.schedule.models import Event
 from src.modules.tables.models import Table
 from src.modules.tables.records import Record
@@ -76,6 +77,48 @@ class AIRepository:
     async def count_kb_pages(self, *, org_id: uuid.UUID) -> int:
         result = await self.session.execute(select(func.count(KBPage.id)).where(KBPage.org_id == org_id))
         return int(result.scalar() or 0)
+
+    async def list_org_users(self, *, org_id: uuid.UUID) -> list[tuple[uuid.UUID, str, str, str]]:
+        rows = (
+            await self.session.execute(
+                select(User.id, User.email, User.first_name, User.last_name)
+                .join(Membership, Membership.user_id == User.id)
+                .where(Membership.org_id == org_id)
+            )
+        ).all()
+        return [
+            (
+                row.id,
+                str(row.email or ""),
+                str(row.first_name or ""),
+                str(row.last_name or ""),
+            )
+            for row in rows
+        ]
+
+    async def resolve_org_user_ids_by_refs(self, *, org_id: uuid.UUID, refs: list[str]) -> list[uuid.UUID]:
+        clean_refs = [str(x or "").strip().lower() for x in refs if str(x or "").strip()]
+        if not clean_refs:
+            return []
+        users = await self.list_org_users(org_id=org_id)
+        result: list[uuid.UUID] = []
+        seen: set[uuid.UUID] = set()
+        for ref in clean_refs:
+            for user_id, email, first_name, last_name in users:
+                full_name = f"{first_name} {last_name}".strip().lower()
+                rev_full_name = f"{last_name} {first_name}".strip().lower()
+                if (
+                    ref == email.lower()
+                    or ref == full_name
+                    or ref == rev_full_name
+                    or ref == first_name.lower()
+                    or ref == last_name.lower()
+                ):
+                    if user_id not in seen:
+                        seen.add(user_id)
+                        result.append(user_id)
+                    break
+        return result
 
     async def list_active_tables_with_columns(self, *, org_id: uuid.UUID) -> list[Table]:
         return (
@@ -364,3 +407,71 @@ class AIRepository:
                 .limit(limit)
             )
         ).scalars().all()
+
+    async def resolve_org_user_ids(self, *, org_id: uuid.UUID, refs: list[str]) -> tuple[list[uuid.UUID], list[str]]:
+        """Resolve org user ids by UUID/email/full-name/first-name/last-name."""
+        normalized = [str(x).strip() for x in refs if str(x).strip()]
+        if not normalized:
+            return [], []
+
+        resolved: list[uuid.UUID] = []
+        unresolved: list[str] = []
+        lowered = [x.lower() for x in normalized]
+
+        # 1) UUID refs.
+        uuid_refs: list[uuid.UUID] = []
+        for raw in normalized:
+            try:
+                uuid_refs.append(uuid.UUID(raw))
+            except Exception:
+                continue
+        if uuid_refs:
+            rows = (
+                await self.session.execute(
+                    select(Membership.user_id).where(Membership.org_id == org_id, Membership.user_id.in_(uuid_refs))
+                )
+            ).scalars().all()
+            for uid in rows:
+                if uid not in resolved:
+                    resolved.append(uid)
+
+        # 2) Email / name refs.
+        members = (
+            await self.session.execute(
+                select(User.id, User.email, User.first_name, User.last_name)
+                .join(Membership, Membership.user_id == User.id)
+                .where(Membership.org_id == org_id)
+            )
+        ).all()
+        by_exact_email: dict[str, uuid.UUID] = {}
+        by_exact_name: dict[str, uuid.UUID] = {}
+        by_first_name: dict[str, uuid.UUID] = {}
+        by_last_name: dict[str, uuid.UUID] = {}
+        for row in members:
+            uid = row.id
+            email = str(row.email or "").strip().lower()
+            first = str(row.first_name or "").strip().lower()
+            last = str(row.last_name or "").strip().lower()
+            full = f"{first} {last}".strip()
+            if email and email not in by_exact_email:
+                by_exact_email[email] = uid
+            if full and full not in by_exact_name:
+                by_exact_name[full] = uid
+            if first and first not in by_first_name:
+                by_first_name[first] = uid
+            if last and last not in by_last_name:
+                by_last_name[last] = uid
+
+        for raw in lowered:
+            uid = by_exact_email.get(raw) or by_exact_name.get(raw) or by_first_name.get(raw) or by_last_name.get(raw)
+            if uid:
+                if uid not in resolved:
+                    resolved.append(uid)
+            else:
+                # Mark unresolved only for non-uuid refs.
+                try:
+                    uuid.UUID(raw)
+                except Exception:
+                    unresolved.append(raw)
+
+        return resolved, unresolved

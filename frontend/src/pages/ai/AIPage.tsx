@@ -11,7 +11,7 @@ import {
   type TableInfo,
 } from '@/lib/api'
 import CapabilitiesMenu from '@/components/ai/CapabilitiesMenu'
-import { ActionErrorPreview, DashboardPreview, KnowledgePreview, SchedulePreview, TablePreview } from '@/components/ai/ActionPreviews'
+import { ActionErrorPreview, DashboardPreview, KnowledgePreview, PendingActionPreview, SchedulePreview, TablePreview } from '@/components/ai/ActionPreviews'
 import StatsTab from '@/components/ai/StatsTab'
 import ChatHistory from '@/components/ai/ChatHistory'
 import ContextHoverPickers from '@/components/ai/ContextHoverPickers'
@@ -35,6 +35,7 @@ interface Message {
   role: 'user' | 'assistant'
   content: string
   tokens?: number
+  tokensEstimated?: boolean
   actionResult?: Record<string, unknown> | null
 }
 
@@ -100,6 +101,7 @@ export default function AIPage() {
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [uiIntent, setUiIntent] = useState<{ type: string; params?: Record<string, unknown> } | null>(null)
+  const [pendingActionLocks, setPendingActionLocks] = useState<Record<string, boolean>>({})
   const clearUiIntent = useCallback(() => setUiIntent(null), [])
 
   const loadStatus = useCallback(async () => {
@@ -169,6 +171,7 @@ export default function AIPage() {
           role: m.role,
           content: m.content,
           tokens: m.token_count || undefined,
+          tokensEstimated: Boolean((m.meta as Record<string, unknown> | null)?.usage_estimated),
           actionResult: (m.meta?.action_result as Record<string, unknown> | undefined) || null,
         }))
         setMessages(rows)
@@ -200,7 +203,6 @@ export default function AIPage() {
     try {
       const r = await aiApi.chat({
         message: messageText,
-        history: messages.slice(-10).map((m) => ({ role: m.role, content: m.content })),
         include_context: includeContext,
         chat_id: currentChatId || undefined,
         request_id: requestId,
@@ -216,6 +218,7 @@ export default function AIPage() {
             role: 'assistant',
             content: d.reply,
             tokens: Number((d.usage as { total_tokens?: number } | null)?.total_tokens || 0) || undefined,
+            tokensEstimated: Boolean((d.usage as { estimated?: boolean } | null)?.estimated),
             actionResult: d.action_result || null,
           },
         ])
@@ -267,6 +270,16 @@ export default function AIPage() {
       // ignore
     }
   }
+
+  const getMessageKey = (msg: Message, index: number) => `${msg.id || 'm'}-${index}`
+  const isPendingActionMessage = (msg: Message) => msg.actionResult?.needs_confirmation === true
+  const lastPendingIndex = (() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const msg = messages[i]
+      if (msg && isPendingActionMessage(msg)) return i
+    }
+    return -1
+  })()
 
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)] gap-0">
@@ -362,7 +375,7 @@ export default function AIPage() {
               ) : (
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
                   {messages.map((msg, i) => (
-                    <div key={`${msg.id || 'm'}-${i}`} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                    <div key={getMessageKey(msg, i)} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
                       <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-primary text-white' : 'bg-secondary'}`}>
                         {msg.role === 'user' ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                       </div>
@@ -374,13 +387,37 @@ export default function AIPage() {
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                           </div>
                         )}
-                        {msg.tokens && <p className={`text-xs mt-2 ${msg.role === 'user' ? 'text-white/60' : 'text-muted-foreground'}`}>{msg.tokens} токенов</p>}
+                        {msg.tokens && (
+                          <p className={`text-xs mt-2 ${msg.role === 'user' ? 'text-white/60' : 'text-muted-foreground'}`}>
+                            {msg.tokensEstimated ? `≈ ${msg.tokens} токенов (оценка)` : `${msg.tokens} токенов`}
+                          </p>
+                        )}
                         {msg.actionResult && (
                           <>
                             <TablePreview result={msg.actionResult} />
                             <DashboardPreview result={msg.actionResult} />
                             <SchedulePreview result={msg.actionResult} />
                             <KnowledgePreview result={msg.actionResult} />
+                            <PendingActionPreview
+                              result={msg.actionResult}
+                              disabled={
+                                sending
+                                || i !== lastPendingIndex
+                                || pendingActionLocks[getMessageKey(msg, i)] === true
+                              }
+                              onConfirm={() => {
+                                const key = getMessageKey(msg, i)
+                                if (pendingActionLocks[key] || sending || i !== lastPendingIndex) return
+                                setPendingActionLocks((prev) => ({ ...prev, [key]: true }))
+                                void handleSend('подтверждаю')
+                              }}
+                              onCancel={() => {
+                                const key = getMessageKey(msg, i)
+                                if (pendingActionLocks[key] || sending || i !== lastPendingIndex) return
+                                setPendingActionLocks((prev) => ({ ...prev, [key]: true }))
+                                void handleSend('отмена')
+                              }}
+                            />
                             <ActionErrorPreview result={msg.actionResult} />
                           </>
                         )}

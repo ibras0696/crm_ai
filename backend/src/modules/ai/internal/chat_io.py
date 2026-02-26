@@ -10,8 +10,10 @@ from typing import Any
 import httpx
 from sqlalchemy import select
 
+from src.config import settings
 from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.models import AIChatMessage, AIChatSession
+from src.modules.ai.internal.prompts import ACTION_INSTRUCTIONS_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -53,60 +55,41 @@ def build_messages(
     db_messages: list[AIChatMessage],
     history: list[dict[str, str]],
     user_message: str,
+    *,
+    include_system_prompt: bool = True,
+    include_action_instructions: bool = True,
+    compact_history: bool = False,
 ) -> list[dict[str, str]]:
     """Собрать массив сообщений для OpenAI-compatible chat completions."""
-    messages: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+    def _clip(text: str, limit: int = 1800) -> str:
+        value = str(text or "")
+        if len(value) <= limit:
+            return value
+        return value[: limit - 64] + "\n\n[...сообщение сокращено для стабильности запроса...]"
+
+    messages: list[dict[str, str]] = []
+    if include_system_prompt and (system_prompt or "").strip():
+        messages.append({"role": "system", "content": system_prompt})
     if org_context:
-        messages.append({"role": "system", "content": f"Organization context:\n\n{org_context}"})
-    messages.append(
-        {
-            "role": "system",
-            "content": (
-                "IMPORTANT:\n"
-                "- Only append ONE final ```crm_action``` block at the end of your answer.\n"
-                "- If user did not explicitly ask to create/change entities, do NOT append crm_action.\n"
-                "- If the user asks for a dashboard/report, do NOT modify tables. Return create_dashboard only.\n"
-                "- Do NOT create columns/records unless the user explicitly asked to change/fill a table.\n"
-                "- For dashboards: explain in simple business language what is on horizontal axis, vertical axis and what filters are applied.\n"
-                "- For dashboards: use only existing table/column names from context. Never invent missing columns.\n"
-                "- If columns are not enough for requested dashboard, ask a short clarifying question instead of generating fake config.\n"
-                "- Prefer human-friendly keys in action payload (for schedule: дата/время/повтор/цвет/напоминания).\n"
-                "- Never dump huge JSON in the normal text. Put the action JSON ONLY inside the final ```crm_action``` block.\n"
-                "- If user explicitly asks for many rows (100/500/1000), return records in action payload up to real system limits.\n"
-                "- For table rows ALWAYS use compact records format ONLY: records={columns:[...],rows:[[...],[...]]}. NEVER use list of objects for records.\n"
-                "If user asks to create dashboard/report, append final block:\n"
-                "```crm_action\n"
-                '{"action":"create_dashboard","name":"...","description":"...","widgets":[...]}\n'
-                "```"
-                "\nIf user asks to create a table, append final block:\n"
-                "```crm_action\n"
-                '{"action":"create_table","name":"...","description":"...","columns":[{"name":"...","field_type":"text"}],"records":{"columns":["Название"],"rows":[["..."]]}}\n'
-                "```"
-                "\nIf user asks to add columns to an existing table, append final block:\n"
-                "```crm_action\n"
-                '{"action":"create_columns","table_name":"...","columns":[{"name":"...","field_type":"number"}]}\n'
-                "```"
-                "\nIf user asks to fill table rows, append final block:\n"
-                "```crm_action\n"
-                '{"action":"create_records","table_name":"...","records":{"columns":["Column"],"rows":[["Value"]]}}\n'
-                "```"
-                "\nIf user asks to create a schedule event, append final block:\n"
-                "```crm_action\n"
-                '{"action":"create_schedule_event","title":"...","start_at":"2026-01-01T10:00:00Z","end_at":null,"all_day":false,"recurrence":null}\n'
-                "```"
-                "\nIf user asks to create a knowledge base page, append final block:\n"
-                "```crm_action\n"
-                '{"action":"create_kb_page","title":"Курс Python","content":"Описание курса","pages":[{"title":"Урок 1","content":"..."},{"title":"Урок 2","content":"..."}]}\n'
-                "```"
-            ),
-        }
-    )
+        messages.append({"role": "system", "content": f"Organization context:\n\n{_clip(org_context, 3500)}"})
+    if include_action_instructions:
+        messages.append(
+            {
+                "role": "system",
+                "content": ACTION_INSTRUCTIONS_PROMPT,
+            }
+        )
     if db_messages:
-        for msg in db_messages[-20:]:
-            messages.append({"role": msg.role, "content": msg.content})
+        history_tail = db_messages[-(4 if compact_history else 12):]
+        for msg in history_tail:
+            clip_limit = 700 if compact_history else 1800
+            messages.append({"role": msg.role, "content": _clip(msg.content, clip_limit)})
     else:
-        messages.extend(history[-10:])
-    messages.append({"role": "user", "content": user_message})
+        raw_tail = history[-(4 if compact_history else 8):]
+        for item in raw_tail:
+            clip_limit = 700 if compact_history else 1800
+            messages.append({"role": item.get("role", "user"), "content": _clip(item.get("content", ""), clip_limit)})
+    messages.append({"role": "user", "content": _clip(user_message, 900 if compact_history else 2200)})
     return messages
 
 
@@ -122,7 +105,8 @@ async def call_openai_compatible_api(
     clean_base = base_url.rstrip("/")
     if clean_base.endswith("/v1"):
         clean_base = clean_base[:-3]
-    async with httpx.AsyncClient(timeout=60) as client:
+    timeout_s = float(getattr(settings, "AI_PROVIDER_TIMEOUT_S", 35.0) or 35.0)
+    async with httpx.AsyncClient(timeout=timeout_s) as client:
         resp = await client.post(
             f"{clean_base}/v1/chat/completions",
             headers={"Authorization": f"Bearer {bearer_token}", "Content-Type": "application/json"},
@@ -160,7 +144,8 @@ async def call_timeweb_native_api(
     payload: dict[str, Any] = {"message": message}
     if parent_message_id:
         payload["parent_message_id"] = parent_message_id
-    async with httpx.AsyncClient(timeout=60) as client:
+    timeout_s = float(getattr(settings, "AI_PROVIDER_TIMEOUT_S", 35.0) or 35.0)
+    async with httpx.AsyncClient(timeout=timeout_s) as client:
         resp = await client.post(
             f"https://api.timeweb.cloud/api/v1/cloud-ai/agents/{agent_id}/call",
             headers={"Authorization": f"Bearer {bearer_token}", "Content-Type": "application/json"},

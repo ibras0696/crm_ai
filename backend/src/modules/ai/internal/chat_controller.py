@@ -871,9 +871,9 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
         and resolve_timeweb_agent_id(settings.AI_BASE_URL) is not None
     )
     enforce_exact_usage = bool(getattr(settings, "AI_ENFORCE_EXACT_USAGE", True))
-    # Если включен timeweb_native, всегда используем нативный /call:
-    # провайдер ведет собственную историю по parent_message_id.
-    use_timeweb_native = bool(configured_timeweb_native)
+    # В режиме точного учета токенов используем только openai-compatible вызов,
+    # т.к. native /call может не отдавать usage.
+    use_timeweb_native = bool(configured_timeweb_native and not enforce_exact_usage)
     # Для native-памяти историю не шлем (цепочка через parent_message_id).
     # Для openai-compatible отправляем компактный хвост истории из БД.
     history_rows = [] if use_timeweb_native else db_messages
@@ -1103,25 +1103,14 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 }
         # Fallback-оценка только если разрешен нестрогий режим.
         if not usage or not int(usage.get("total_tokens", 0) or 0):
-            if use_timeweb_native:
-                # В native режиме фактически отправляется строка `provider_message`.
-                # Для продолжения цепочки (parent_message_id) это обычно только текущее user-сообщение.
-                provider_payload_text = ""
-                try:
-                    provider_payload_text = str(provider_message)  # type: ignore[name-defined]
-                except Exception:
-                    provider_payload_text = body.message
-                prompt_tokens_est = int(estimate_tokens(provider_payload_text) + 12)
-            else:
-                prompt_tokens_est = _estimate_prompt_tokens(messages)
-            completion_tokens_est = int(estimate_tokens(reply_raw))
-            usage = {
-                "prompt_tokens": prompt_tokens_est,
-                "completion_tokens": completion_tokens_est,
-                "total_tokens": prompt_tokens_est + completion_tokens_est,
-                "estimated": True,
-                "estimation_mode": "fallback_full_context",
-            }
+            return ApiResponse(
+                ok=False,
+                data=None,
+                error={
+                    "code": "AI_PROVIDER_USAGE_UNAVAILABLE",
+                    "message": "Провайдер не вернул usage по токенам. Повторите запрос позже.",
+                },
+            )
         # Учитываем токены скрытых helper-вызовов (repair/synthesis), чтобы UI и списание
         # совпадали с фактическим расходом у провайдера.
         usage = {

@@ -14,6 +14,7 @@ export interface AIContextOptions {
   include_kb?: boolean
   include_table_schema?: boolean
   include_table_records?: boolean
+  table_records_mode?: 'sample' | 'all'
   include_schedule?: boolean
   kb_limit?: number
   tables_limit?: number

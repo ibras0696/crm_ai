@@ -15,7 +15,6 @@ from __future__ import annotations
 import logging
 import uuid
 import json
-import re
 import asyncio
 from datetime import UTC, datetime
 
@@ -37,6 +36,17 @@ from src.modules.ai.internal.prompts import (
     build_repair_user_prompt,
     build_synthesis_user_prompt,
 )
+from src.modules.ai.internal.chat_policy import (
+    build_intent_decision,
+    extract_requested_record_count,
+    has_selected_context,
+    looks_like_broken_action,
+    looks_like_table_create_request,
+    resolve_provider_max_tokens,
+    should_attach_context,
+    should_enable_action_mode,
+)
+from src.modules.ai.internal.intent_router import build_routing_system_hint
 from src.modules.ai.limits import check_ai_limits, is_org_ai_enabled
 from src.modules.ai.models import AIChatMessage, AIUsageLog
 from src.modules.ai.schemas import ChatRequest, ChatResponse
@@ -60,9 +70,6 @@ from src.modules.ai.service import (
 from src.modules.auth.dependencies import CurrentUser
 
 logger = logging.getLogger(__name__)
-
-MAX_CLIENT_HISTORY_MESSAGES = 20
-MAX_CLIENT_HISTORY_CONTENT_CHARS = 4000
 
 ACTION_HANDLERS = {
     "create_dashboard": handle_create_dashboard_action,
@@ -88,6 +95,18 @@ CANCEL_WORDS = {"отмена", "cancel", "не применять", "стоп",
 
 
 async def _await_with_deadline(coro, timeout_s: float):
+    """Дождаться coroutine с ограничением времени.
+
+    Args:
+        coro: Ожидаемая coroutine.
+        timeout_s: Таймаут в секундах.
+
+    Returns:
+        Результат выполнения coroutine.
+
+    Raises:
+        asyncio.TimeoutError: Если время ожидания истекло.
+    """
     return await asyncio.wait_for(coro, timeout=max(1.0, float(timeout_s)))
 
 def _record_metric(status: str, tokens: int | None = None) -> None:
@@ -121,30 +140,6 @@ def _record_limit_rejection(code: str) -> None:
         AI_LIMIT_REJECTIONS_TOTAL.labels(code=code).inc()
     except Exception as exc:
         logger.warning("ai_limit_rejection_metric_failed", exc_info=exc)
-
-
-def _sanitize_client_history(history_rows: list) -> list[dict[str, str]]:
-    """Нормализовать историю из запроса и ограничить размер.
-
-    Args:
-        history_rows: Список сообщений `body.history`.
-
-    Returns:
-        Безопасный список словарей `{role, content}` с ограниченным размером.
-    """
-    normalized: list[dict[str, str]] = []
-    for item in history_rows[:MAX_CLIENT_HISTORY_MESSAGES]:
-        role = str(getattr(item, "role", "user") or "user").strip().lower()
-        content = str(getattr(item, "content", "") or "").strip()
-        if not content:
-            continue
-        normalized.append(
-            {
-                "role": role,
-                "content": content[:MAX_CLIENT_HISTORY_CONTENT_CHARS],
-            }
-        )
-    return normalized
 
 
 def _extract_provider_reply(data: dict) -> str:
@@ -185,7 +180,14 @@ def _extract_provider_reply(data: dict) -> str:
 
 
 def _extract_provider_message_id(data: dict) -> str | None:
-    """Извлечь идентификатор сообщения провайдера (для parent_message_id)."""
+    """Извлечь идентификатор сообщения провайдера для parent-цепочки.
+
+    Args:
+        data: Сырой JSON-ответ провайдера.
+
+    Returns:
+        `id/message_id/response_id` или None, если идентификатор не найден.
+    """
     for key in ("id", "message_id", "response_id"):
         value = data.get(key)
         if isinstance(value, str) and value.strip():
@@ -221,6 +223,55 @@ def _estimate_prompt_tokens(messages: list[dict]) -> int:
     return int(tokens + max(0, len(messages) * 4))
 
 
+def _extract_native_bootstrap_prompt_tokens(db_messages: list[AIChatMessage]) -> int:
+    """Извлечь сохраненную оценку bootstrap prompt из истории сообщений.
+
+    Args:
+        db_messages: Сообщения текущей сессии из БД.
+
+    Returns:
+        Количество токенов bootstrap prompt или 0, если не найдено.
+    """
+    for msg in reversed(db_messages):
+        if msg.role != "assistant":
+            continue
+        meta = msg.meta or {}
+        if not isinstance(meta, dict):
+            continue
+        value = meta.get("native_bootstrap_prompt_tokens")
+        if isinstance(value, int) and value > 0:
+            return value
+        if isinstance(value, str) and value.strip().isdigit():
+            return int(value.strip())
+    return 0
+
+
+def _estimate_native_prompt_tokens(
+    *,
+    provider_message: str,
+    db_messages: list[AIChatMessage],
+    has_parent: bool,
+) -> int:
+    """Оценить prompt-токены для native-цепочки Timeweb.
+
+    Args:
+        provider_message: Фактически отправляемый текст в `/call`.
+        db_messages: История сообщений сессии из БД.
+        has_parent: Есть ли parent_message_id у запроса.
+
+    Returns:
+        Приблизительное число prompt-токенов.
+    """
+    direct_prompt = int(estimate_tokens(provider_message) + 12)
+    if not has_parent:
+        return direct_prompt
+    history_tail = db_messages[-12:]
+    history_tokens = sum(estimate_tokens(str(msg.content or "")) for msg in history_tail)
+    history_overhead = max(0, len(history_tail) * 4)
+    bootstrap_tokens = _extract_native_bootstrap_prompt_tokens(db_messages)
+    return int(direct_prompt + history_tokens + history_overhead + bootstrap_tokens)
+
+
 def _build_native_provider_message(
     *,
     messages: list[dict[str, str]],
@@ -231,6 +282,14 @@ def _build_native_provider_message(
 
     Для первого сообщения отправляем полный инструктивный контекст.
     Для продолжения цепочки отправляем только user message.
+
+    Args:
+        messages: Собранные сообщения запроса.
+        user_message: Текущее сообщение пользователя.
+        has_parent: Есть ли parent_message_id.
+
+    Returns:
+        Строка сообщения для Timeweb `/call`.
     """
     if has_parent:
         return user_message
@@ -244,75 +303,26 @@ def _build_native_provider_message(
     return "\n\n".join(chunks) if chunks else user_message
 
 
-def _looks_like_table_create_request(text: str) -> bool:
-    t = (text or "").lower()
-    return ("созд" in t and "таблиц" in t) or ("create" in t and "table" in t)
-
-
-def _extract_requested_record_count(text: str) -> int | None:
-    t = (text or "").lower()
-    patterns = [
-        r"(\d{1,5})\s*(?:запис(?:ей|и|ь)|строк(?:и)?|слов(?:а)?)",
-        r"(?:на|с)\s*(\d{1,5})\s*(?:запис(?:ей|и|ь)|строк(?:и)?|слов(?:а)?)",
-    ]
-    for p in patterns:
-        m = re.search(p, t)
-        if m:
-            try:
-                n = int(m.group(1))
-                if 1 <= n <= 5000:
-                    return n
-            except Exception:
-                return None
-    return None
-
-
-def _looks_like_broken_action(reply_raw: str) -> bool:
-    text = (reply_raw or "").lower()
-    return ("action" in text and "{" in text) or "crm_action" in text
-
-
-def _looks_like_action_request(text: str) -> bool:
-    t = (text or "").lower()
-    verbs = (
-        "созд",
-        "добав",
-        "измени",
-        "обнов",
-        "удал",
-        "запол",
-        "настрой",
-        "create",
-        "add",
-        "update",
-        "delete",
-        "fill",
-        "schedule",
-        "dashboard",
-    )
-    entities = ("таблиц", "дашборд", "расписан", "событи", "база знаний", "колон", "запис")
-    return any(v in t for v in verbs) and any(e in t for e in entities)
-
-
-def _has_selected_context(context_options: dict | None) -> bool:
-    opts = context_options if isinstance(context_options, dict) else {}
-    selected_tables = opts.get("selected_table_ids") or []
-    selected_kb = opts.get("selected_kb_page_ids") or []
-    return bool(selected_tables or selected_kb)
-
-
-def _should_attach_context(*, include_context: bool, ui_intent: str | None, context_options: dict | None) -> bool:
-    if not include_context:
-        return False
-    if ui_intent:
-        return True
-    if _has_selected_context(context_options):
-        return True
-    return True
 
 
 def _extract_usage_dict(data: dict) -> dict[str, int]:
+    """Нормализовать usage-токены из разных форматов ответа провайдера.
+
+    Args:
+        data: Сырой JSON-ответ провайдера.
+
+    Returns:
+        Словарь с ключами `prompt_tokens`, `completion_tokens`, `total_tokens`.
+    """
     def _to_int(value: object) -> int:
+        """Безопасно преобразовать значение токенов к int.
+
+        Args:
+            value: Исходное значение из ответа провайдера.
+
+        Returns:
+            Целое число токенов или 0.
+        """
         if isinstance(value, bool):
             return 0
         if isinstance(value, int):
@@ -326,6 +336,14 @@ def _extract_usage_dict(data: dict) -> dict[str, int]:
         return 0
 
     def _as_usage(obj: dict | None) -> dict[str, int] | None:
+        """Извлечь usage из словаря в унифицированный формат.
+
+        Args:
+            obj: Кандидат-словарь с полями usage.
+
+        Returns:
+            Словарь `prompt/completion/total` или None.
+        """
         if not isinstance(obj, dict):
             return None
         prompt = _to_int(
@@ -340,7 +358,14 @@ def _extract_usage_dict(data: dict) -> dict[str, int]:
             or obj.get("output_tokens")
             or obj.get("outputTokens")
         )
-        total = _to_int(obj.get("total_tokens") or obj.get("totalTokens")) or (prompt + completion)
+        provider_total = _to_int(obj.get("total_tokens") or obj.get("totalTokens"))
+        if prompt > 0 or completion > 0:
+            # Для биллинга используем сумму фактических in/out токенов.
+            # Некоторые провайдеры могут возвращать total_tokens с иным смыслом
+            # (например, с учетом max_tokens/request budget), что искажает списание.
+            total = prompt + completion
+        else:
+            total = provider_total
         if prompt > 0 or completion > 0 or total > 0:
             return {
                 "prompt_tokens": prompt,
@@ -387,20 +412,52 @@ def _extract_usage_dict(data: dict) -> dict[str, int]:
 
 
 def _normalize_user_command(text: str) -> str:
+    """Нормализовать короткую команду пользователя.
+
+    Args:
+        text: Исходный текст.
+
+    Returns:
+        Текст в нижнем регистре без лишних пробелов.
+    """
     return " ".join((text or "").strip().lower().split())
 
 
 def _is_confirmation_message(text: str) -> bool:
+    """Проверить, является ли сообщение подтверждением pending-действия.
+
+    Args:
+        text: Текст пользователя.
+
+    Returns:
+        True, если сообщение совпадает с подтверждающей фразой.
+    """
     t = _normalize_user_command(text)
     return any(t == word or t.startswith(f"{word} ") for word in CONFIRM_WORDS)
 
 
 def _is_cancel_message(text: str) -> bool:
+    """Проверить, является ли сообщение отменой pending-действия.
+
+    Args:
+        text: Текст пользователя.
+
+    Returns:
+        True, если сообщение совпадает с фразой отмены.
+    """
     t = _normalize_user_command(text)
     return any(t == word or t.startswith(f"{word} ") for word in CANCEL_WORDS)
 
 
 def _get_last_pending_action(db_messages: list[AIChatMessage]) -> dict | None:
+    """Получить последнее незавершенное ожидающее действие из истории.
+
+    Args:
+        db_messages: История сообщений сессии.
+
+    Returns:
+        Пейлоад pending action или None, если ожидающего действия нет.
+    """
     for msg in reversed(db_messages):
         if msg.role != "assistant":
             user_meta = msg.meta or {}
@@ -426,6 +483,14 @@ def _get_last_pending_action(db_messages: list[AIChatMessage]) -> dict | None:
 
 
 def _estimate_rows_count(action_payload: dict) -> int:
+    """Оценить количество строк в action payload.
+
+    Args:
+        action_payload: Action-пейлоад.
+
+    Returns:
+        Число строк в `records`.
+    """
     src = action_payload.get("records")
     if isinstance(src, list):
         return len(src)
@@ -435,6 +500,14 @@ def _estimate_rows_count(action_payload: dict) -> int:
 
 
 def _build_pending_action_result(action_payload: dict) -> dict:
+    """Сформировать унифицированный результат для ожидающего подтверждения.
+
+    Args:
+        action_payload: Пейлоад действия, требующего подтверждения.
+
+    Returns:
+        Словарь результата для UI/логов.
+    """
     action_name = str(action_payload.get("action") or "").strip()
     table_ref = str(action_payload.get("table_name") or action_payload.get("table_id") or "").strip()
     rows_count = _estimate_rows_count(action_payload)
@@ -453,6 +526,14 @@ def _build_pending_action_result(action_payload: dict) -> dict:
 
 
 def _claims_action_completed(reply_text: str) -> bool:
+    """Проверить, заявляет ли текст ассистента о выполненном действии.
+
+    Args:
+        reply_text: Ответ ассистента.
+
+    Returns:
+        True, если в тексте есть маркеры "действие уже выполнено".
+    """
     text = (reply_text or "").lower()
     markers = [
         "создал",
@@ -475,7 +556,18 @@ async def _repair_action_payload_with_model(
     model: str,
     broken_reply: str,
 ) -> tuple[dict | None, dict[str, int]]:
-    """Попробовать восстановить валидный action JSON из битого ответа модели."""
+    """Попробовать восстановить валидный action JSON из битого ответа.
+
+    Args:
+        base_url: Базовый URL провайдера.
+        bearer_token: Токен доступа.
+        model: Имя модели.
+        broken_reply: Сырой ответ с частично сломанным action.
+
+    Returns:
+        Кортеж `(action_payload, usage)`:
+        `action_payload` — dict или None, `usage` — словарь токенов helper-вызова.
+    """
     repair_messages = [
         {
             "role": "system",
@@ -520,7 +612,19 @@ async def _synthesize_missing_action_with_model(
     user_message: str,
     assistant_reply: str,
 ) -> tuple[dict | None, dict[str, int]]:
-    """Если модель не отдала crm_action, попросить ее вернуть только action-JSON или {}."""
+    """Синтезировать action JSON, если основной ответ не вернул `crm_action`.
+
+    Args:
+        base_url: Базовый URL провайдера.
+        bearer_token: Токен доступа.
+        model: Имя модели.
+        user_message: Сообщение пользователя.
+        assistant_reply: Ответ ассистента без action-блока.
+
+    Returns:
+        Кортеж `(action_payload, usage)`:
+        `action_payload` — dict или None, `usage` — словарь токенов helper-вызова.
+    """
     synth_messages = [
         {
             "role": "system",
@@ -558,6 +662,15 @@ async def _synthesize_missing_action_with_model(
 
 
 async def _load_action_limits(uow: UnitOfWork, *, org_id: uuid.UUID) -> dict[str, int]:
+    """Загрузить текущие лимиты и фактическое потребление по сущностям.
+
+    Args:
+        uow: UnitOfWork с доступом к БД.
+        org_id: ID организации.
+
+    Returns:
+        Словарь с лимитами и текущими счетчиками (tables/records/kb pages).
+    """
     repo = AIRepository(uow.session)
     plan = await repo.resolve_effective_plan(org_id=org_id)
     max_tables = int(getattr(plan, "max_tables", 0) or 0)
@@ -575,6 +688,15 @@ async def _load_action_limits(uow: UnitOfWork, *, org_id: uuid.UUID) -> dict[str
 
 
 def _build_limits_hint(intent: str, limits: dict[str, int]) -> str:
+    """Сформировать текстовую подсказку модели о тарифных ограничениях.
+
+    Args:
+        intent: UI intent (`create_table` или `create_kb_page`).
+        limits: Словарь лимитов и текущего потребления.
+
+    Returns:
+        Текст подсказки для system prompt.
+    """
     max_tables = int(limits.get("max_tables", 0))
     max_records = int(limits.get("max_records", 0))
     cur_tables = int(limits.get("current_tables", 0))
@@ -603,6 +725,15 @@ def _build_limits_hint(intent: str, limits: dict[str, int]) -> str:
 
 
 def _intent_limit_error(intent: str, limits: dict[str, int]) -> dict | None:
+    """Проверить, достигнут ли лимит для конкретного intent.
+
+    Args:
+        intent: Имя intent.
+        limits: Лимиты и текущие счетчики.
+
+    Returns:
+        Словарь ошибки лимита или None, если лимит не достигнут.
+    """
     max_tables = int(limits.get("max_tables", 0))
     max_records = int(limits.get("max_records", 0))
     cur_tables = int(limits.get("current_tables", 0))
@@ -701,8 +832,9 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
 
     # Этап 2: подготовка system_prompt (UI intent = подсказка, не приказ).
     system_prompt = body.system_prompt or effective_system_prompt
-    requested_records_target = _extract_requested_record_count(body.message)
-    is_table_create_request = _looks_like_table_create_request(body.message)
+    intent_decision = build_intent_decision(body.message, body.ui_intent)
+    requested_records_target = extract_requested_record_count(body.message)
+    is_table_create_request = looks_like_table_create_request(body.message)
     if body.ui_intent:
         intent = str(body.ui_intent).strip()
         params = body.ui_intent_params if isinstance(body.ui_intent_params, dict) else {}
@@ -733,6 +865,14 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
             + "- Не дели на порции и не предлагай 'продолжай'.\n"
         )
     context_options = body.context_options or {}
+    if has_selected_context(context_options):
+        system_prompt += (
+            "\n\nКонтекст выбран пользователем в интерфейсе.\n"
+            + "- Не отвечай, что ты не видишь выбранные таблицы/страницы.\n"
+            + "- Используй переданный Organization context как источник истины.\n"
+            + "- Если в запросе спрашивают про отмеченную таблицу, отвечай по выбранной таблице из контекста.\n"
+        )
+    system_prompt += build_routing_system_hint(intent_decision)
     request_id = (body.request_id or "").strip() or None
 
     # Этап 3: загрузка/создание сессии + последние сообщения из БД.
@@ -837,20 +977,24 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
     # Этап 4: сбор контекста организации (опционально).
     org_context = ""
     context_meta: dict | None = None
-    attach_context = _should_attach_context(
+    attach_context = should_attach_context(
         include_context=bool(body.include_context),
         ui_intent=body.ui_intent,
         context_options=context_options,
+        user_message=body.message,
     )
     if attach_context:
         org_context, context_meta = await build_org_context_for_user(current_user.org_id, current_user.user_id, context_options)
 
     # Этап 5: предварительная оценка токенов и проверка лимитов.
     max_tokens_per_request = int(effective_max_tokens_per_request)
-    provider_max_tokens = max_tokens_per_request
-    if requested_records_target and is_table_create_request:
-        desired = 1200 + int(requested_records_target * 35)
-        provider_max_tokens = max(max_tokens_per_request, min(12000, desired))
+    action_mode = should_enable_action_mode(user_message=body.message, ui_intent=body.ui_intent)
+    provider_max_tokens = resolve_provider_max_tokens(
+        max_tokens_per_request=max_tokens_per_request,
+        action_mode=action_mode,
+        requested_records_target=requested_records_target,
+        is_table_create_request=is_table_create_request,
+    )
     estimated_prompt_tokens = estimate_tokens(body.message) + estimate_tokens(org_context) + 280
     estimated_request_tokens = int(estimated_prompt_tokens + provider_max_tokens)
     async with UnitOfWork() as uow:
@@ -871,18 +1015,19 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
         and resolve_timeweb_agent_id(settings.AI_BASE_URL) is not None
     )
     enforce_exact_usage = bool(getattr(settings, "AI_ENFORCE_EXACT_USAGE", True))
-    # Для timeweb_native всегда используем нативный /call:
-    # это сохраняет цепочку диалога через parent_message_id на стороне Timeweb.
+    # Для режима Timeweb native используем нативный /call, чтобы сохранялась
+    # цепочка provider-side диалога через parent_message_id.
     use_timeweb_native = bool(configured_timeweb_native)
-    # Для native-памяти историю не шлем (цепочка через parent_message_id).
-    # Для openai-compatible отправляем компактный хвост истории из БД.
-    history_rows = [] if use_timeweb_native else db_messages
-    # Action-mode всегда включен: решение о действии принимает модель на основании контекста/сообщения.
-    action_mode = True
+    # Историю чата в payload не подмешиваем:
+    # - в timeweb_native цепочка идет через parent_message_id на стороне провайдера;
+    # - в openai-compatible работаем как stateless turn (без локального history-tail).
+    history_rows: list[dict[str, str]] = []
+    # Первоначальный prompt отправляем только один раз на чат-сессию.
     first_turn = len(db_messages) == 0
-    include_system_prompt = True if not use_timeweb_native else bool(
-        getattr(settings, "AI_SEND_SYSTEM_PROMPT_ONCE_PER_CHAT", True) is False or first_turn
-    )
+    include_system_prompt = bool(first_turn)
+    # Action-инструкции считаем частью начального контракта чата:
+    # отправляем только на первом сообщении сессии.
+    action_mode = bool(first_turn)
     messages = build_messages(
         system_prompt,
         org_context,
@@ -894,16 +1039,9 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
         compact_history=True,
     )
     
+    # Явно отключаем provider-side цепочку контекста:
+    # в нативный Timeweb не передаем parent_message_id.
     provider_parent_message_id: str | None = None
-    if use_timeweb_native:
-        for msg in reversed(db_messages):
-            if msg.role != "assistant":
-                continue
-            meta = msg.meta or {}
-            provider_id = meta.get("provider_message_id") if isinstance(meta, dict) else None
-            if isinstance(provider_id, str) and provider_id.strip():
-                provider_parent_message_id = provider_id.strip()
-                break
 
     # Этап 7: поддержка "прямых команд" (когда пользователь сам прислал crm_action).
     direct_action_payload, cleaned_direct_reply = extract_action_payload(body.message)
@@ -962,6 +1100,7 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
     # Этап 8: вызов провайдера, парсинг ответа и запись в БД.
     try:
         provider_deadline_s = float(getattr(settings, "AI_PROVIDER_TIMEOUT_S", 35.0) or 35.0) + 3.0
+        native_bootstrap_prompt_tokens = 0
         try:
             if use_timeweb_native:
                 provider_message = _build_native_provider_message(
@@ -969,6 +1108,8 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                     user_message=body.message,
                     has_parent=provider_parent_message_id is not None,
                 )
+                if provider_parent_message_id is None:
+                    native_bootstrap_prompt_tokens = int(estimate_tokens(provider_message) + 12)
                 data = await _await_with_deadline(
                     call_timeweb_native_api(
                         base_url=settings.AI_BASE_URL,
@@ -1012,6 +1153,7 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                     user_message=body.message,
                     has_parent=False,
                 )
+                native_bootstrap_prompt_tokens = int(estimate_tokens(provider_message) + 12)
                 data = await _await_with_deadline(
                     call_timeweb_native_api(
                         base_url=settings.AI_BASE_URL,
@@ -1037,7 +1179,7 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
         provider_message_id = _extract_provider_message_id(data)
         auxiliary_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
         action_payload, reply = extract_action_payload(reply_raw)
-        if action_payload is None and _looks_like_broken_action(reply_raw):
+        if action_mode and action_payload is None and looks_like_broken_action(reply_raw):
             repaired_payload, repaired_usage = await _await_with_deadline(
                 _repair_action_payload_with_model(
                     base_url=settings.AI_BASE_URL,
@@ -1057,12 +1199,12 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 if not reply.strip():
                     reply = "Готово, выполняю."
         should_try_synthesis = (
+            action_mode
+            and
             action_payload is None
             and (
-                bool(body.ui_intent)
-                or _has_selected_context(context_options)
-                or _claims_action_completed(reply)
-                or _looks_like_broken_action(reply_raw)
+                _claims_action_completed(reply)
+                or looks_like_broken_action(reply_raw)
             )
         )
         if should_try_synthesis:
@@ -1104,22 +1246,27 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
         # Fallback-оценка только если разрешен нестрогий режим.
         if not usage or not int(usage.get("total_tokens", 0) or 0):
             if use_timeweb_native:
-                # В native режиме фактически отправляется строка `provider_message`.
-                provider_payload_text = ""
+                provider_payload_text = body.message
                 try:
                     provider_payload_text = str(provider_message)  # type: ignore[name-defined]
                 except Exception:
                     provider_payload_text = body.message
-                prompt_tokens_est = int(estimate_tokens(provider_payload_text) + 12)
+                prompt_tokens_est = _estimate_native_prompt_tokens(
+                    provider_message=provider_payload_text,
+                    db_messages=db_messages,
+                    has_parent=provider_parent_message_id is not None,
+                )
+                estimation_mode = "fallback_native_parent_history" if provider_parent_message_id else "fallback_native_bootstrap"
             else:
                 prompt_tokens_est = _estimate_prompt_tokens(messages)
+                estimation_mode = "fallback_full_context"
             completion_tokens_est = int(estimate_tokens(reply_raw))
             usage = {
                 "prompt_tokens": prompt_tokens_est,
                 "completion_tokens": completion_tokens_est,
                 "total_tokens": prompt_tokens_est + completion_tokens_est,
                 "estimated": True,
-                "estimation_mode": "fallback_full_context",
+                "estimation_mode": estimation_mode,
             }
         # Учитываем токены скрытых helper-вызовов (repair/synthesis), чтобы UI и списание
         # совпадали с фактическим расходом у провайдера.
@@ -1156,6 +1303,43 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                     },
                 )
 
+            if token_spend.idempotent_replay and request_id:
+                repo = AIRepository(uow.session)
+                replay_msg = await repo.get_last_assistant_message_by_request_id(
+                    session_id=session_id,
+                    org_id=current_user.org_id,
+                    user_id=current_user.user_id,
+                    request_id=request_id,
+                )
+                replay_action_result = None
+                replay_usage = usage
+                if replay_msg is not None and isinstance(replay_msg.meta, dict):
+                    action_result_raw = replay_msg.meta.get("action_result")
+                    if isinstance(action_result_raw, dict):
+                        replay_action_result = action_result_raw
+                    usage_raw = replay_msg.meta.get("usage")
+                    if isinstance(usage_raw, dict):
+                        replay_usage = usage_raw
+                replay_usage = {
+                    **replay_usage,
+                    "wallet_spent_addon": token_spend.spent_addon,
+                    "wallet_spent_plan": token_spend.spent_plan,
+                    "wallet_remaining_addon": token_spend.addon_remaining,
+                    "wallet_remaining_plan": token_spend.plan_remaining,
+                    "wallet_idempotent_replay": token_spend.idempotent_replay,
+                }
+                _record_metric("ok")
+                return ApiResponse(
+                    data=ChatResponse(
+                        reply=replay_msg.content if replay_msg is not None else reply,
+                        model=effective_model,
+                        usage=replay_usage,
+                        chat_id=str(session_id),
+                        context_estimate=context_meta,
+                        action_result=replay_action_result,
+                    )
+                )
+
             user_msg = AIChatMessage(
                 session_id=session_id,
                 org_id=current_user.org_id,
@@ -1163,7 +1347,11 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 role="user",
                 content=body.message,
                 token_count=None,
-                meta={"include_context": body.include_context, "context_options": context_options},
+                meta={
+                    "include_context": body.include_context,
+                    "context_options": context_options,
+                    "request_id": request_id,
+                },
             )
             assistant_msg = AIChatMessage(
                 session_id=session_id,
@@ -1175,6 +1363,8 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 meta={
                     "usage_estimated": bool(usage.get("estimated")),
                     "usage_source": "estimated_native" if use_timeweb_native and bool(usage.get("estimated")) else "provider",
+                    "usage": usage,
+                    "request_id": request_id,
                 },
             )
             uow.session.add(user_msg)
@@ -1199,6 +1389,8 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 "provider_parent_message_id": provider_parent_message_id,
                 "provider_mode": "timeweb_native_call" if use_timeweb_native else "openai_compatible",
             }
+            if use_timeweb_native and native_bootstrap_prompt_tokens > 0:
+                assistant_meta["native_bootstrap_prompt_tokens"] = native_bootstrap_prompt_tokens
             if action_payload:
                 action_name = str(action_payload.get("action") or "").strip()
                 if action_name in CONFIRMABLE_ACTIONS:

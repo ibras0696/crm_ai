@@ -15,6 +15,12 @@ type Props = {
 
 type PickerType = 'tables' | 'kb' | null
 
+function clampInt(value: string, fallback: number, min: number, max: number): number {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return fallback
+  return Math.max(min, Math.min(max, Math.trunc(n)))
+}
+
 export default function ContextHoverPickers({
   includeContext,
   contextOptions,
@@ -97,15 +103,76 @@ export default function ContextHoverPickers({
           </div>
 
           {openPicker === 'tables' ? (
-            <TableFolderTreeSelect
-              tables={normalizedTables}
-              folders={tableFolders}
-              selectedIds={selectedTableIds}
-              onSelectedIdsChange={(next) => setContextOptions((prev) => ({ ...prev, selected_table_ids: next }))}
-              disabled={disableContext}
-              emptyText="Нет таблиц"
-              heightClassName="max-h-[320px]"
-            />
+            <div className="space-y-2">
+              <div className="rounded-lg border border-border bg-background/40 p-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Данные таблиц:</span>
+                  <button
+                    type="button"
+                    className={`h-7 px-2 rounded-md border text-xs ${contextOptions.table_records_mode !== 'all' ? 'bg-secondary border-primary/40' : 'border-border hover:bg-secondary/50'}`}
+                    onClick={() => setContextOptions((prev) => ({ ...prev, table_records_mode: 'sample' }))}
+                    disabled={disableContext}
+                  >
+                    Пример
+                  </button>
+                  <button
+                    type="button"
+                    className={`h-7 px-2 rounded-md border text-xs ${contextOptions.table_records_mode === 'all' ? 'bg-secondary border-primary/40' : 'border-border hover:bg-secondary/50'}`}
+                    onClick={() => setContextOptions((prev) => ({ ...prev, table_records_mode: 'all' }))}
+                    disabled={disableContext}
+                  >
+                    Все данные
+                  </button>
+                </div>
+
+                {contextOptions.table_records_mode !== 'all' && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Строк на таблицу:</span>
+                    {[1, 3, 5, 10].map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        className={`h-7 px-2 rounded-md border text-xs ${Number(contextOptions.records_per_table ?? 5) === n ? 'bg-secondary border-primary/40' : 'border-border hover:bg-secondary/50'}`}
+                        onClick={() => setContextOptions((prev) => ({ ...prev, records_per_table: n, table_records_mode: 'sample' }))}
+                        disabled={disableContext}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={contextOptions.records_per_table ?? 5}
+                      onChange={(e) =>
+                        setContextOptions((prev) => ({
+                          ...prev,
+                          records_per_table: clampInt(e.target.value, prev.records_per_table ?? 5, 1, 20),
+                          table_records_mode: 'sample',
+                        }))
+                      }
+                      disabled={disableContext}
+                      className="h-7 w-16 px-2 rounded-md border border-input bg-background text-xs"
+                    />
+                  </div>
+                )}
+                {contextOptions.table_records_mode === 'all' && (
+                  <p className="mt-2 text-[11px] text-muted-foreground">
+                    Будут подгружены все строки выбранных таблиц (с серверным ограничением).
+                  </p>
+                )}
+              </div>
+
+              <TableFolderTreeSelect
+                tables={normalizedTables}
+                folders={tableFolders}
+                selectedIds={selectedTableIds}
+                onSelectedIdsChange={(next) => setContextOptions((prev) => ({ ...prev, selected_table_ids: next }))}
+                disabled={disableContext}
+                emptyText="Нет таблиц"
+                heightClassName="max-h-[320px]"
+              />
+            </div>
           ) : (
             <KbPageTreeSelect
               pages={contextSources.kb_pages}

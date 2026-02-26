@@ -91,6 +91,7 @@ export default function AIPage() {
     include_kb: true,
     include_table_schema: true,
     include_table_records: true,
+    table_records_mode: 'sample',
     kb_limit: 1000,
     tables_limit: 5000,
     records_per_table: 5,

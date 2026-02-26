@@ -34,6 +34,12 @@ def context_flags(options: dict | None) -> dict[str, Any]:
     kb_ids = [str(x) for x in (src.get("selected_kb_page_ids") or []) if str(x).strip()]
     table_ids = [str(x) for x in (src.get("selected_table_ids") or []) if str(x).strip()]
     schedule_ids = [str(x) for x in (src.get("selected_schedule_event_ids") or []) if str(x).strip()]
+    table_records_mode_raw = str(src.get("table_records_mode", "sample") or "sample").strip().lower()
+    table_records_mode = "all" if table_records_mode_raw == "all" else "sample"
+    sample_records_per_table = max(1, min(int(src.get("records_per_table", 5)), 20))
+    # Режим "all" ограничиваем серверным потолком, чтобы не убить БД и prompt.
+    # Дальше все равно сработает max_context_tokens и обрезка контекста.
+    records_limit_per_table = 5000 if table_records_mode == "all" else sample_records_per_table
     return {
         "include_kb": bool(src.get("include_kb", True)),
         "include_table_schema": bool(src.get("include_table_schema", True)),
@@ -41,7 +47,9 @@ def context_flags(options: dict | None) -> dict[str, Any]:
         "include_schedule": bool(src.get("include_schedule", True)),
         "kb_limit": max(1, min(int(src.get("kb_limit", 1000)), 5000)),
         "tables_limit": max(1, min(int(src.get("tables_limit", 5000)), 10000)),
-        "records_per_table": max(1, min(int(src.get("records_per_table", 5)), 20)),
+        "table_records_mode": table_records_mode,
+        "records_per_table": records_limit_per_table,
+        "records_per_table_sample": sample_records_per_table,
         "schedule_days": max(1, min(int(src.get("schedule_days", 30)), 180)),
         "max_context_tokens": max(200, min(int(src.get("max_context_tokens", 2500)), 20000)),
         "selected_kb_page_ids": kb_ids,
@@ -89,6 +97,7 @@ async def _build_org_context_internal(
             "tables": flags["selected_table_ids"],
             "schedule_events": flags["selected_schedule_event_ids"],
         },
+        "table_records_mode": flags["table_records_mode"],
         "model_overhead_tokens": 280,
         "max_context_tokens": flags["max_context_tokens"],
         "used_context_tokens": 0,

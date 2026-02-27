@@ -18,7 +18,7 @@ class User(BaseDBModel):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
     timezone: Mapped[str] = mapped_column(String(50), default="UTC", server_default=text("'UTC'"))
 
-    memberships: Mapped[list["Membership"]] = relationship(back_populates="user", lazy="selectin")
+    memberships: Mapped[list["Membership"]] = relationship(back_populates="user", lazy="noload")
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(back_populates="user", lazy="noload")
 
 

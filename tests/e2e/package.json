@@ -1,0 +1,15 @@
+{
+  "name": "crm-e2e-tests",
+  "version": "1.0.0",
+  "description": "E2E tests for CRM Platform",
+  "scripts": {
+    "test": "pytest tests/e2e/ -v",
+    "test:headed": "pytest tests/e2e/ -v --headed",
+    "test:debug": "pytest tests/e2e/ -v -s",
+    "test:auth": "pytest tests/e2e/test_auth_flow.py -v",
+    "test:tables": "pytest tests/e2e/test_tables_flow.py -v"
+  },
+  "devDependencies": {
+    "playwright": "^1.40.0"
+  }
+}

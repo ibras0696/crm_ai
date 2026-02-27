@@ -95,6 +95,7 @@ async def http_error_handler(request: Request, exc: StarletteHTTPException) -> J
         "http_error",
         code=code,
         status_code=exc.status_code,
+        detail=str(exc.detail),
         path=str(request.url),
         correlation_id=correlation_id,
     )

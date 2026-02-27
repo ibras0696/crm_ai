@@ -316,3 +316,71 @@ class UsageOut(BaseModel):
     limit_bytes: int
     available_bytes: int
     percent_used: float
+
+
+class DocsUsageInfoOut(BaseModel):
+    """DTO информации об использовании хранилища."""
+
+    used_bytes: int
+    reserved_bytes: int
+    limit_bytes: int
+    percent_used: float
+
+    model_config = {"from_attributes": True}
+
+
+class PDFAnnotationRequest(BaseModel):
+    """PDF annotation data."""
+
+    annotation_type: str = Field(pattern="^(text|shape|signature|highlight|stamp|comment)$")
+    page: int = Field(ge=0)
+    x: float = Field(ge=0)
+    y: float = Field(ge=0)
+    width: float = Field(ge=0)
+    height: float = Field(ge=0)
+    content: str | None = None
+    color: str | None = None
+    image_data: str | None = None
+    metadata: dict | None = None
+
+
+class SavePDFAnnotationsRequest(BaseModel):
+    """Request to save PDF with annotations."""
+
+    annotations: list[PDFAnnotationRequest]
+
+
+class SavePDFAnnotationsResult(BaseModel):
+    """Result of saving PDF with annotations."""
+
+    file: FileOut
+    annotations_applied: int
+
+
+class ConvertDocxToHtmlRequest(BaseModel):
+    """Request to convert DOCX to HTML."""
+
+    pass  # File ID is in URL
+
+
+class ConvertDocxToHtmlResult(BaseModel):
+    """Result of DOCX to HTML conversion."""
+
+    html_content: str
+    word_count: int
+    paragraphs_count: int
+
+
+class SaveDocxFromHtmlRequest(BaseModel):
+    """Request to save DOCX from HTML content."""
+
+    html_content: str = Field(min_length=1)
+    title: str | None = Field(default=None, max_length=500)
+
+
+class SaveDocxFromHtmlResult(BaseModel):
+    """Result of saving DOCX from HTML."""
+
+    file: FileOut
+    word_count: int
+    paragraphs_count: int

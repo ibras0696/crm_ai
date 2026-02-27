@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
 import Editor from '@monaco-editor/react'
-import type { IConfig as OnlyOfficeConfig } from '@onlyoffice/document-editor-react'
 import {
   docsApi,
   type DocsAIGenerationJob,
@@ -35,8 +34,6 @@ import {
   Upload,
   X,
 } from 'lucide-react'
-import { PdfSignerPanel } from './components/PdfSignerPanel'
-import { DocxEditorPanel } from './components/DocxEditorPanel'
 
 const MAX_DEPTH = 2
 const STATUS_POLL_INTERVAL_MS = 2000

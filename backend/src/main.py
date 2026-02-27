@@ -70,19 +70,17 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Security headers
-    from src.middleware.security_headers import SecurityHeadersMiddleware
+    # Security headers (only in production — BaseHTTPMiddleware can break POST body in dev)
+    if is_prod:
+        from src.middleware.security_headers import SecurityHeadersMiddleware
 
-    application.add_middleware(SecurityHeadersMiddleware)
+        application.add_middleware(SecurityHeadersMiddleware)
 
-    # Rate limiter
-    if settings.ENABLE_RATE_LIMIT:
+    # Rate limiter (only in production — BaseHTTPMiddleware can break POST body in dev)
+    if settings.ENABLE_RATE_LIMIT and is_prod:
         from src.middleware.rate_limit import RateLimitMiddleware
 
         rpm = int(settings.RATE_LIMIT_REQUESTS_PER_MINUTE or 120)
-        # Dev UX: avoid false-positive 429 under local proxy/HMR noise.
-        if str(settings.ENVIRONMENT).lower() != "production":
-            rpm = max(rpm, 600)
         application.add_middleware(RateLimitMiddleware, requests_per_minute=rpm)
 
     # Error handlers

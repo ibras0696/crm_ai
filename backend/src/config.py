@@ -75,11 +75,12 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://crm_user:crm_pass@localhost:5432/crm_db"
     DATABASE_URL_SYNC: str = "postgresql+psycopg2://crm_user:crm_pass@localhost:5432/crm_db"
     DB_ECHO: bool = False
-    DB_POOL_SIZE: int = 20
-    DB_MAX_OVERFLOW: int = 10
-    DB_POOL_TIMEOUT_S: float = 30.0
+    DB_POOL_SIZE: int = 50
+    DB_MAX_OVERFLOW: int = 20
+    DB_POOL_TIMEOUT_S: float = 10.0
     DB_POOL_RECYCLE_S: int = 1800
     DB_HEALTH_TIMEOUT_S: float = 2.0
+    DB_STATEMENT_TIMEOUT_MS: int = 30000
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"

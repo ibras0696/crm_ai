@@ -17,9 +17,9 @@ class Organization(BaseDBModel):
     plan: Mapped[PlanTier] = mapped_column(Enum(PlanTier, values_callable=lambda x: [e.value for e in x]), default=PlanTier.FREE, server_default=text("'free'"))
     ai_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
 
-    memberships: Mapped[list["Membership"]] = relationship(back_populates="organization", lazy="selectin")
+    memberships: Mapped[list["Membership"]] = relationship(back_populates="organization", lazy="noload")
     invites: Mapped[list["Invite"]] = relationship(back_populates="organization", lazy="noload")
-    subscription: Mapped["Subscription | None"] = relationship(back_populates="organization", uselist=False, lazy="selectin")
+    subscription: Mapped["Subscription | None"] = relationship(back_populates="organization", uselist=False, lazy="noload")
 
 
 class Membership(BaseDBModel):

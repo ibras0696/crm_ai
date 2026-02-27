@@ -42,6 +42,13 @@ class BillingRepository:
         )
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def get_active_token_package(self, *, code: str) -> TokenPackage | None:
+        stmt = select(TokenPackage).where(
+            TokenPackage.code == code,
+            TokenPackage.is_active.is_(True),
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def get_usage_counts(self, *, org_id: uuid.UUID) -> tuple[int, int, int, int, int]:
         mem_cnt = (
             await self.session.execute(

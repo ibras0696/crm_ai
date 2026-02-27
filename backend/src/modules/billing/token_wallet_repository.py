@@ -74,6 +74,10 @@ class TokenWalletRepository:
         stmt = select(TokenPackage).where(TokenPackage.code == package_code, TokenPackage.is_active.is_(True))
         return (await self.session.execute(stmt)).scalars().first()
 
+    async def get_purchase_by_payment_id(self, *, payment_id: str) -> TokenPurchase | None:
+        stmt = select(TokenPurchase).where(TokenPurchase.payment_id == payment_id).limit(1)
+        return (await self.session.execute(stmt)).scalars().first()
+
     async def get_idempotency(self, *, org_id: uuid.UUID, request_id: str) -> TokenUsageIdempotency | None:
         stmt = select(TokenUsageIdempotency).where(
             TokenUsageIdempotency.org_id == org_id,

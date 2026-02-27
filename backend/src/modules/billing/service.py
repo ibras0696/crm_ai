@@ -11,12 +11,14 @@ from src.config import settings
 from src.infrastructure.uow import UnitOfWork
 from src.modules.billing.errors import BillingModuleError
 from src.modules.billing.repository import BillingRepository
+from src.modules.billing.runtime_config import resolve_yookassa_runtime_config
 from src.modules.billing.schemas import UsageOut
 from src.modules.billing.token_wallet import (
     ensure_token_balances_bulk,
     get_token_balance_view,
     purchase_addon_tokens,
 )
+from src.modules.billing.token_wallet_repository import TokenWalletRepository
 from src.modules.files import storage
 from src.modules.notifications.models import Notification
 
@@ -39,6 +41,43 @@ class BillingOperationError(BillingModuleError):
 
 class BillingService:
     """Сервисный слой billing без HTTP-логики роутера."""
+
+    async def _create_yookassa_payment(
+        self,
+        *,
+        shop_id: str,
+        secret_key: str,
+        return_url: str,
+        amount_cents: int,
+        description: str,
+        metadata: dict[str, str],
+    ) -> dict:
+        """Создать payment в YooKassa и вернуть сырой ответ."""
+        idempotency_key = str(uuid.uuid4())
+        payload = {
+            "amount": {"value": f"{amount_cents / 100:.2f}", "currency": "RUB"},
+            "confirmation": {"type": "redirect", "return_url": return_url},
+            "capture": True,
+            "description": description,
+            "metadata": metadata,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(
+                    "https://api.yookassa.ru/v3/payments",
+                    json=payload,
+                    auth=(shop_id, secret_key),
+                    headers={"Idempotence-Key": idempotency_key, "Content-Type": "application/json"},
+                )
+                resp.raise_for_status()
+                return resp.json()
+        except httpx.HTTPStatusError as exc:
+            raise BillingOperationError(
+                "PAYMENT_ERROR",
+                f"Ошибка платежного шлюза: {exc.response.status_code}",
+            ) from exc
+        except (httpx.RequestError, httpx.TimeoutException) as exc:
+            raise BillingOperationError("PAYMENT_ERROR", "Платежный шлюз недоступен") from exc
 
     async def list_plans(self):
         async with UnitOfWork() as uow:
@@ -84,21 +123,77 @@ class BillingService:
         package_code: str,
     ) -> dict:
         async with UnitOfWork() as uow:
-            try:
-                data = await purchase_addon_tokens(
-                    uow.session,
-                    org_id=org_id,
-                    user_id=user_id,
-                    package_code=package_code,
-                    months_valid=12,
-                    payment_id=None,
-                )
-            except ValueError as exc:
-                if str(exc) == "UNKNOWN_PACKAGE":
-                    raise BillingOperationError("UNKNOWN_PACKAGE", "Неизвестный пакет токенов") from exc
-                raise BillingOperationError("INVALID_PACKAGE", "Некорректный пакет токенов") from exc
-            await uow.commit()
-        return data
+            yk = await resolve_yookassa_runtime_config(uow.session)
+            repo = BillingRepository(uow.session)
+            package = await repo.get_active_token_package(code=package_code)
+        if package is None:
+            raise BillingOperationError("UNKNOWN_PACKAGE", "Неизвестный пакет токенов")
+
+        amount = int(package.price_rub_cents or 0)
+        # Бесплатные пакеты начисляем сразу, без платежного шлюза.
+        if amount <= 0:
+            async with UnitOfWork() as uow:
+                try:
+                    data = await purchase_addon_tokens(
+                        uow.session,
+                        org_id=org_id,
+                        user_id=user_id,
+                        package_code=package_code,
+                        months_valid=12,
+                        payment_id=f"free-token-pack-{uuid.uuid4().hex[:12]}",
+                        purchase_meta={
+                            "purchase_kind": "token_package",
+                            "payment_status": "succeeded",
+                            "source": "free_package",
+                        },
+                    )
+                except ValueError as exc:
+                    if str(exc) == "UNKNOWN_PACKAGE":
+                        raise BillingOperationError("UNKNOWN_PACKAGE", "Неизвестный пакет токенов") from exc
+                    raise BillingOperationError("INVALID_PACKAGE", "Некорректный пакет токенов") from exc
+                await uow.commit()
+            return {
+                "purchase_applied": True,
+                "requires_payment": False,
+                "confirmation_url": "",
+                "payment_id": data.get("payment_id"),
+                "status": "succeeded",
+                "amount": 0,
+                "package_code": package.code,
+                "package_display_name": package.display_name,
+                "package_tokens": int(package.tokens or 0),
+                **data,
+            }
+
+        if not yk.shop_id or not yk.secret_key:
+            raise BillingOperationError(
+                "BILLING_NOT_CONFIGURED",
+                "Платежный шлюз не настроен. Укажите YooKassa shop_id и secret_key.",
+            )
+        data = await self._create_yookassa_payment(
+            shop_id=yk.shop_id,
+            secret_key=yk.secret_key,
+            return_url=yk.return_url,
+            amount_cents=amount,
+            description=f"Пакет AI токенов: {package.display_name}",
+            metadata={
+                "org_id": str(org_id),
+                "user_id": str(user_id),
+                "purchase_kind": "token_package",
+                "package_code": package.code,
+            },
+        )
+        return {
+            "purchase_applied": False,
+            "requires_payment": True,
+            "payment_id": data.get("id"),
+            "status": data.get("status"),
+            "confirmation_url": data.get("confirmation", {}).get("confirmation_url", ""),
+            "amount": amount,
+            "package_code": package.code,
+            "package_display_name": package.display_name,
+            "package_tokens": int(package.tokens or 0),
+        }
 
     async def create_payment(
         self,
@@ -111,15 +206,15 @@ class BillingService:
         if period != "monthly":
             raise BillingOperationError("INVALID_PERIOD", "Поддерживается только ежемесячная подписка (monthly)")
 
-        if not settings.YOOKASSA_SHOP_ID or not settings.YOOKASSA_SECRET_KEY:
-            raise BillingOperationError(
-                "BILLING_NOT_CONFIGURED",
-                "Платежный шлюз не настроен. Добавьте YOOKASSA_SHOP_ID и YOOKASSA_SECRET_KEY в .env",
-            )
-
         async with UnitOfWork() as uow:
+            yk = await resolve_yookassa_runtime_config(uow.session)
             repo = BillingRepository(uow.session)
             plan = await repo.get_plan_by_name(plan_name)
+        if not yk.shop_id or not yk.secret_key:
+            raise BillingOperationError(
+                "BILLING_NOT_CONFIGURED",
+                "Платежный шлюз не настроен. Укажите YooKassa shop_id и secret_key.",
+            )
         if not plan:
             raise BillingOperationError("PLAN_NOT_FOUND", f"Тариф '{plan_name}' не найден")
 
@@ -127,34 +222,19 @@ class BillingService:
         if amount == 0:
             raise BillingOperationError("FREE_PLAN", "Этот тариф бесплатный")
 
-        idempotency_key = str(uuid.uuid4())
-        payload = {
-            "amount": {"value": f"{amount / 100:.2f}", "currency": "RUB"},
-            "confirmation": {"type": "redirect", "return_url": settings.YOOKASSA_RETURN_URL},
-            "capture": True,
-            "description": f"Тариф {plan.display_name} (monthly)",
-            "metadata": {
+        data = await self._create_yookassa_payment(
+            shop_id=yk.shop_id,
+            secret_key=yk.secret_key,
+            return_url=yk.return_url,
+            amount_cents=amount,
+            description=f"Тариф {plan.display_name} (monthly)",
+            metadata={
                 "org_id": str(org_id),
                 "user_id": str(user_id),
                 "plan_name": plan_name,
                 "period": "monthly",
             },
-        }
-
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.post(
-                    "https://api.yookassa.ru/v3/payments",
-                    json=payload,
-                    auth=(settings.YOOKASSA_SHOP_ID, settings.YOOKASSA_SECRET_KEY),
-                    headers={"Idempotence-Key": idempotency_key, "Content-Type": "application/json"},
-                )
-                resp.raise_for_status()
-                data = resp.json()
-        except httpx.HTTPStatusError as exc:
-            raise BillingOperationError("PAYMENT_ERROR", f"Ошибка платежного шлюза: {exc.response.status_code}") from exc
-        except (httpx.RequestError, httpx.TimeoutException) as exc:
-            raise BillingOperationError("PAYMENT_ERROR", "Платежный шлюз недоступен") from exc
+        )
 
         return {
             "payment_id": data.get("id"),
@@ -196,8 +276,52 @@ class BillingService:
         metadata = obj.get("metadata", {})
         org_id = metadata.get("org_id")
         plan_name = metadata.get("plan_name")
+        purchase_kind = str(metadata.get("purchase_kind") or "").strip()
+        package_code = str(metadata.get("package_code") or "").strip()
         payment_id = obj.get("id")
-        if not org_id or not plan_name:
+        if not org_id:
+            return
+
+        if purchase_kind == "token_package" and package_code:
+            org_uuid = uuid.UUID(org_id)
+            user_id_raw = str(metadata.get("user_id") or "").strip()
+            user_uuid: uuid.UUID | None = None
+            if user_id_raw:
+                try:
+                    user_uuid = uuid.UUID(user_id_raw)
+                except ValueError:
+                    user_uuid = None
+            async with UnitOfWork() as uow:
+                wallet_repo = TokenWalletRepository(uow.session)
+                if payment_id:
+                    existing = await wallet_repo.get_purchase_by_payment_id(payment_id=str(payment_id))
+                    if existing is not None:
+                        return
+                billing_repo = BillingRepository(uow.session)
+                if user_uuid is None:
+                    owners_admins = await billing_repo.list_org_owner_admin_user_ids(org_id=org_uuid)
+                    if owners_admins:
+                        user_uuid = owners_admins[0]
+                    else:
+                        members = await billing_repo.list_org_member_user_ids(org_id=org_uuid)
+                        user_uuid = members[0] if members else None
+                await purchase_addon_tokens(
+                    uow.session,
+                    org_id=org_uuid,
+                    user_id=user_uuid,
+                    package_code=package_code,
+                    months_valid=12,
+                    payment_id=str(payment_id or ""),
+                    purchase_meta={
+                        "purchase_kind": "token_package",
+                        "payment_status": "succeeded",
+                        "status": str(obj.get("status") or "succeeded"),
+                    },
+                )
+                await uow.commit()
+            return
+
+        if not plan_name:
             return
 
         plan_map = {"free": PlanTier.FREE, "team": PlanTier.TEAM, "business": PlanTier.BUSINESS}

@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import { billingApi, type PlanInfo, type TokenBalanceInfo, type TokenPackageInfo, type UsageInfo } from '@/lib/api'
+import {
+  billingApi,
+  type PlanInfo,
+  type TokenBalanceInfo,
+  type TokenPackageInfo,
+  type TokenPurchaseResponse,
+  type UsageInfo,
+} from '@/lib/api'
 import { CreditCard, Zap, Users, Database, HardDrive, FileText, Check, Crown, Sparkles } from 'lucide-react'
 
 interface SubInfo {
@@ -41,10 +48,12 @@ export default function BillingPage() {
   const [cancelling, setCancelling] = useState(false)
   const [cancelConfirm, setCancelConfirm] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     setErrorMessage(null)
+    setSuccessMessage(null)
     try {
       const [pR, uR, sR, tbR, tpR] = await Promise.all([
         billingApi.plans(),
@@ -69,6 +78,7 @@ export default function BillingPage() {
   const handleCancelSubscription = async () => {
     setCancelling(true)
     setErrorMessage(null)
+    setSuccessMessage(null)
     try {
       const r = await billingApi.cancelSubscription()
       if (r.data.ok) {
@@ -84,6 +94,7 @@ export default function BillingPage() {
   const handleUpgrade = async (planName: string) => {
     setPaying(true)
     setErrorMessage(null)
+    setSuccessMessage(null)
     try {
       const r = await billingApi.createPayment(planName, 'monthly')
       if (r.data.ok && r.data.data) {
@@ -99,9 +110,24 @@ export default function BillingPage() {
   const handleBuyTokens = async (packageCode: string) => {
     setBuyingPackage(packageCode)
     setErrorMessage(null)
+    setSuccessMessage(null)
     try {
       const r = await billingApi.purchaseTokens(packageCode)
-      if (r.data.ok) await load()
+      if (r.data.ok && r.data.data) {
+        const data = r.data.data as TokenPurchaseResponse
+        if (data.requires_payment && data.confirmation_url) {
+          window.location.href = data.confirmation_url
+          return
+        }
+        if (data.purchase_applied) {
+          setSuccessMessage(
+            `Пакет ${data.package_display_name || data.package_code} успешно зачислен: +${Number(
+              data.tokens_added || 0,
+            ).toLocaleString('ru-RU')} токенов.`,
+          )
+        }
+        await load()
+      }
     } catch (error) {
       setErrorMessage(getApiErrorMessage(error, 'Не удалось купить пакет токенов.'))
     }
@@ -120,6 +146,8 @@ export default function BillingPage() {
     return `${(cents / 100).toLocaleString('ru')} ₽`
   }
 
+  const currentPlan = plans.find((p) => p.name === sub?.plan) ?? null
+
   if (loading) return <div className="flex items-center justify-center py-32"><div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>
 
   return (
@@ -132,6 +160,11 @@ export default function BillingPage() {
       {errorMessage && (
         <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {errorMessage}
+        </div>
+      )}
+      {successMessage && (
+        <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-600">
+          {successMessage}
         </div>
       )}
 
@@ -150,6 +183,26 @@ export default function BillingPage() {
                 {sub.grace_period_end && <> · льготный период до {new Date(sub.grace_period_end).toLocaleDateString('ru')}</>}
                 {sub.data_purge_at && <> · удаление данных после {new Date(sub.data_purge_at).toLocaleDateString('ru')}</>}
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {currentPlan && (
+        <div className="rounded-xl border border-border bg-card p-5">
+          <h3 className="text-base font-semibold">AI лимиты текущего тарифа</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+            <div className="rounded-lg border border-border p-3">
+              <div className="text-xs text-muted-foreground">Токенов на период тарифа</div>
+              <div className="text-xl font-bold">{Number(currentPlan.ai_tokens_per_day || 0).toLocaleString('ru-RU')}</div>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <div className="text-xs text-muted-foreground">Токенов за запрос</div>
+              <div className="text-xl font-bold">{Number(currentPlan.ai_max_tokens_per_request || 0).toLocaleString('ru-RU')}</div>
+            </div>
+            <div className="rounded-lg border border-border p-3">
+              <div className="text-xs text-muted-foreground">Запросов/мин на пользователя</div>
+              <div className="text-xl font-bold">{Number(currentPlan.ai_rpm_per_user || 0).toLocaleString('ru-RU')}</div>
             </div>
           </div>
         </div>
@@ -202,19 +255,38 @@ export default function BillingPage() {
             </div>
           </div>
           {tokenPackages.length > 0 && (
-            <div className="space-y-2">
-              <div className="text-sm font-medium">Пакеты токенов</div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                {tokenPackages.map((p) => (
-                  <button
-                    key={p.code}
-                    onClick={() => handleBuyTokens(p.code)}
-                    disabled={buyingPackage !== null}
-                    className="h-10 rounded-lg border border-border bg-secondary/20 hover:bg-secondary/35 text-sm transition-colors disabled:opacity-50"
-                  >
-                    {buyingPackage === p.code ? 'Покупка...' : `Купить ${p.tokens.toLocaleString('ru-RU')} токенов`}
-                  </button>
-                ))}
+            <div className="space-y-3">
+              <div>
+                <div className="text-sm font-medium">Пакеты токенов</div>
+                <div className="text-xs text-muted-foreground mt-1">
+                  Оплата проходит через YooKassa. После успешной оплаты токены начисляются автоматически в биллинг-кошелёк.
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {tokenPackages.map((p) => {
+                  const costPer1k = p.tokens > 0 ? Math.round((p.price_rub_cents / 100 / p.tokens) * 1000) : 0
+                  return (
+                    <div key={p.code} className="rounded-lg border border-border p-3 bg-secondary/10 space-y-3">
+                      <div>
+                        <div className="text-sm font-semibold">{p.display_name}</div>
+                        <div className="text-xs text-muted-foreground mt-1">
+                          {p.tokens.toLocaleString('ru-RU')} токенов
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xl font-bold">{formatPrice(Number(p.price_rub_cents || 0))}</div>
+                        <div className="text-xs text-muted-foreground">{costPer1k.toLocaleString('ru-RU')} ₽ / 1k токенов</div>
+                      </div>
+                      <button
+                        onClick={() => handleBuyTokens(p.code)}
+                        disabled={buyingPackage !== null}
+                        className="w-full h-10 rounded-lg border border-primary/30 bg-primary/10 hover:bg-primary/15 text-sm font-medium transition-colors disabled:opacity-50"
+                      >
+                        {buyingPackage === p.code ? 'Переход к оплате...' : 'Купить пакет'}
+                      </button>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}

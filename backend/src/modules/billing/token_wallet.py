@@ -227,10 +227,11 @@ async def purchase_addon_tokens(
     session: AsyncSession,
     *,
     org_id: uuid.UUID,
-    user_id: uuid.UUID,
+    user_id: uuid.UUID | None,
     package_code: str,
     months_valid: int = 12,
     payment_id: str | None = None,
+    purchase_meta: dict | None = None,
 ) -> dict:
     repo = TokenWalletRepository(session)
     package = await repo.get_active_token_package(package_code=package_code)
@@ -256,7 +257,7 @@ async def purchase_addon_tokens(
         payment_id=payment_id,
         expires_at=expires_at,
         is_active=True,
-        meta={"months_valid": months_valid},
+        meta={"months_valid": months_valid, **(purchase_meta or {})},
     )
     repo.add_purchase(purchase)
     balance.addon_tokens_remaining = int(balance.addon_tokens_remaining or 0) + amount

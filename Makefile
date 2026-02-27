@@ -15,20 +15,9 @@
         up-prod down-prod restart-prod logs-prod \
         test lint lint-fix clean clean-all gen-prod-secrets
 
-COMPOSE := docker compose
+COMPOSE_DEV := ./scripts/compose-dev.sh
+COMPOSE_PROD := ./scripts/compose-prod.sh
 SECRETS_FILE ?= secrets.yml
-
-COMPOSE_DEV_FILES := -f docker-compose.yml
-ifneq ($(wildcard $(SECRETS_FILE)),)
-COMPOSE_DEV_FILES += -f $(SECRETS_FILE)
-endif
-COMPOSE_DEV := $(COMPOSE) --profile dev $(COMPOSE_DEV_FILES)
-
-COMPOSE_PROD_FILES := -f docker-compose.prod.yml
-ifneq ($(wildcard $(SECRETS_FILE)),)
-COMPOSE_PROD_FILES += -f $(SECRETS_FILE)
-endif
-COMPOSE_PROD := $(COMPOSE) $(COMPOSE_PROD_FILES)
 
 help:
 	@echo ""

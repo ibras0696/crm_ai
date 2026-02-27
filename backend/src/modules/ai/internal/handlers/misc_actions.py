@@ -58,6 +58,14 @@ def _parse_dt(value: Any | None) -> datetime | None:
 
 
 def _normalize_color(value: str | None) -> str | None:
+    """Нормализовать цвет в HEX-формат.
+
+    Args:
+        value: Название цвета или HEX-строка.
+
+    Returns:
+        Нормализованный HEX (`#rrggbb`) или None.
+    """
     if not value:
         return None
     s = str(value).strip().lower()
@@ -86,6 +94,14 @@ def _normalize_color(value: str | None) -> str | None:
 
 
 def _extract_color_from_text(text: str | None) -> str | None:
+    """Извлечь цвет из пользовательского текста.
+
+    Args:
+        text: Исходный текст.
+
+    Returns:
+        HEX-цвет или None, если цвет не найден.
+    """
     if not text:
         return None
     lowered = str(text).lower()
@@ -111,6 +127,14 @@ def _extract_color_from_text(text: str | None) -> str | None:
 
 
 def _default_color_by_weekday(start_at: datetime) -> str:
+    """Вернуть цвет по дню недели события.
+
+    Args:
+        start_at: Дата/время начала события.
+
+    Returns:
+        HEX-цвет из предопределенной палитры.
+    """
     palette = [
         "#3b82f6",  # mon
         "#8b5cf6",  # tue
@@ -125,6 +149,14 @@ def _default_color_by_weekday(start_at: datetime) -> str:
 
 
 def _normalize_recurrence(value: str | None) -> str | None:
+    """Нормализовать значение повторяемости события.
+
+    Args:
+        value: Сырой recurrence/repeat из payload.
+
+    Returns:
+        Нормализованное значение recurrence или None.
+    """
     if not value:
         return None
     s = str(value).strip().lower()
@@ -152,6 +184,14 @@ def _normalize_recurrence(value: str | None) -> str | None:
 
 
 def _extract_start_end(payload: dict[str, Any]) -> tuple[datetime | None, datetime | None]:
+    """Извлечь `start_at` и `end_at` из payload события.
+
+    Args:
+        payload: Action payload события.
+
+    Returns:
+        Кортеж `(start_at, end_at)`; элементы могут быть None.
+    """
     start_raw = payload.get("start_at") or payload.get("startAt") or payload.get("starts_at")
     end_raw = payload.get("end_at") or payload.get("endAt") or payload.get("ends_at")
 
@@ -183,6 +223,14 @@ def _extract_start_end(payload: dict[str, Any]) -> tuple[datetime | None, dateti
 
 
 def _extract_reminders(payload: dict[str, Any]) -> list[int]:
+    """Извлечь напоминания в минутах из payload.
+
+    Args:
+        payload: Action payload события.
+
+    Returns:
+        Список уникальных оффсетов напоминаний в минутах.
+    """
     raw = (
         payload.get("reminder_offsets_minutes")
         or payload.get("reminders_minutes")
@@ -251,6 +299,14 @@ def _extract_reminders(payload: dict[str, Any]) -> list[int]:
 
 
 def _extract_participant_refs(payload: dict[str, Any]) -> tuple[list[uuid.UUID], list[str]]:
+    """Извлечь участников события в виде UUID и строковых референсов.
+
+    Args:
+        payload: Action payload события.
+
+    Returns:
+        Кортеж `(participant_ids, participant_refs)`.
+    """
     raw = (
         payload.get("participant_ids")
         or payload.get("participants")
@@ -291,6 +347,14 @@ def _extract_participant_refs(payload: dict[str, Any]) -> tuple[list[uuid.UUID],
 
 
 def _normalize_schedule_items(action_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Нормализовать payload расписания в список однотипных элементов.
+
+    Args:
+        action_payload: Action payload с событием или массивом `events`.
+
+    Returns:
+        Список payload-элементов событий.
+    """
     items_raw = action_payload.get("events")
     if isinstance(items_raw, list) and items_raw:
         items: list[dict[str, Any]] = []
@@ -525,6 +589,15 @@ async def handle_create_kb_page_action(
     skipped_due_to_limit = 0
 
     async def _create_node(node: dict[str, Any], parent: uuid.UUID | None) -> None:
+        """Рекурсивно создать узел KB-дерева и его дочерние узлы.
+
+        Args:
+            node: Нормализованный узел страницы KB.
+            parent: ID родительской страницы.
+
+        Returns:
+            None.
+        """
         nonlocal remaining_slots, skipped_due_to_limit
         if remaining_slots <= 0:
             skipped_due_to_limit += _count_kb_nodes(node)
@@ -579,12 +652,29 @@ async def handle_create_kb_page_action(
 
 
 async def _resolve_kb_limit(uow: UnitOfWork, *, org_id: uuid.UUID) -> int:
+    """Получить лимит страниц KB для организации по тарифу.
+
+    Args:
+        uow: UnitOfWork с активной сессией.
+        org_id: ID организации.
+
+    Returns:
+        Максимально допустимое число страниц KB (0 = без лимита в модели).
+    """
     plan = await AIRepository(uow.session).resolve_effective_plan(org_id=org_id)
     # Для KB используем общий лимит записей тарифа.
     return int(getattr(plan, "max_records", 0) or 0)
 
 
 def _normalize_kb_node(raw: Any) -> dict[str, Any] | None:
+    """Нормализовать произвольный узел KB к стандартной структуре.
+
+    Args:
+        raw: Сырой объект узла.
+
+    Returns:
+        Нормализованный узел или None.
+    """
     if not isinstance(raw, dict):
         return None
     title = str(raw.get("title") or raw.get("name") or "").strip()[:500]
@@ -607,6 +697,14 @@ def _normalize_kb_node(raw: Any) -> dict[str, Any] | None:
 
 
 def _extract_kb_nodes(action_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Извлечь список корневых узлов KB из action payload.
+
+    Args:
+        action_payload: Action payload `create_kb_page`.
+
+    Returns:
+        Список нормализованных корневых узлов.
+    """
     nodes: list[dict[str, Any]] = []
 
     tree_raw = action_payload.get("tree")
@@ -640,6 +738,14 @@ def _extract_kb_nodes(action_payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _count_kb_nodes(node: dict[str, Any]) -> int:
+    """Посчитать количество узлов в KB-поддереве.
+
+    Args:
+        node: Нормализованный узел KB.
+
+    Returns:
+        Общее число узлов (включая текущий).
+    """
     children = node.get("children") or []
     if not isinstance(children, list):
         return 1
@@ -647,6 +753,14 @@ def _count_kb_nodes(node: dict[str, Any]) -> int:
 
 
 def _build_kb_slug(title: str) -> str:
+    """Построить slug страницы KB из заголовка.
+
+    Args:
+        title: Заголовок страницы.
+
+    Returns:
+        Безопасный slug ограниченной длины.
+    """
     raw = (title or "").strip().lower()
     replaced = re.sub(r"\s+", "-", raw)
     cleaned = re.sub(r"[^a-z0-9\-а-яё]", "", replaced)

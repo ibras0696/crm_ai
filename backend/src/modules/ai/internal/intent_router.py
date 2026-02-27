@@ -48,7 +48,8 @@ _READ_MARKERS = ("покажи", "посмотр", "найди", "проанал
 _DOMAIN_MARKERS: dict[IntentDomain, tuple[str, ...]] = {
     "table": ("таблиц", "колон", "запис", "строк", "records", "table", "column"),
     "schedule": ("расписан", "событи", "календар", "встреч", "schedule", "event", "calendar"),
-    "knowledge": ("база знаний", "kb", "страниц", "knowledge", "wiki", "документац"),
+    # Добавляем основы слов, чтобы ловить формы вроде "в базе знаний".
+    "knowledge": ("база знаний", "баз", "знан", "курс", "урок", "kb", "страниц", "knowledge", "wiki", "документац"),
     "dashboard": ("дашборд", "график", "виджет", "отчет", "отчёт", "dashboard", "chart", "widget", "report"),
     "general": (),
 }

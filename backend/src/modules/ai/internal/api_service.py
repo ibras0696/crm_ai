@@ -13,6 +13,7 @@ from src.config import settings
 from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.limits import is_org_ai_enabled, resolve_org_plan, resolve_plan_limits
 from src.modules.ai.models import AIChatMessage
+from src.modules.ai.internal.runtime_secrets import decrypt_runtime_secret
 from src.modules.ai.repository import AIRepository
 from src.modules.billing.token_wallet import get_token_balance_view
 from src.modules.ai.service import build_messages, build_org_context_for_user, estimate_tokens
@@ -27,12 +28,12 @@ async def build_ai_status(*, org_id: uuid.UUID) -> dict[str, Any]:
     Returns:
         Словарь со статусом включенности, наличием credentials, планом, статистикой и лимитами.
     """
-    credentials_present = bool(settings.OPENAI_BEARER_TOKEN or settings.OPENAI_API_KEY)
     now = datetime.now(timezone.utc)
     day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
 
     async with UnitOfWork() as uow:
         repo = AIRepository(uow.session)
+        runtime_secret = await repo.get_runtime_secret()
         org_ai_enabled = await is_org_ai_enabled(uow.session, org_id=org_id)
         plan_tier = await resolve_org_plan(uow.session, org_id=org_id)
         plan = plan_tier.value
@@ -41,6 +42,8 @@ async def build_ai_status(*, org_id: uuid.UUID) -> dict[str, Any]:
         total = await repo.usage_stats(org_id=org_id)
         today = await repo.usage_stats(org_id=org_id, since=day_start)
         wallet = await get_token_balance_view(uow.session, org_id=org_id)
+        runtime_token = decrypt_runtime_secret(runtime_secret.bearer_token_encrypted) if runtime_secret else ""
+        credentials_present = bool(runtime_token.strip() or settings.OPENAI_BEARER_TOKEN or settings.OPENAI_API_KEY)
 
     limits = resolve_plan_limits(plan_tier, plan_db)
 

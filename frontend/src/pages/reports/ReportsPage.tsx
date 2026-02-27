@@ -534,21 +534,32 @@ export default function ReportsPage() {
                 <option value="">Выбери дашборд</option>
                 {dashboards.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
-              <div className="grid grid-cols-[1fr_auto] gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <input
                   value={newDashName}
                   onChange={e => setNewDashName(e.target.value)}
-                  className="h-9 px-3 rounded-lg border border-input bg-background text-sm"
+                  className="h-9 flex-1 min-w-0 px-3 rounded-lg border border-input bg-background text-sm"
                   placeholder="Название нового дашборда"
                 />
                 <button
                   onClick={createDashboard}
                   disabled={busy || !newDashName.trim()}
-                  className="h-9 px-3 rounded-lg border border-border text-sm hover:bg-secondary disabled:opacity-50"
+                  className="h-9 px-3 rounded-lg border border-border text-sm hover:bg-secondary disabled:opacity-50 inline-flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap"
                 >
+                  <Plus className="h-4 w-4" />
                   Создать
                 </button>
               </div>
+              {selectedDashboard && (
+                <button
+                  onClick={() => setDashboardToDelete(selectedDashboard)}
+                  disabled={busy}
+                  className="w-full h-9 rounded-lg border border-destructive/40 text-destructive text-sm hover:bg-destructive/10 disabled:opacity-50 inline-flex items-center justify-center gap-1.5"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Удалить текущий дашборд
+                </button>
+              )}
             </div>
 
             <div className="rounded-xl border border-border bg-card p-4 space-y-3">

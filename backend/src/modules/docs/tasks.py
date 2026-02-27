@@ -1,0 +1,898 @@
+"""Celery tasks модуля Docs (AV-сканирование и статусный gating)."""
+# ruff: noqa: TC003
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import uuid
+from collections.abc import Iterable
+from contextlib import suppress
+from datetime import UTC, datetime, timedelta
+from hashlib import sha256
+
+from sqlalchemy import delete, func, select
+
+from src.common.enums import AuditAction
+from src.config import settings
+from src.infrastructure.celery_app import celery
+from src.infrastructure.database_sync import sync_session_factory
+from src.infrastructure.metrics_custom import (
+    DOCS_AI_GENERATE_ERRORS_TOTAL,
+    DOCS_AI_GENERATE_TOTAL,
+    DOCS_RETENTION_CLEANUP_TOTAL,
+    FILE_SCAN_TOTAL,
+    UPLOADS_TOTAL,
+)
+from src.infrastructure.uow import UnitOfWork
+from src.modules.ai.internal.repository import AIRepository
+from src.modules.ai.limits import check_ai_limits
+from src.modules.ai.models import AIUsageLog
+from src.modules.audit.models import AuditLog
+from src.modules.billing.token_wallet import spend_tokens
+from src.modules.docs.ai_generator import DEFAULT_AI_DOCUMENT_GENERATOR
+from src.modules.docs.antivirus import AntivirusScanResult, build_antivirus_provider
+from src.modules.docs.document_render import render_document_bytes
+from src.modules.docs.domain import FileStatus, FileType
+from src.modules.docs.magic_bytes import validate_magic_bytes
+from src.modules.docs.models import DocsAIGenerationJob, FileVersion, OrgStorageUsage
+from src.modules.docs.pdf_stamper import PdfStampInput, stamp_pdf_with_signature
+from src.modules.docs.repository import DocsRepository
+from src.modules.docs.storage import DEFAULT_STORAGE_PROVIDER
+from src.modules.files.models import File
+
+
+@celery.task(name="scan_version")
+def scan_version(version_id: str) -> dict[str, str]:
+    """Проверить загруженную версию файла и выставить финальный статус."""
+    try:
+        version_uuid = uuid.UUID(str(version_id))
+    except Exception:
+        _inc_scan_metric("invalid_version_id")
+        return {"status": "error", "reason": "invalid_version_id"}
+
+    with sync_session_factory() as session:
+        row = session.execute(
+            select(FileVersion, File)
+            .join(File, File.id == FileVersion.file_id)
+            .where(FileVersion.id == version_uuid)
+            .limit(1)
+        ).first()
+        if row is None:
+            _inc_scan_metric("version_not_found")
+            return {"status": "skipped", "reason": "version_not_found"}
+
+        version, file_obj = row
+        if file_obj.status != FileStatus.SCANNING.value:
+            _inc_scan_metric("status_not_scanning")
+            return {"status": "skipped", "reason": "status_not_scanning"}
+
+        scan_result = _scan_payload(file_obj=file_obj, version=version)
+        final_status = FileStatus.READY.value if scan_result.result == "clean" else FileStatus.BLOCKED.value
+
+        usage = (
+            session.execute(
+                select(OrgStorageUsage)
+                .where(OrgStorageUsage.org_id == file_obj.org_id)
+                .with_for_update()
+                .limit(1)
+            )
+            .scalars()
+            .first()
+        )
+        if usage is None:
+            used_bytes = int(
+                session.execute(
+                    select(func.coalesce(func.sum(File.size), 0)).where(
+                        File.org_id == file_obj.org_id,
+                        File.type.in_([FileType.TXT.value, FileType.PDF.value, FileType.DOCX.value]),
+                        File.status == FileStatus.READY.value,
+                        File.current_version_id.is_not(None),
+                    )
+                ).scalar_one()
+                or 0
+            )
+            usage = OrgStorageUsage(org_id=file_obj.org_id, used_bytes=used_bytes, reserved_bytes=0)
+            session.add(usage)
+            session.flush()
+
+        usage.reserved_bytes = max(0, int(usage.reserved_bytes) - int(file_obj.size))
+        version_meta = version.meta_json if isinstance(version.meta_json, dict) else {}
+        replaced_ready_size = int(version_meta.get("replaced_ready_size") or 0)
+        if final_status == FileStatus.READY.value:
+            usage.used_bytes = max(0, int(usage.used_bytes) + int(file_obj.size) - replaced_ready_size)
+        elif replaced_ready_size > 0:
+            usage.used_bytes = max(0, int(usage.used_bytes) - replaced_ready_size)
+
+        file_obj.status = final_status
+        ai_job_id_raw = version_meta.get("ai_generation_job_id")
+        ai_job_id = _safe_uuid(str(ai_job_id_raw)) if ai_job_id_raw else None
+        if ai_job_id is not None:
+            ai_job = (
+                session.execute(
+                    select(DocsAIGenerationJob).where(DocsAIGenerationJob.id == ai_job_id).limit(1)
+                )
+            ).scalars().first()
+            if ai_job is not None:
+                ai_job.status = final_status if final_status in {"ready", "blocked"} else "failed"
+                ai_job.finished_at = datetime.now(UTC)
+                if final_status != FileStatus.READY.value and not ai_job.error_message:
+                    ai_job.error_message = "Сканирование завершилось блокировкой файла"
+
+        session.add(
+            AuditLog(
+                org_id=file_obj.org_id,
+                actor_id=file_obj.uploaded_by,
+                action=AuditAction.UPDATE,
+                entity_type="docs_file",
+                entity_id=str(file_obj.id),
+                meta={
+                    "event": "scan_result",
+                    "version_id": str(version.id),
+                    "status": final_status,
+                    "scan_result": scan_result.result,
+                    "threat_name": scan_result.threat_name,
+                    "details": scan_result.details,
+                },
+            )
+        )
+
+        session.commit()
+
+    _inc_scan_metric(scan_result.result)
+    _inc_upload_metric(final_status)
+    return {
+        "status": final_status,
+        "scan_result": scan_result.result,
+        "version_id": str(version_uuid),
+    }
+
+
+@celery.task(name="pdf_stamp_sign")
+def pdf_stamp_sign(version_id: str, payload: dict, requested_by: str | None = None) -> dict[str, str]:
+    """Наложить подпись на PDF, создать новую версию и прогнать AV-gating."""
+    try:
+        source_version_id = uuid.UUID(str(version_id))
+    except Exception:
+        _inc_scan_metric("invalid_version_id")
+        return {"status": "error", "reason": "invalid_version_id"}
+
+    file_status = FileStatus.BLOCKED.value
+    with sync_session_factory() as session:
+        row = session.execute(
+            select(FileVersion, File)
+            .join(File, File.id == FileVersion.file_id)
+            .where(FileVersion.id == source_version_id)
+            .limit(1)
+        ).first()
+        if row is None:
+            _inc_scan_metric("version_not_found")
+            return {"status": "error", "reason": "version_not_found"}
+
+        source_version, file_obj = row
+        if file_obj.type != FileType.PDF.value:
+            _inc_scan_metric("invalid_file_type")
+            return {"status": "error", "reason": "invalid_file_type"}
+        if file_obj.status != FileStatus.SCANNING.value:
+            _inc_scan_metric("status_not_scanning")
+            return {"status": "skipped", "reason": "status_not_scanning"}
+
+        try:
+            source_pdf = DEFAULT_STORAGE_PROVIDER.get_object_bytes(
+                bucket=source_version.s3_bucket,
+                key=source_version.s3_key,
+            )
+            signature_png = _decode_signature_png(str(payload.get("image") or ""))
+            stamp_input = PdfStampInput(
+                page=int(payload.get("page") or 1),
+                x=float(payload.get("x") or 0),
+                y=float(payload.get("y") or 0),
+                width=float(payload.get("width") or 0),
+                height=float(payload.get("height") or 0),
+                author=str(payload.get("author") or "").strip() or None,
+            )
+            stamped_pdf, stamp_meta = stamp_pdf_with_signature(
+                source_pdf=source_pdf,
+                signature_png=signature_png,
+                stamp=stamp_input,
+            )
+        except Exception as exc:
+            file_obj.status = FileStatus.BLOCKED.value
+            session.add(file_obj)
+            session.add(
+                AuditLog(
+                    org_id=file_obj.org_id,
+                    actor_id=_safe_uuid(requested_by) or file_obj.uploaded_by,
+                    action=AuditAction.UPDATE,
+                    entity_type="docs_file",
+                    entity_id=str(file_obj.id),
+                    meta={
+                        "event": "pdf_sign_failed",
+                        "source_version_id": str(source_version.id),
+                        "reason": str(exc)[:300],
+                    },
+                )
+            )
+            session.commit()
+            _inc_scan_metric("error")
+            _inc_upload_metric(FileStatus.BLOCKED.value)
+            return {"status": "blocked", "reason": "pdf_stamp_failed"}
+
+        scan_result = _scan_payload_bytes(file_type=FileType.PDF, payload=stamped_pdf)
+        final_status = FileStatus.READY.value if scan_result.result == "clean" else FileStatus.BLOCKED.value
+
+        usage = (
+            session.execute(
+                select(OrgStorageUsage)
+                .where(OrgStorageUsage.org_id == file_obj.org_id)
+                .with_for_update()
+                .limit(1)
+            )
+            .scalars()
+            .first()
+        )
+        if usage is None:
+            used_bytes = int(
+                session.execute(
+                    select(func.coalesce(func.sum(File.size), 0)).where(
+                        File.org_id == file_obj.org_id,
+                        File.type.in_([FileType.TXT.value, FileType.PDF.value, FileType.DOCX.value]),
+                        File.status == FileStatus.READY.value,
+                        File.current_version_id.is_not(None),
+                    )
+                ).scalar_one()
+                or 0
+            )
+            usage = OrgStorageUsage(org_id=file_obj.org_id, used_bytes=used_bytes, reserved_bytes=0)
+            session.add(usage)
+            session.flush()
+
+        actor_id = _safe_uuid(requested_by) or file_obj.uploaded_by
+        if final_status == FileStatus.READY.value:
+            new_version_id = uuid.uuid4()
+            new_key = DEFAULT_STORAGE_PROVIDER.build_version_key(
+                org_id=file_obj.org_id,
+                file_id=file_obj.id,
+                version_id=new_version_id,
+            )
+            DEFAULT_STORAGE_PROVIDER.put_object_bytes(
+                bucket=source_version.s3_bucket,
+                key=new_key,
+                payload=stamped_pdf,
+                content_type="application/pdf",
+            )
+            new_version = FileVersion(
+                id=new_version_id,
+                file_id=file_obj.id,
+                s3_key=new_key,
+                s3_bucket=source_version.s3_bucket,
+                size_bytes=len(stamped_pdf),
+                sha256=sha256(stamped_pdf).hexdigest(),
+                mime="application/pdf",
+                meta_json={"signatures": [stamp_meta]},
+                created_by=actor_id,
+            )
+            session.add(new_version)
+            session.flush()
+
+            old_size = int(source_version.size_bytes or file_obj.size or 0)
+            new_size = int(len(stamped_pdf))
+            usage.used_bytes = max(0, int(usage.used_bytes) + new_size - old_size)
+
+            file_obj.current_version_id = new_version.id
+            file_obj.s3_key = new_key
+            file_obj.s3_bucket = source_version.s3_bucket
+            file_obj.size = new_size
+            file_obj.status = FileStatus.READY.value
+
+            session.add(
+                AuditLog(
+                    org_id=file_obj.org_id,
+                    actor_id=actor_id,
+                    action=AuditAction.CREATE,
+                    entity_type="docs_file_version",
+                    entity_id=str(new_version.id),
+                    meta={
+                        "event": "version_created",
+                        "source": "pdf_sign",
+                        "file_id": str(file_obj.id),
+                        "size_bytes": int(new_size),
+                    },
+                )
+            )
+
+        else:
+            file_obj.status = FileStatus.BLOCKED.value
+        file_status = str(file_obj.status or final_status)
+
+        session.add(
+            AuditLog(
+                org_id=file_obj.org_id,
+                actor_id=actor_id,
+                action=AuditAction.UPDATE,
+                entity_type="docs_file",
+                entity_id=str(file_obj.id),
+                meta={
+                    "event": "pdf_sign_result",
+                    "source_version_id": str(source_version.id),
+                    "status": file_obj.status,
+                    "scan_result": scan_result.result,
+                    "threat_name": scan_result.threat_name,
+                    "details": scan_result.details,
+                },
+            )
+        )
+        session.commit()
+
+    _inc_scan_metric(scan_result.result)
+    _inc_upload_metric(file_status)
+    return {
+        "status": file_status,
+        "scan_result": scan_result.result,
+        "source_version_id": str(source_version_id),
+    }
+
+
+@celery.task(name="docs_ai_generate", bind=True)
+def ai_generate(self, job_id: str) -> dict[str, str]:
+    """Сгенерировать документ через AI и запустить AV-пайплайн версии."""
+    task_id = str(getattr(getattr(self, "request", None), "id", "") or "")
+    try:
+        return asyncio.run(run_ai_generate_inline(job_id=job_id, task_id=task_id))
+    except Exception as exc:
+        with suppress(Exception):
+            asyncio.run(_mark_ai_job_failed_unexpected(job_id=job_id, reason=str(exc)))
+        _inc_ai_generate_error_metric("unexpected_exception")
+        return {"status": "failed", "reason": str(exc)[:240]}
+
+
+async def run_ai_generate_inline(*, job_id: str, task_id: str = "inline") -> dict[str, str]:
+    """Асинхронная реализация Celery task `docs_ai_generate`."""
+    job_uuid = _safe_uuid(job_id)
+    if job_uuid is None:
+        _inc_ai_generate_error_metric("invalid_job_id")
+        return {"status": "failed", "reason": "invalid_job_id"}
+
+    # Этап 1: захват job и pre-check лимитов/конфига.
+    async with UnitOfWork() as uow:
+        repo = DocsRepository(uow.session)
+        job = await repo.get_ai_generation_job_for_update(job_id=job_uuid)
+        if job is None:
+            _inc_ai_generate_error_metric("job_not_found")
+            return {"status": "failed", "reason": "job_not_found"}
+        if job.status not in {"queued", "running"}:
+            return {"status": "skipped", "reason": f"invalid_status:{job.status}"}
+        if job.file_id is None:
+            await _mark_ai_job_failed(
+                uow=uow,
+                repo=repo,
+                job=job,
+                reason="Файл генерации не найден",
+                code="file_not_found",
+            )
+            return {"status": "failed", "reason": "file_not_found"}
+
+        file_obj = await repo.get_doc_file(file_id=job.file_id, org_id=job.org_id)
+        if file_obj is None:
+            await _mark_ai_job_failed(
+                uow=uow,
+                repo=repo,
+                job=job,
+                reason="Файл генерации не найден",
+                code="file_not_found",
+            )
+            return {"status": "failed", "reason": "file_not_found"}
+
+        normalized_type = _resolve_file_type(job.file_type)
+        if normalized_type is None:
+            await _mark_ai_job_failed(
+                uow=uow,
+                repo=repo,
+                job=job,
+                reason="Неподдерживаемый тип документа в AI-job",
+                code="invalid_file_type",
+            )
+            return {"status": "failed", "reason": "invalid_file_type"}
+        if job.user_id is None:
+            await _mark_ai_job_failed(
+                uow=uow,
+                repo=repo,
+                job=job,
+                reason="Не найден пользователь, инициировавший AI-генерацию",
+                code="user_not_found",
+            )
+            return {"status": "failed", "reason": "user_not_found"}
+
+        estimated_tokens = int(max(200, len((job.prompt or "").split()) * 4 + 1000))
+        ok, err = await check_ai_limits(
+            uow.session,
+            org_id=job.org_id,
+            user_id=job.user_id,
+            estimated_request_tokens=estimated_tokens,
+        )
+        if not ok:
+            await _mark_ai_job_failed(
+                uow=uow,
+                repo=repo,
+                job=job,
+                reason=str((err or {}).get("message") or "AI лимит превышен"),
+                code=str((err or {}).get("code") or "ai_limit"),
+            )
+            return {"status": "failed", "reason": str((err or {}).get("code") or "ai_limit")}
+
+        ai_repo = AIRepository(uow.session)
+        runtime = await DEFAULT_AI_DOCUMENT_GENERATOR.resolve_runtime(ai_repo)
+        job.status = "running"
+        job.started_at = job.started_at or datetime.now(UTC)
+        if task_id:
+            job.task_id = task_id
+        await repo.update_ai_generation_job(job)
+        await uow.commit()
+        _inc_ai_generate_metric("running", normalized_type.value)
+        snapshot = {
+            "org_id": job.org_id,
+            "user_id": job.user_id,
+            "job_id": job.id,
+            "file_id": file_obj.id,
+            "file_type": normalized_type,
+            "prompt": str(job.prompt or ""),
+            "template": job.template,
+            "title": job.title or file_obj.title or file_obj.original_name,
+            "language": job.language or "ru",
+            "runtime": runtime,
+        }
+
+    # Этап 2: вызов AI провайдера.
+    generated = await DEFAULT_AI_DOCUMENT_GENERATOR.generate_text(
+        runtime=snapshot["runtime"],
+        file_type=snapshot["file_type"],
+        prompt=snapshot["prompt"],
+        template=snapshot["template"],
+        title=snapshot["title"],
+        language=snapshot["language"],
+    )
+    payload, mime, extension = render_document_bytes(
+        file_type=snapshot["file_type"],
+        text=generated.text,
+        title=snapshot["title"],
+    )
+    payload_size = int(len(payload))
+    max_upload_bytes = int(max(1, int(settings.FILE_MAX_UPLOAD_MB)) * 1024 * 1024)
+    if payload_size > max_upload_bytes:
+        async with UnitOfWork() as uow:
+            repo = DocsRepository(uow.session)
+            job = await repo.get_ai_generation_job_for_update(job_id=snapshot["job_id"])
+            if job is not None:
+                await _mark_ai_job_failed(
+                    uow=uow,
+                    repo=repo,
+                    job=job,
+                    reason="Сгенерированный документ превысил максимальный размер файла",
+                    code="file_too_large",
+                )
+        _inc_ai_generate_error_metric("file_too_large")
+        return {"status": "failed", "reason": "file_too_large"}
+
+    # Этап 3: запись версии/usage/биллинга в одной транзакции.
+    async with UnitOfWork() as uow:
+        repo = DocsRepository(uow.session)
+        job = await repo.get_ai_generation_job_for_update(job_id=snapshot["job_id"])
+        if job is None:
+            _inc_ai_generate_error_metric("job_not_found_after_generate")
+            return {"status": "failed", "reason": "job_not_found_after_generate"}
+        file_obj = await repo.get_doc_file(file_id=snapshot["file_id"], org_id=snapshot["org_id"])
+        if file_obj is None:
+            await _mark_ai_job_failed(
+                uow=uow,
+                repo=repo,
+                job=job,
+                reason="Файл генерации не найден",
+                code="file_not_found_after_generate",
+            )
+            return {"status": "failed", "reason": "file_not_found_after_generate"}
+
+        usage_row = await repo.get_storage_usage_for_update(org_id=snapshot["org_id"])
+        reserved_bytes = _extract_reserved_bytes(job.meta_json)
+        usage_row.reserved_bytes = max(0, int(usage_row.reserved_bytes) - reserved_bytes)
+        storage_limit = await _resolve_storage_limit_bytes(session=uow.session, org_id=snapshot["org_id"])
+        projected = int(usage_row.used_bytes) + int(usage_row.reserved_bytes) + payload_size
+        if storage_limit > 0 and projected > storage_limit:
+            await _mark_ai_job_failed(
+                uow=uow,
+                repo=repo,
+                job=job,
+                reason="Недостаточно места для AI-документа",
+                code="quota_exceeded",
+                release_reserved=False,
+            )
+            return {"status": "failed", "reason": "quota_exceeded"}
+
+        usage_total = int(generated.usage.get("total_tokens", 0) or 0)
+        try:
+            await spend_tokens(
+                uow.session,
+                org_id=snapshot["org_id"],
+                user_id=snapshot["user_id"],
+                tokens=usage_total,
+                request_id=f"docs-ai-generate:{snapshot['job_id']}",
+                meta={
+                    "source": "docs_ai_generate",
+                    "file_id": str(file_obj.id),
+                    "job_id": str(job.id),
+                    "file_type": snapshot["file_type"].value,
+                },
+            )
+        except ValueError:
+            await _mark_ai_job_failed(
+                uow=uow,
+                repo=repo,
+                job=job,
+                reason="Лимит токенов исчерпан.",
+                code="ai_token_limit_exceeded",
+                release_reserved=False,
+            )
+            return {"status": "failed", "reason": "ai_token_limit_exceeded"}
+
+        new_version_id = uuid.uuid4()
+        new_key = DEFAULT_STORAGE_PROVIDER.build_version_key(
+            org_id=snapshot["org_id"],
+            file_id=file_obj.id,
+            version_id=new_version_id,
+        )
+        DEFAULT_STORAGE_PROVIDER.put_object_bytes(
+            bucket=file_obj.s3_bucket or settings.S3_BUCKET,
+            key=new_key,
+            payload=payload,
+            content_type=mime,
+        )
+
+        new_version = FileVersion(
+            id=new_version_id,
+            file_id=file_obj.id,
+            s3_key=new_key,
+            s3_bucket=file_obj.s3_bucket or settings.S3_BUCKET,
+            size_bytes=payload_size,
+            sha256=sha256(payload).hexdigest(),
+            mime=mime,
+            meta_json={
+                "source": "ai_generate",
+                "ai_generation_job_id": str(job.id),
+                "provider_mode": generated.provider_mode,
+                "extension": extension,
+                "replaced_ready_size": 0,
+            },
+            created_by=snapshot["user_id"],
+        )
+        await repo.create_file_version(new_version)
+
+        file_title = (str(snapshot["title"] or "").strip() or file_obj.title or file_obj.original_name)[:500]
+        filename = f"{file_title[:220]}.{extension}"
+        file_obj.current_version_id = new_version.id
+        file_obj.s3_key = new_key
+        file_obj.s3_bucket = file_obj.s3_bucket or settings.S3_BUCKET
+        file_obj.content_type = mime
+        file_obj.size = payload_size
+        file_obj.type = snapshot["file_type"].value
+        file_obj.status = FileStatus.SCANNING.value
+        file_obj.title = file_title
+        file_obj.filename = filename
+        file_obj.original_name = filename
+        await repo.update_file(file_obj)
+        await repo.update_storage_usage(usage_row)
+
+        job.status = "scanning"
+        job.provider_model = generated.model
+        job.prompt_tokens = int(generated.usage.get("prompt_tokens", 0) or 0)
+        job.completion_tokens = int(generated.usage.get("completion_tokens", 0) or 0)
+        job.total_tokens = usage_total
+        job.error_message = None
+        meta_json = dict(job.meta_json or {})
+        meta_json["generated_size_bytes"] = payload_size
+        meta_json["version_id"] = str(new_version.id)
+        meta_json["content_type"] = mime
+        job.meta_json = meta_json
+        await repo.update_ai_generation_job(job)
+
+        uow.session.add(
+            AIUsageLog(
+                org_id=snapshot["org_id"],
+                user_id=snapshot["user_id"],
+                model=generated.model,
+                prompt_tokens=int(generated.usage.get("prompt_tokens", 0) or 0),
+                completion_tokens=int(generated.usage.get("completion_tokens", 0) or 0),
+                total_tokens=usage_total,
+                message_preview=snapshot["prompt"][:200],
+            )
+        )
+        uow.session.add(
+            AuditLog(
+                org_id=snapshot["org_id"],
+                actor_id=snapshot["user_id"],
+                action=AuditAction.CREATE,
+                entity_type="docs_file_version",
+                entity_id=str(new_version.id),
+                meta={
+                    "event": "version_created",
+                    "source": "ai_generate",
+                    "file_id": str(file_obj.id),
+                    "size_bytes": payload_size,
+                },
+            )
+        )
+        uow.session.add(
+            AuditLog(
+                org_id=snapshot["org_id"],
+                actor_id=snapshot["user_id"],
+                action=AuditAction.UPDATE,
+                entity_type="docs_file",
+                entity_id=str(file_obj.id),
+                meta={
+                    "event": "ai_generate_ready_for_scan",
+                    "job_id": str(job.id),
+                    "version_id": str(new_version.id),
+                    "status": "scanning",
+                    "file_type": snapshot["file_type"].value,
+                },
+            )
+        )
+        await uow.commit()
+
+    _inc_ai_generate_metric("scanning", snapshot["file_type"].value)
+    _inc_upload_metric(FileStatus.SCANNING.value)
+    try:
+        scan_version.delay(str(new_version_id))
+    except Exception:
+        scan_version.run(str(new_version_id))
+    return {"status": "scanning", "job_id": str(snapshot["job_id"]), "file_id": str(snapshot["file_id"])}
+
+
+async def _mark_ai_job_failed_unexpected(*, job_id: str, reason: str) -> None:
+    """Fail-safe перевод job в failed при необработанном исключении task."""
+    job_uuid = _safe_uuid(job_id)
+    if job_uuid is None:
+        return
+    async with UnitOfWork() as uow:
+        repo = DocsRepository(uow.session)
+        job = await repo.get_ai_generation_job_for_update(job_id=job_uuid)
+        if job is None:
+            return
+        if job.status in {"ready", "blocked", "failed"}:
+            return
+        await _mark_ai_job_failed(
+            uow=uow,
+            repo=repo,
+            job=job,
+            reason=f"Внутренняя ошибка генерации: {reason[:300]}",
+            code="unexpected_exception",
+        )
+
+
+@celery.task(name="docs_cleanup_old_versions")
+def cleanup_old_doc_versions() -> dict[str, int | str]:
+    """Удалить старые неактуальные версии документов по retention-политике."""
+    retention_days = int(getattr(settings, "DOCS_RETENTION_DAYS", 0) or 0)
+    keep_latest = max(1, int(getattr(settings, "DOCS_RETENTION_KEEP_LATEST", 5) or 5))
+    batch_size = max(1, int(getattr(settings, "DOCS_RETENTION_BATCH_SIZE", 200) or 200))
+    if retention_days <= 0:
+        _inc_retention_metric("disabled")
+        return {"status": "disabled", "deleted": 0}
+
+    threshold = datetime.now(UTC) - timedelta(days=retention_days)
+    deleted_count = 0
+    scanned_files = 0
+    with sync_session_factory() as session:
+        files = (
+            session.execute(
+                select(File.id, File.current_version_id)
+                .where(
+                    File.type.in_([FileType.TXT.value, FileType.PDF.value, FileType.DOCX.value]),
+                    File.current_version_id.is_not(None),
+                )
+                .limit(max(100, batch_size))
+            )
+        ).all()
+        for file_id, current_version_id in files:
+            scanned_files += 1
+            versions = (
+                session.execute(
+                    select(FileVersion)
+                    .where(
+                        FileVersion.file_id == file_id,
+                        FileVersion.id != current_version_id,
+                        FileVersion.created_at < threshold,
+                    )
+                    .order_by(FileVersion.created_at.desc())
+                )
+            ).scalars().all()
+            if len(versions) <= keep_latest:
+                continue
+            for version in versions[keep_latest:]:
+                if deleted_count >= batch_size:
+                    break
+                try:
+                    # У StorageProvider нет публичного delete, поэтому используем базовый клиент files-модуля.
+                    from src.modules.files.storage import get_s3_client
+
+                    get_s3_client().delete_object(Bucket=version.s3_bucket, Key=version.s3_key)
+                except Exception:
+                    pass
+                session.execute(delete(FileVersion).where(FileVersion.id == version.id))
+                deleted_count += 1
+            if deleted_count >= batch_size:
+                break
+        session.commit()
+    _inc_retention_metric("ok")
+    return {"status": "ok", "deleted": int(deleted_count), "scanned_files": int(scanned_files)}
+
+
+async def _mark_ai_job_failed(
+    *,
+    uow: UnitOfWork,
+    repo: DocsRepository,
+    job: DocsAIGenerationJob,
+    reason: str,
+    code: str,
+    release_reserved: bool = True,
+) -> None:
+    """Перевести AI job в failed и аккуратно снять резерв квоты."""
+    if release_reserved:
+        usage = await repo.get_storage_usage_for_update(org_id=job.org_id)
+        usage.reserved_bytes = max(0, int(usage.reserved_bytes) - _extract_reserved_bytes(job.meta_json))
+        await repo.update_storage_usage(usage)
+
+    if job.file_id is not None:
+        file_obj = await repo.get_doc_file(file_id=job.file_id, org_id=job.org_id)
+        if file_obj is not None and file_obj.status in {FileStatus.DRAFT.value, FileStatus.UPLOADING.value}:
+            file_obj.status = FileStatus.BLOCKED.value
+            await repo.update_file(file_obj)
+
+    job.status = "failed"
+    job.error_message = reason[:500]
+    job.finished_at = datetime.now(UTC)
+    await repo.update_ai_generation_job(job)
+    uow.session.add(
+        AuditLog(
+            org_id=job.org_id,
+            actor_id=job.user_id,
+            action=AuditAction.UPDATE,
+            entity_type="docs_ai_generation_job",
+            entity_id=str(job.id),
+            meta={"event": "ai_generate_failed", "reason": reason[:300], "code": code},
+        )
+    )
+    await uow.commit()
+    file_type = str(job.file_type or "unknown")
+    _inc_ai_generate_metric("failed", file_type)
+    _inc_ai_generate_error_metric(code)
+
+
+def _extract_reserved_bytes(meta_json: dict | None) -> int:
+    """Извлечь reserved_bytes из meta_json job."""
+    if not isinstance(meta_json, dict):
+        return 0
+    try:
+        return max(0, int(meta_json.get("reserved_bytes") or 0))
+    except Exception:
+        return 0
+
+
+async def _resolve_storage_limit_bytes(*, session, org_id: uuid.UUID) -> int:
+    """Получить лимит docs-хранилища по активному тарифу организации."""
+    plan = await DocsRepository(session).resolve_effective_plan(org_id=org_id)
+    max_storage_mb = int(getattr(plan, "max_storage_mb", 0) or 0)
+    if max_storage_mb <= 0:
+        return 0
+    return int(max_storage_mb) * 1024 * 1024
+
+
+def _scan_payload(*, file_obj: File, version: FileVersion) -> AntivirusScanResult:
+    """Проверить magic bytes и выполнить AV-скан объекта."""
+    declared_type = _resolve_file_type(file_obj.type)
+    if declared_type is None:
+        return AntivirusScanResult(result="magic_mismatch", details="invalid_declared_type")
+
+    try:
+        payload = DEFAULT_STORAGE_PROVIDER.get_object_bytes(bucket=version.s3_bucket, key=version.s3_key)
+    except Exception as exc:
+        return AntivirusScanResult(result="error", details=f"storage_read_error: {exc}")
+
+    return _scan_payload_bytes(file_type=declared_type, payload=payload)
+
+
+def _scan_payload_bytes(*, file_type: FileType, payload: bytes) -> AntivirusScanResult:
+    """Проверить magic bytes и выполнить AV-скан готового payload."""
+    magic_ok, magic_reason = validate_magic_bytes(file_type, payload)
+    if not magic_ok:
+        return AntivirusScanResult(result="magic_mismatch", details=magic_reason)
+
+    provider = build_antivirus_provider()
+    chunk_size = max(8 * 1024, int(getattr(settings, "DOCS_SCAN_CHUNK_SIZE_KB", 256)) * 1024)
+    av_result = provider.scan_stream(_iter_payload_chunks(payload, chunk_size=chunk_size))
+
+    if av_result.result == "infected":
+        return AntivirusScanResult(
+            result="infected",
+            threat_name=av_result.threat_name,
+            details=av_result.details,
+        )
+    if av_result.result == "clean":
+        return AntivirusScanResult(result="clean", details=magic_reason)
+    return AntivirusScanResult(result="error", details=av_result.details or "scan_error")
+
+
+def _decode_signature_png(raw: str) -> bytes:
+    """Декодировать подпись из data-url/base64 строки."""
+    value = str(raw or "").strip()
+    if not value:
+        raise ValueError("empty_signature")
+
+    if value.startswith("data:"):
+        _, _, value = value.partition(",")
+    try:
+        decoded = base64.b64decode(value, validate=True)
+    except Exception as exc:
+        raise ValueError("invalid_signature_base64") from exc
+    if len(decoded) < 20:
+        raise ValueError("signature_too_small")
+    if not decoded.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ValueError("signature_not_png")
+    return decoded
+
+
+def _safe_uuid(raw: str | None) -> uuid.UUID | None:
+    """Безопасно распарсить UUID из строки."""
+    try:
+        return uuid.UUID(str(raw)) if raw else None
+    except Exception:
+        return None
+
+
+def _resolve_file_type(file_type: str | None) -> FileType | None:
+    """Нормализовать строковый тип файла в enum."""
+    raw = str(file_type or "").strip().lower()
+    if raw == FileType.TXT.value:
+        return FileType.TXT
+    if raw == FileType.PDF.value:
+        return FileType.PDF
+    if raw == FileType.DOCX.value:
+        return FileType.DOCX
+    return None
+
+
+def _iter_payload_chunks(payload: bytes, *, chunk_size: int) -> Iterable[bytes]:
+    """Разбить payload на чанки для потоковой передачи в AV."""
+    chunk_size = max(8 * 1024, int(chunk_size))
+    offset = 0
+    while offset < len(payload):
+        yield payload[offset : offset + chunk_size]
+        offset += chunk_size
+
+
+def _inc_scan_metric(result: str) -> None:
+    """Безопасно инкрементировать метрику scan."""
+    with suppress(Exception):
+        FILE_SCAN_TOTAL.labels(result=result).inc()
+
+
+def _inc_upload_metric(status: str) -> None:
+    """Безопасно инкрементировать метрику upload pipeline."""
+    with suppress(Exception):
+        UPLOADS_TOTAL.labels(status=status).inc()
+
+
+def _inc_ai_generate_metric(status: str, file_type: str) -> None:
+    """Безопасно инкрементировать метрику AI-генерации документов."""
+    with suppress(Exception):
+        DOCS_AI_GENERATE_TOTAL.labels(status=status, file_type=file_type).inc()
+
+
+def _inc_ai_generate_error_metric(reason: str) -> None:
+    """Безопасно инкрементировать метрику ошибок AI-генерации."""
+    with suppress(Exception):
+        DOCS_AI_GENERATE_ERRORS_TOTAL.labels(reason=reason).inc()
+
+
+def _inc_retention_metric(status: str) -> None:
+    """Безопасно инкрементировать метрику retention-cleanup."""
+    with suppress(Exception):
+        DOCS_RETENTION_CLEANUP_TOTAL.labels(status=status).inc()

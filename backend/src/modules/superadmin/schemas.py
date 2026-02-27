@@ -2,8 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
-from pydantic import model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 class SuperadminLoginRequest(BaseModel):
@@ -315,9 +314,44 @@ class SuperadminTokenPackageItem(BaseModel):
     sort_order: int
 
 
+class SuperadminTokenPurchaseItem(BaseModel):
+    id: str
+    org_id: str
+    org_name: str
+    package_code: str
+    tokens_total: int
+    tokens_remaining: int
+    payment_id: str | None = None
+    payment_status: str | None = None
+    status: str
+    is_active: bool
+    created_at: str | None = None
+    expires_at: str | None = None
+
+
+class SuperadminYooKassaAuditItem(BaseModel):
+    id: str
+    created_at: str | None = None
+    actor: str
+    ip_address: str | None = None
+    changed_fields: list[str]
+    meta: dict | None = None
+
+
+class SuperadminYooKassaConfig(BaseModel):
+    shop_id: str
+    return_url: str
+    webhook_url: str
+    secret_key_configured: bool
+    secret_key_masked: str
+    audit: list[SuperadminYooKassaAuditItem] = Field(default_factory=list)
+
+
 class SuperadminBillingConfigResponse(BaseModel):
     plans: list[SuperadminBillingPlanItem]
     token_packages: list[SuperadminTokenPackageItem]
+    recent_purchases: list[SuperadminTokenPurchaseItem]
+    yookassa: SuperadminYooKassaConfig
 
 
 class SuperadminUpdateBillingPlanRequest(BaseModel):
@@ -343,8 +377,20 @@ class SuperadminUpsertTokenPackageRequest(BaseModel):
     sort_order: int | None = Field(default=None, ge=0)
 
 
+class SuperadminUpdateYooKassaRequest(BaseModel):
+    yookassa_shop_id: str | None = Field(default=None, max_length=255)
+    # Пустая строка = удалить runtime-secret и вернуться к fallback из env.
+    yookassa_secret_key: str | None = Field(default=None, max_length=4000)
+    yookassa_return_url: str | None = Field(default=None, max_length=2000)
+    yookassa_webhook_url: str | None = Field(default=None, max_length=2000)
+
+
 class SuperadminUpdateAIConfigRequest(BaseModel):
     model: str | None = Field(default=None, min_length=1, max_length=120)
+    ai_base_url: str | None = Field(default=None, max_length=1000)
+    ai_provider_mode: str | None = Field(default=None, pattern="^(openai_compatible|timeweb_native)$")
+    # Пустая строка = очистить runtime-token и вернуться к fallback из env.
+    ai_bearer_token: str | None = Field(default=None, max_length=4000)
     system_prompt: str | None = Field(default=None, min_length=1, max_length=12000)
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     max_tokens_per_request: int | None = Field(default=None, ge=64, le=12000)

@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
@@ -173,7 +173,7 @@ async def test_superadmin_ai_quick_actions_reset_usage_and_kill_switch(client: A
                 completion_tokens=50,
                 total_tokens=150,
                 message_preview="quick-actions-test",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         await uow.commit()
@@ -277,6 +277,7 @@ async def test_superadmin_set_subscription_period_validation(client: AsyncClient
 @pytest.mark.asyncio
 async def test_superadmin_can_manage_billing_config_plans_and_token_packages(client: AsyncClient):
     sa = await _login_sa(client)
+    owner_token, owner_org_id = await _register_owner(client, org_name="Billing Org")
 
     from src.modules.billing.seed import upsert_default_plans, upsert_default_token_packages
 
@@ -285,12 +286,24 @@ async def test_superadmin_can_manage_billing_config_plans_and_token_packages(cli
         await upsert_default_token_packages(uow.session)
         await uow.commit()
 
+    # Seed one purchase to validate superadmin purchases table.
+    purchased = await client.post(
+        "/api/v1/billing/tokens/purchase",
+        json={"package_code": "pack_50k"},
+        headers=_h(owner_token),
+    )
+    assert purchased.status_code == 200
+    assert purchased.json()["ok"] is True
+
     cfg = await client.get("/api/v1/superadmin/billing/config", headers=_h(sa))
     assert cfg.status_code == 200
     assert cfg.json()["ok"] is True
     data = cfg.json()["data"]
     assert any(p["name"] == "free" for p in data["plans"])
     assert any(p["code"] == "pack_50k" for p in data["token_packages"])
+    assert "yookassa" in data
+    assert "recent_purchases" in data
+    assert any(p["org_id"] == owner_org_id for p in data["recent_purchases"])
 
     upd_plan = await client.patch(
         "/api/v1/superadmin/billing/plans/team",
@@ -313,6 +326,72 @@ async def test_superadmin_can_manage_billing_config_plans_and_token_packages(cli
     assert upd_pkg.json()["data"]["tokens"] == 120000
     assert upd_pkg.json()["data"]["price_rub_cents"] == 199000
 
+    del_pkg = await client.delete("/api/v1/superadmin/billing/token-packages/pack_100k", headers=_h(sa))
+    assert del_pkg.status_code == 200
+    assert del_pkg.json()["ok"] is True
+    assert del_pkg.json()["data"]["is_active"] is False
+
+    upd_yk = await client.patch(
+        "/api/v1/superadmin/billing/yookassa",
+        json={
+            "yookassa_shop_id": "shop-runtime-001",
+            "yookassa_secret_key": "runtime-secret-001",
+            "yookassa_return_url": "https://example.com/return",
+            "yookassa_webhook_url": "https://example.com/webhook",
+        },
+        headers=_h(sa),
+    )
+    assert upd_yk.status_code == 200
+    assert upd_yk.json()["ok"] is True
+    assert upd_yk.json()["data"]["shop_id"] == "shop-runtime-001"
+    assert upd_yk.json()["data"]["secret_key_configured"] is True
+    assert upd_yk.json()["data"]["secret_key_masked"].startswith("runt")
+
+    import httpx
+
+    class _MockResponse:
+        def __init__(self, status_code: int, payload: dict):
+            self.status_code = status_code
+            self._payload = payload
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                req = httpx.Request("GET", "https://api.yookassa.ru/v3/me")
+                resp = httpx.Response(self.status_code, request=req)
+                raise httpx.HTTPStatusError("mock error", request=req, response=resp)
+
+        def json(self):
+            return self._payload
+
+    class _MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url: str, auth=None):
+            assert url == "https://api.yookassa.ru/v3/me"
+            assert auth == ("shop-runtime-001", "runtime-secret-001")
+            return _MockResponse(200, {"account_id": "acc-1", "test": True})
+
+    from src.modules.superadmin.services import billing as sa_billing_module
+
+    old_async_client = sa_billing_module.httpx.AsyncClient
+    sa_billing_module.httpx.AsyncClient = _MockAsyncClient
+    try:
+        test_yk = await client.post("/api/v1/superadmin/billing/yookassa/test", headers=_h(sa))
+    finally:
+        sa_billing_module.httpx.AsyncClient = old_async_client
+
+    assert test_yk.status_code == 200
+    assert test_yk.json()["ok"] is True
+    assert test_yk.json()["data"]["connected"] is True
+    assert test_yk.json()["data"]["account_id"] == "acc-1"
+
 
 @pytest.mark.asyncio
 async def test_superadmin_can_update_ai_runtime_config(client: AsyncClient):
@@ -327,6 +406,9 @@ async def test_superadmin_can_update_ai_runtime_config(client: AsyncClient):
         "/api/v1/superadmin/ai-config",
         json={
             "model": "gpt-4.1-mini",
+            "ai_base_url": "https://example.ai/v1",
+            "ai_provider_mode": "openai_compatible",
+            "ai_bearer_token": "runtime-secret-token",
             "system_prompt": "Отвечай кратко и по делу.",
             "temperature": 0.4,
             "max_tokens_per_request": 1800,
@@ -338,7 +420,13 @@ async def test_superadmin_can_update_ai_runtime_config(client: AsyncClient):
     assert patch.json()["ok"] is True
     runtime = patch.json()["data"]["runtime"]
     assert runtime["model"] == "gpt-4.1-mini"
+    assert runtime["ai_base_url"] == "https://example.ai/v1"
+    assert runtime["ai_provider_mode"] == "openai_compatible"
+    assert runtime["ai_bearer_token_configured"] is True
+    assert runtime["ai_bearer_token_masked"].startswith("runt")
     assert runtime["system_prompt"] == "Отвечай кратко и по делу."
     assert float(runtime["temperature"]) == 0.4
     assert int(runtime["max_tokens_per_request"]) == 1800
     assert runtime["strict_actions"] is True
+    assert patch.json()["data"]["audit"]
+    assert "ai_bearer_token" in (patch.json()["data"]["audit"][0]["changed_fields"] or [])

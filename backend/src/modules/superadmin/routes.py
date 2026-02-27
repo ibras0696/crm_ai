@@ -16,8 +16,8 @@ from src.modules.superadmin.schemas import (
     SuperadminBillingConfigResponse,
     SuperadminDashboardResponse,
     SuperadminLoginRequest,
-    SuperadminOrgDetail,
     SuperadminOrgAIEnabledResponse,
+    SuperadminOrgDetail,
     SuperadminOrgListPage,
     SuperadminOrgMembersPage,
     SuperadminOverviewResponse,
@@ -27,8 +27,9 @@ from src.modules.superadmin.schemas import (
     SuperadminTableDetail,
     SuperadminTableListPage,
     SuperadminTokenResponse,
-    SuperadminUpdateBillingPlanRequest,
     SuperadminUpdateAIConfigRequest,
+    SuperadminUpdateBillingPlanRequest,
+    SuperadminUpdateYooKassaRequest,
     SuperadminUpsertTokenPackageRequest,
     SuperadminUserListPage,
 )
@@ -243,8 +244,16 @@ async def superadmin_ai_config():
 
 
 @protected.patch("/ai-config", response_model=ApiResponse[dict])
-async def superadmin_update_ai_config(body: SuperadminUpdateAIConfigRequest):
-    data = await _service.ai_config.update_config(body.model_dump(exclude_none=True))
+async def superadmin_update_ai_config(
+    body: SuperadminUpdateAIConfigRequest,
+    request: Request,
+    superadmin_payload: dict = Depends(require_superadmin),
+):
+    data = await _service.ai_config.update_config(
+        body.model_dump(exclude_none=True),
+        changed_by=str(superadmin_payload.get("email") or settings.SUPERADMIN_EMAIL or "superadmin"),
+        ip_address=request.client.host if request.client else None,
+    )
     return ApiResponse(data=data)
 
 
@@ -265,9 +274,87 @@ async def superadmin_update_billing_plan(plan_name: str, body: SuperadminUpdateB
 @protected.put("/billing/token-packages/{code}", response_model=ApiResponse[dict])
 async def superadmin_upsert_token_package(code: str, body: SuperadminUpsertTokenPackageRequest):
     payload = body.model_dump(exclude_none=True)
-    if "tokens" not in payload and "display_name" not in payload and "price_rub_cents" not in payload and "is_active" not in payload and "sort_order" not in payload:
+    if (
+        "tokens" not in payload
+        and "display_name" not in payload
+        and "price_rub_cents" not in payload
+        and "is_active" not in payload
+        and "sort_order" not in payload
+    ):
         return ApiResponse(ok=False, data=None, error={"code": "EMPTY_PAYLOAD", "message": "Нет полей для обновления"})
-    data = await _service.billing.upsert_token_package(code=code, payload=payload)
+    try:
+        data = await _service.billing.upsert_token_package(code=code, payload=payload)
+    except ValueError as exc:
+        code_val = str(exc)
+        if code_val == "TOKENS_REQUIRED":
+            return ApiResponse(
+                ok=False,
+                data=None,
+                error={"code": "TOKENS_REQUIRED", "message": "Для нового пакета укажите tokens"},
+            )
+        if code_val == "PRICE_REQUIRED":
+            return ApiResponse(
+                ok=False,
+                data=None,
+                error={"code": "PRICE_REQUIRED", "message": "Для нового пакета укажите price_rub_cents"},
+            )
+        return ApiResponse(
+            ok=False,
+            data=None,
+            error={"code": "INVALID_PAYLOAD", "message": "Некорректные параметры пакета"},
+        )
+    return ApiResponse(data=data)
+
+
+@protected.delete("/billing/token-packages/{code}", response_model=ApiResponse[dict])
+async def superadmin_delete_token_package(code: str):
+    try:
+        data = await _service.billing.delete_token_package(code=code)
+    except LookupError:
+        return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Пакет не найден"})
+    return ApiResponse(data=data)
+
+
+@protected.patch("/billing/yookassa", response_model=ApiResponse[dict])
+async def superadmin_update_yookassa_config(
+    body: SuperadminUpdateYooKassaRequest,
+    request: Request,
+    superadmin_payload: dict = Depends(require_superadmin),
+):
+    data = await _service.billing.update_yookassa(
+        body.model_dump(exclude_none=True),
+        changed_by=str(superadmin_payload.get("email") or settings.SUPERADMIN_EMAIL or "superadmin"),
+        ip_address=request.client.host if request.client else None,
+    )
+    return ApiResponse(data=data)
+
+
+@protected.post("/billing/yookassa/test", response_model=ApiResponse[dict])
+async def superadmin_test_yookassa_config():
+    try:
+        data = await _service.billing.test_yookassa_connection()
+    except ValueError:
+        return ApiResponse(
+            ok=False,
+            data=None,
+            error={"code": "NOT_CONFIGURED", "message": "YooKassa не настроена: укажите shop_id и secret_key"},
+        )
+    except RuntimeError as exc:
+        code_val = str(exc)
+        if code_val == "YOOKASSA_UNAVAILABLE":
+            return ApiResponse(ok=False, data=None, error={"code": "UNAVAILABLE", "message": "YooKassa недоступна"})
+        if code_val.startswith("YOOKASSA_HTTP_"):
+            http_code = code_val.removeprefix("YOOKASSA_HTTP_")
+            return ApiResponse(
+                ok=False,
+                data=None,
+                error={"code": "HTTP_ERROR", "message": f"YooKassa вернула ошибку: {http_code}"},
+            )
+        return ApiResponse(
+            ok=False,
+            data=None,
+            error={"code": "TEST_FAILED", "message": "Не удалось проверить подключение"},
+        )
     return ApiResponse(data=data)
 
 

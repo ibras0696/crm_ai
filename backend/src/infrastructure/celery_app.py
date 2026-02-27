@@ -27,7 +27,13 @@ celery.conf.update(
             "task": "process_billing_lifecycle",
             "schedule": crontab(minute=0),
         },
+        "docs-retention-cleanup-daily": {
+            "task": "docs_cleanup_old_versions",
+            "schedule": crontab(hour=3, minute=20),
+        },
     },
 )
 
-celery.autodiscover_tasks(["src.modules.notifications", "src.modules.schedule", "src.modules.billing"])
+celery.autodiscover_tasks(
+    ["src.modules.notifications", "src.modules.schedule", "src.modules.billing", "src.modules.docs"]
+)

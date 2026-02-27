@@ -218,3 +218,119 @@ async def test_check_ai_limits_rejects_projected_monthly_wallet_overflow(client:
         assert ok is False
         assert err is not None
         assert err["code"] == "AI_TOKEN_LIMIT_EXCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_check_ai_limits_rejects_org_daily_override(client: AsyncClient):
+    email_owner = f"owner4-{uuid.uuid4().hex[:8]}@example.com"
+    reg = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email_owner,
+            "password": "StrongPass123!",
+            "first_name": "Owner",
+            "last_name": "User",
+            "org_name": f"AI Limits Org {uuid.uuid4().hex[:6]}",
+            "accepted_privacy_policy": True,
+        },
+    )
+    assert reg.status_code == 201
+
+    from datetime import datetime, timezone
+
+    from src.infrastructure.uow import UnitOfWork
+    from src.modules.ai.limits import check_ai_limits
+    from src.modules.ai.models import AIOrgLimit, AIUsageLog
+    from src.modules.auth.models import User
+    from src.modules.org.models import Membership
+
+    async with UnitOfWork() as uow:
+        user = (await uow.session.execute(select(User).where(User.email == email_owner))).scalars().first()
+        assert user is not None
+        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        assert membership is not None
+        org_id = membership.org_id
+
+        uow.session.add(AIOrgLimit(org_id=org_id, daily_tokens_limit=100, monthly_tokens_limit=0))
+        uow.session.add(
+            AIUsageLog(
+                org_id=org_id,
+                user_id=user.id,
+                model="m",
+                prompt_tokens=70,
+                completion_tokens=20,
+                total_tokens=90,
+                message_preview="x",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        await uow.commit()
+
+    async with UnitOfWork() as uow:
+        ok, err = await check_ai_limits(
+            uow.session,
+            org_id=org_id,
+            user_id=user.id,
+            estimated_request_tokens=20,
+        )
+        assert ok is False
+        assert err is not None
+        assert err["code"] == "AI_ORG_DAILY_LIMIT_EXCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_check_ai_limits_rejects_user_rpm_override(client: AsyncClient):
+    email_owner = f"owner5-{uuid.uuid4().hex[:8]}@example.com"
+    reg = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email_owner,
+            "password": "StrongPass123!",
+            "first_name": "Owner",
+            "last_name": "User",
+            "org_name": f"AI Limits Org {uuid.uuid4().hex[:6]}",
+            "accepted_privacy_policy": True,
+        },
+    )
+    assert reg.status_code == 201
+
+    from datetime import datetime, timezone
+
+    from src.infrastructure.uow import UnitOfWork
+    from src.modules.ai.limits import check_ai_limits
+    from src.modules.ai.models import AIUsageLog, AIUserLimit
+    from src.modules.auth.models import User
+    from src.modules.org.models import Membership
+
+    async with UnitOfWork() as uow:
+        user = (await uow.session.execute(select(User).where(User.email == email_owner))).scalars().first()
+        assert user is not None
+        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        assert membership is not None
+        org_id = membership.org_id
+
+        uow.session.add(AIUserLimit(org_id=org_id, user_id=user.id, daily_tokens_limit=0, rpm_limit=1))
+        uow.session.add(
+            AIUsageLog(
+                org_id=org_id,
+                user_id=user.id,
+                model="m",
+                prompt_tokens=1,
+                completion_tokens=1,
+                total_tokens=2,
+                message_preview="rpm",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        await uow.commit()
+
+    async with UnitOfWork() as uow:
+        ok, err = await check_ai_limits(
+            uow.session,
+            org_id=org_id,
+            user_id=user.id,
+            estimated_request_tokens=1,
+        )
+        assert ok is False
+        assert err is not None
+        assert err["code"] == "AI_USER_RATE_LIMIT"

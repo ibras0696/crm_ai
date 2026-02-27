@@ -7,6 +7,9 @@ import { SuperadminEmptyState } from '../shared/EmptyState'
 type AIUsage = { org_id: string; org_name: string; requests: number; tokens: number }
 type RuntimeConfig = {
   model: string
+  ai_base_url: string
+  ai_provider_mode: 'openai_compatible' | 'timeweb_native'
+  ai_bearer_token: string
   system_prompt: string
   temperature: number
   max_tokens_per_request: number
@@ -15,6 +18,9 @@ type RuntimeConfig = {
 
 const DEFAULT_RUNTIME: RuntimeConfig = {
   model: 'gpt-4.1',
+  ai_base_url: '',
+  ai_provider_mode: 'openai_compatible',
+  ai_bearer_token: '',
   system_prompt: '',
   temperature: 0.3,
   max_tokens_per_request: 2000,
@@ -29,6 +35,7 @@ export function SuperadminAIView() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [okMsg, setOkMsg] = useState('')
+  const [clearTokenRequested, setClearTokenRequested] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -41,6 +48,9 @@ export function SuperadminAIView() {
         setConfig(c.data.data)
         setRuntimeDraft({
           model: String(c.data.data.runtime?.model || c.data.data.model || DEFAULT_RUNTIME.model),
+          ai_base_url: String(c.data.data.runtime?.ai_base_url || DEFAULT_RUNTIME.ai_base_url),
+          ai_provider_mode: (String(c.data.data.runtime?.ai_provider_mode || DEFAULT_RUNTIME.ai_provider_mode) as RuntimeConfig['ai_provider_mode']),
+          ai_bearer_token: '',
           system_prompt: String(c.data.data.runtime?.system_prompt || DEFAULT_RUNTIME.system_prompt),
           temperature: Number(c.data.data.runtime?.temperature ?? DEFAULT_RUNTIME.temperature),
           max_tokens_per_request: Number(c.data.data.runtime?.max_tokens_per_request ?? DEFAULT_RUNTIME.max_tokens_per_request),
@@ -76,6 +86,10 @@ export function SuperadminAIView() {
     try {
       const payload = {
         model: runtimeDraft.model.trim(),
+        ai_base_url: runtimeDraft.ai_base_url.trim(),
+        ai_provider_mode: runtimeDraft.ai_provider_mode,
+        ...(clearTokenRequested ? { ai_bearer_token: '' } : {}),
+        ...(runtimeDraft.ai_bearer_token.trim() ? { ai_bearer_token: runtimeDraft.ai_bearer_token.trim() } : {}),
         system_prompt: runtimeDraft.system_prompt.trim(),
         temperature: Number(runtimeDraft.temperature || 0),
         max_tokens_per_request: Number(runtimeDraft.max_tokens_per_request || 0),
@@ -84,14 +98,19 @@ export function SuperadminAIView() {
       const r = await superadminApi.updateAiConfig(payload)
       if (!r.data.ok) throw new Error(r.data.error?.message || 'Не удалось сохранить настройки AI')
       setOkMsg('Настройки AI сохранены')
+      if (r.data.data) setConfig(r.data.data)
       if (r.data.data?.runtime) {
         setRuntimeDraft({
           model: String(r.data.data.runtime.model || payload.model),
+          ai_base_url: String(r.data.data.runtime.ai_base_url || payload.ai_base_url || ''),
+          ai_provider_mode: (String(r.data.data.runtime.ai_provider_mode || payload.ai_provider_mode) as RuntimeConfig['ai_provider_mode']),
+          ai_bearer_token: '',
           system_prompt: String(r.data.data.runtime.system_prompt || payload.system_prompt),
           temperature: Number(r.data.data.runtime.temperature),
           max_tokens_per_request: Number(r.data.data.runtime.max_tokens_per_request),
           strict_actions: Boolean(r.data.data.runtime.strict_actions),
         })
+        setClearTokenRequested(false)
       }
     } catch (e: any) {
       setError(e?.response?.data?.error?.message || e?.message || 'Не удалось сохранить настройки AI')
@@ -169,6 +188,17 @@ export function SuperadminAIView() {
                 />
               </label>
               <label className="space-y-1.5">
+                <span className="text-xs text-muted-foreground">Режим провайдера</span>
+                <select
+                  className="h-10 w-full rounded-xl border border-sidebar-border bg-sidebar-background px-3 text-sm"
+                  value={runtimeDraft.ai_provider_mode}
+                  onChange={(e) => setRuntimeDraft((p) => ({ ...p, ai_provider_mode: e.target.value as RuntimeConfig['ai_provider_mode'] }))}
+                >
+                  <option value="openai_compatible">openai_compatible</option>
+                  <option value="timeweb_native">timeweb_native</option>
+                </select>
+              </label>
+              <label className="space-y-1.5">
                 <span className="text-xs text-muted-foreground">Температура (0..2)</span>
                 <input
                   type="number"
@@ -191,6 +221,48 @@ export function SuperadminAIView() {
                   onChange={(e) => setRuntimeDraft((p) => ({ ...p, max_tokens_per_request: Number(e.target.value || 64) }))}
                 />
               </label>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <label className="space-y-1.5">
+                <span className="text-xs text-muted-foreground">AI base URL</span>
+                <input
+                  className="h-10 w-full rounded-xl border border-sidebar-border bg-sidebar-background px-3 text-sm"
+                  value={runtimeDraft.ai_base_url}
+                  onChange={(e) => setRuntimeDraft((p) => ({ ...p, ai_base_url: e.target.value }))}
+                  placeholder="https://.../v1"
+                />
+              </label>
+              <label className="space-y-1.5">
+                <span className="text-xs text-muted-foreground">Bearer token (замена)</span>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  className="h-10 w-full rounded-xl border border-sidebar-border bg-sidebar-background px-3 text-sm"
+                  value={runtimeDraft.ai_bearer_token}
+                  onChange={(e) => {
+                    setClearTokenRequested(false)
+                    setRuntimeDraft((p) => ({ ...p, ai_bearer_token: e.target.value }))
+                  }}
+                  placeholder={config?.runtime?.ai_bearer_token_masked ? `Текущий: ${config.runtime.ai_bearer_token_masked}` : 'Введите токен'}
+                />
+              </label>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-sidebar-border bg-sidebar-background/50 px-3 py-2">
+              <span className="text-xs text-muted-foreground">
+                Runtime token: {config?.runtime?.ai_bearer_token_configured ? (config?.runtime?.ai_bearer_token_masked || 'настроен') : 'не настроен'}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setRuntimeDraft((p) => ({ ...p, ai_bearer_token: '' }))
+                  setClearTokenRequested(true)
+                }}
+                className="text-xs rounded-md border border-sidebar-border px-2 py-1 hover:bg-sidebar-accent"
+              >
+                Очистить runtime токен
+              </button>
             </div>
 
             <label className="space-y-1.5 block">

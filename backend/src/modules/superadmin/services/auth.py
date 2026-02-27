@@ -36,7 +36,7 @@ class SuperadminAuthService:
             raise ValueError("INVALID_CREDENTIALS")
 
         await self._on_auth_success(throttle_key)
-        return create_superadmin_access_token()
+        return create_superadmin_access_token(email=(settings.SUPERADMIN_EMAIL or "").strip().lower())
 
     def ai_config(self) -> dict:
         base_url = (settings.AI_BASE_URL or "").rstrip("/")

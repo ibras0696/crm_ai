@@ -9,6 +9,9 @@ from src.modules.org.schemas import (
     AcceptInviteRequest,
     InviteCreateRequest,
     InviteResponse,
+    OrgAIOrgLimitsRequest,
+    OrgAILimitsResponse,
+    OrgAIUserLimitRequest,
     MemberResponse,
     OrgUpdateRequest,
     OrgResponse,
@@ -150,3 +153,54 @@ async def remove_member(
         ip_address=ip,
     )
     return ApiResponse(data=None)
+
+
+@router.get("/ai/limits", response_model=ApiResponse[OrgAILimitsResponse])
+async def get_org_ai_limits(
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
+):
+    data = await _org_service.get_ai_limits(org_id=current_user.org_id)
+    return ApiResponse(data=data)
+
+
+@router.patch("/ai/limits", response_model=ApiResponse[OrgAILimitsResponse])
+async def update_org_ai_limits(
+    body: OrgAIOrgLimitsRequest,
+    request: Request,
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
+):
+    ip = request.client.host if request.client else None
+    data = await _org_service.update_ai_org_limits(
+        org_id=current_user.org_id,
+        actor_id=current_user.user_id,
+        daily_tokens_limit=body.daily_tokens_limit,
+        monthly_tokens_limit=body.monthly_tokens_limit,
+        ip_address=ip,
+    )
+    return ApiResponse(data=data)
+
+
+@router.put("/ai/limits/users/{user_id}", response_model=ApiResponse[OrgAILimitsResponse])
+async def update_org_ai_user_limits(
+    user_id: uuid.UUID,
+    body: OrgAIUserLimitRequest,
+    request: Request,
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
+):
+    ip = request.client.host if request.client else None
+    try:
+        data = await _org_service.update_ai_user_limits(
+            org_id=current_user.org_id,
+            user_id=user_id,
+            actor_id=current_user.user_id,
+            daily_tokens_limit=body.daily_tokens_limit,
+            rpm_limit=body.rpm_limit,
+            ip_address=ip,
+        )
+    except LookupError:
+        return ApiResponse(
+            ok=False,
+            data=None,
+            error={"code": "MEMBER_NOT_FOUND", "message": "Сотрудник не найден в вашей организации."},
+        )
+    return ApiResponse(data=data)

@@ -14,6 +14,7 @@ import BillingPage from './pages/billing/BillingPage'
 import PlansPage from './pages/billing/PlansPage'
 import TablesPage from './pages/tables/TablesPage'
 import TableDetailPage from './pages/tables/TableDetailPage'
+import DocsPage from './pages/docs/DocsPage'
 import KnowledgePage from './pages/knowledge/KnowledgePage'
 import SchedulePage from './pages/schedule/SchedulePage'
 import ReportsPage from './pages/reports/ReportsPage'
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/tables" element={<TablesPage />} />
         <Route path="/tables/:tableId" element={<TableDetailPage />} />
+        <Route path="/docs" element={<DocsPage />} />
         <Route path="/knowledge" element={<KnowledgePage />} />
         <Route path="/schedule" element={<SchedulePage />} />
         <Route path="/reports" element={<ReportsPage />} />

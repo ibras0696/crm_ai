@@ -21,6 +21,33 @@ export interface MemberInfo {
   created_at: string
 }
 
+export interface OrgAILimitUserInfo {
+  user_id: string
+  membership_id: string
+  email: string | null
+  first_name: string | null
+  last_name: string | null
+  role: string
+  daily_tokens_limit: number
+  rpm_limit: number
+  usage_today_tokens: number
+  usage_month_tokens: number
+  usage_last_min_requests: number
+}
+
+export interface OrgAILimitsInfo {
+  org_limits: {
+    daily_tokens_limit: number
+    monthly_tokens_limit: number
+  }
+  effective_defaults: {
+    plan_daily_tokens_limit: number
+    plan_rpm_per_user: number
+    plan_max_tokens_per_request: number
+  }
+  users: OrgAILimitUserInfo[]
+}
+
 export interface InviteInfo {
   id: string
   org_id: string
@@ -46,4 +73,9 @@ export const orgApi = {
     api.put<ApiResponse<unknown>>(`/orgs/members/${memberId}/role`, { role }),
   removeMember: (memberId: string) => api.delete<ApiResponse<unknown>>(`/orgs/members/${memberId}`),
   switchOrg: (org_id: string) => api.post<ApiResponse<TokenResponse>>('/orgs/switch', { org_id }),
+  getAiLimits: () => api.get<ApiResponse<OrgAILimitsInfo>>('/orgs/ai/limits'),
+  updateAiOrgLimits: (data: { daily_tokens_limit: number; monthly_tokens_limit: number }) =>
+    api.patch<ApiResponse<OrgAILimitsInfo>>('/orgs/ai/limits', data),
+  upsertAiUserLimits: (userId: string, data: { daily_tokens_limit: number; rpm_limit: number }) =>
+    api.put<ApiResponse<OrgAILimitsInfo>>(`/orgs/ai/limits/users/${userId}`, data),
 }

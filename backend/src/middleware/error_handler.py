@@ -1,7 +1,7 @@
 import structlog
-from fastapi.exceptions import RequestValidationError
-from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi import Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
@@ -12,6 +12,17 @@ logger = structlog.get_logger()
 
 def _correlation_id(request: Request) -> str | None:
     return getattr(getattr(request, "state", None), "correlation_id", None)
+
+
+def _json_safe(value):
+    """Привести произвольное значение к JSON-сериализуемому виду."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+    return str(value)
 
 
 async def app_error_handler(request: Request, exc: BaseAppError) -> JSONResponse:
@@ -42,12 +53,13 @@ async def app_error_handler(request: Request, exc: BaseAppError) -> JSONResponse
 
 async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
     correlation_id = _correlation_id(request)
+    safe_errors = _json_safe(exc.errors())
     logger.warning(
         "request_validation_error",
         code="VALIDATION_ERROR",
         path=str(request.url),
         correlation_id=correlation_id,
-        errors=exc.errors(),
+        errors=safe_errors,
     )
     # Keep FastAPI's normalized error details shape.
     _ = await request_validation_exception_handler(request, exc)
@@ -60,7 +72,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
                 "code": "VALIDATION_ERROR",
                 "message": "Validation error",
                 "field": None,
-                "details": exc.errors(),
+                "details": safe_errors,
                 "correlation_id": correlation_id,
             },
         },

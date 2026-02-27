@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 
 from src.config import settings
 from src.common.enums import PlanTier, SubscriptionStatus
-from src.modules.ai.models import AIUsageLog
+from src.modules.ai.models import AIOrgLimit, AIUsageLog, AIUserLimit
 from src.modules.billing.models import Plan
 from src.modules.billing.token_wallet import get_token_balance_view
 from src.modules.org.models import Organization, Subscription
@@ -184,14 +184,30 @@ async def check_ai_limits(session, *, org_id, user_id, estimated_request_tokens:
     daily_limit = int(limits["daily_tokens"])
     rpm_limit = int(limits["rpm_per_user"])
 
+    org_custom = (
+        await session.execute(select(AIOrgLimit).where(AIOrgLimit.org_id == org_id).limit(1))
+    ).scalars().first()
+    user_custom = (
+        await session.execute(select(AIUserLimit).where(AIUserLimit.org_id == org_id, AIUserLimit.user_id == user_id).limit(1))
+    ).scalars().first()
+
+    org_daily_override = int(org_custom.daily_tokens_limit if org_custom else 0)
+    org_monthly_override = int(org_custom.monthly_tokens_limit if org_custom else 0)
+    user_daily_override = int(user_custom.daily_tokens_limit if user_custom else 0)
+    user_rpm_override = int(user_custom.rpm_limit if user_custom else 0)
+
+    effective_rpm_limit = user_rpm_override if user_rpm_override > 0 else rpm_limit
+
     # RPM per user
     now = datetime.now(timezone.utc)
     window_start = now - timedelta(seconds=60)
+    day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+    month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
 
     # Важно: текущая реализация лимитов — soft-limit.
     # При высокой параллельности возможны небольшие "проскоки", т.к. check и запись
     # usage выполняются в разных транзакциях.
-    if rpm_limit > 0:
+    if effective_rpm_limit > 0:
         reqs_last_min = (
             await session.execute(
                 select(func.count(AIUsageLog.id)).where(
@@ -201,10 +217,79 @@ async def check_ai_limits(session, *, org_id, user_id, estimated_request_tokens:
                 )
             )
         ).scalar_one()
-        if int(reqs_last_min) >= rpm_limit:
+        if int(reqs_last_min) >= effective_rpm_limit:
             return False, {
-                "code": "AI_RATE_LIMIT",
-                "message": f"Слишком много запросов к AI (лимит {rpm_limit}/мин). Подождите минуту и попробуйте снова.",
+                "code": "AI_USER_RATE_LIMIT",
+                "message": f"Превышен лимит запросов сотрудника к AI ({effective_rpm_limit}/мин). Подождите минуту.",
+            }
+
+    projected = int(max(0, estimated_request_tokens))
+
+    if org_daily_override > 0:
+        org_today_tokens = (
+            await session.execute(
+                select(func.coalesce(func.sum(AIUsageLog.total_tokens), 0)).where(
+                    AIUsageLog.org_id == org_id,
+                    AIUsageLog.created_at >= day_start,
+                )
+            )
+        ).scalar_one()
+        remaining_org_daily = int(org_daily_override - int(org_today_tokens or 0))
+        if projected > max(0, remaining_org_daily):
+            return False, {
+                "code": "AI_ORG_DAILY_LIMIT_EXCEEDED",
+                "message": "Превышен дневной лимит AI для организации.",
+                "details": {
+                    "limit": org_daily_override,
+                    "used": int(org_today_tokens or 0),
+                    "remaining": max(0, remaining_org_daily),
+                    "required_tokens": projected,
+                },
+            }
+
+    if org_monthly_override > 0:
+        org_month_tokens = (
+            await session.execute(
+                select(func.coalesce(func.sum(AIUsageLog.total_tokens), 0)).where(
+                    AIUsageLog.org_id == org_id,
+                    AIUsageLog.created_at >= month_start,
+                )
+            )
+        ).scalar_one()
+        remaining_org_monthly = int(org_monthly_override - int(org_month_tokens or 0))
+        if projected > max(0, remaining_org_monthly):
+            return False, {
+                "code": "AI_ORG_MONTHLY_LIMIT_EXCEEDED",
+                "message": "Превышен месячный лимит AI для организации.",
+                "details": {
+                    "limit": org_monthly_override,
+                    "used": int(org_month_tokens or 0),
+                    "remaining": max(0, remaining_org_monthly),
+                    "required_tokens": projected,
+                },
+            }
+
+    if user_daily_override > 0:
+        user_today_tokens = (
+            await session.execute(
+                select(func.coalesce(func.sum(AIUsageLog.total_tokens), 0)).where(
+                    AIUsageLog.org_id == org_id,
+                    AIUsageLog.user_id == user_id,
+                    AIUsageLog.created_at >= day_start,
+                )
+            )
+        ).scalar_one()
+        remaining_user_daily = int(user_daily_override - int(user_today_tokens or 0))
+        if projected > max(0, remaining_user_daily):
+            return False, {
+                "code": "AI_USER_DAILY_LIMIT_EXCEEDED",
+                "message": "Превышен персональный дневной лимит AI для сотрудника.",
+                "details": {
+                    "limit": user_daily_override,
+                    "used": int(user_today_tokens or 0),
+                    "remaining": max(0, remaining_user_daily),
+                    "required_tokens": projected,
+                },
             }
 
     # Monthly tokens per org (plan wallet + purchased addon wallet).
@@ -212,7 +297,6 @@ async def check_ai_limits(session, *, org_id, user_id, estimated_request_tokens:
     if daily_limit > 0:
         wallet = await get_token_balance_view(session, org_id=org_id)
         available = int(wallet["total_tokens_remaining"])
-        projected = int(max(0, estimated_request_tokens))
         if projected > available:
             return False, {
                 "code": "AI_TOKEN_LIMIT_EXCEEDED",

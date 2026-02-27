@@ -71,6 +71,14 @@ CONFIRM_TABLE_CHANGE_MESSAGE = (
 
 
 def build_repair_user_prompt(broken_reply: str) -> str:
+    """Собрать user-prompt для восстановления битого action JSON.
+
+    Args:
+        broken_reply: Сырой ответ модели с поврежденным JSON.
+
+    Returns:
+        Текст запроса для repair-helper вызова.
+    """
     return (
         "Преобразуй это в валидный JSON действия. "
         "Если действия нет или нельзя восстановить, верни {}.\n\n"
@@ -79,6 +87,15 @@ def build_repair_user_prompt(broken_reply: str) -> str:
 
 
 def build_synthesis_user_prompt(user_message: str, assistant_reply: str) -> str:
+    """Собрать user-prompt для синтеза отсутствующего action JSON.
+
+    Args:
+        user_message: Исходный текст пользователя.
+        assistant_reply: Ответ ассистента без action-блока.
+
+    Returns:
+        Текст запроса для synthesis-helper вызова.
+    """
     return (
         f"Сообщение пользователя:\n{user_message}\n\n"
         f"Ответ ассистента:\n{assistant_reply}\n\n"

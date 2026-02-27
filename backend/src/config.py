@@ -35,6 +35,28 @@ class Settings(BaseSettings):
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "application/vnd.ms-excel",
     ]
+    # Docs module security pipeline
+    DOCS_AV_MODE: str = "mock_clean"  # mock_clean | clamav
+    DOCS_CLAMAV_HOST: str = "clamav"
+    DOCS_CLAMAV_PORT: int = 3310
+    DOCS_CLAMAV_TIMEOUT_S: float = 10.0
+    DOCS_SCAN_CHUNK_SIZE_KB: int = 256
+    DOCS_TEXT_SAVE_RPM: int = 20
+    DOCS_ONLYOFFICE_ENABLED: bool = False
+    DOCS_ONLYOFFICE_DOCUMENT_SERVER_URL: str = ""
+    DOCS_ONLYOFFICE_JWT_SECRET: str = ""
+    DOCS_ONLYOFFICE_CALLBACK_URL: str = "http://api:8000/api/v1/docs/integrations/onlyoffice/callback"
+    DOCS_ONLYOFFICE_EDITOR_LANG: str = "ru"
+    DOCS_ONLYOFFICE_REQUEST_TIMEOUT_S: float = 20.0
+    DOCS_AI_GENERATION_ENABLED: bool = True
+    DOCS_AI_MAX_PROMPT_CHARS: int = 12000
+    DOCS_AI_MAX_CHARS_TXT: int = 60000
+    DOCS_AI_MAX_CHARS_DOCX: int = 80000
+    DOCS_AI_MAX_CHARS_PDF: int = 70000
+    DOCS_AI_RESERVED_BYTES_BASE: int = 262144
+    DOCS_RETENTION_DAYS: int = 0
+    DOCS_RETENTION_KEEP_LATEST: int = 5
+    DOCS_RETENTION_BATCH_SIZE: int = 200
     TABLE_EXPORT_MAX_ROWS: int = 5000
     TABLE_EXPORT_MAX_COLUMNS: int = 200
     TABLE_IMPORT_MAX_BYTES: int = 5 * 1024 * 1024
@@ -76,6 +98,7 @@ class Settings(BaseSettings):
 
     # S3 / MinIO
     S3_ENDPOINT: str = "http://localhost:9000"
+    S3_PUBLIC_ENDPOINT: str = ""
     S3_ACCESS_KEY: str = "minioadmin"
     S3_SECRET_KEY: str = "minioadmin"
     S3_BUCKET: str = "crm-files"
@@ -191,6 +214,7 @@ class Settings(BaseSettings):
     YOOKASSA_SHOP_ID: str = ""
     YOOKASSA_SECRET_KEY: str = ""
     YOOKASSA_RETURN_URL: str = "http://localhost:5173/billing/success"
+    YOOKASSA_WEBHOOK_URL: str = ""
     BILLING_GRACE_DAYS: int = 7
     BILLING_PRE_EXPIRY_NOTICE_HOURS: int = 24
     BILLING_PURGE_AFTER_END_DAYS: int = 30
@@ -259,9 +283,12 @@ class Settings(BaseSettings):
             errors.append("JWT_USER_SECRET_KEY")
         if len((self.JWT_SUPERADMIN_SECRET_KEY or "").strip()) < 32 or _is_unsafe(self.JWT_SUPERADMIN_SECRET_KEY):
             errors.append("JWT_SUPERADMIN_SECRET_KEY")
-        if self.JWT_USER_SECRET_KEY.strip() and self.JWT_SUPERADMIN_SECRET_KEY.strip():
-            if self.JWT_USER_SECRET_KEY.strip() == self.JWT_SUPERADMIN_SECRET_KEY.strip():
-                errors.append("JWT_USER_SECRET_KEY/JWT_SUPERADMIN_SECRET_KEY")
+        if (
+            self.JWT_USER_SECRET_KEY.strip()
+            and self.JWT_SUPERADMIN_SECRET_KEY.strip()
+            and self.JWT_USER_SECRET_KEY.strip() == self.JWT_SUPERADMIN_SECRET_KEY.strip()
+        ):
+            errors.append("JWT_USER_SECRET_KEY/JWT_SUPERADMIN_SECRET_KEY")
 
         if _is_unsafe(
             self.DATABASE_URL,

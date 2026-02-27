@@ -45,6 +45,7 @@ def build_turn_system_prompt(
     *,
     base_system_prompt: str,
     first_turn: bool,
+    action_mode: bool,
     intent_decision: IntentDecision,
     has_selected_context: bool,
 ) -> str:
@@ -56,7 +57,9 @@ def build_turn_system_prompt(
     Последующие ходы:
     - возвращаем компактную версию с ключевыми правилами и инструментами.
     """
-    if first_turn:
+    # Для action-запросов всегда даем полный промпт:
+    # модель должна видеть полный контракт инструментов.
+    if first_turn or action_mode:
         return str(base_system_prompt or "").strip()
 
     base_compact = _clip_text(base_system_prompt, 900)

@@ -79,6 +79,15 @@ def _extract_rows_payload(action_payload: dict[str, Any]) -> list[dict[str, Any]
 
 
 async def _resolve_plan_limits(uow: UnitOfWork, *, org_id: uuid.UUID) -> tuple[int, int]:
+    """Получить лимиты тарифа по таблицам и записям.
+
+    Args:
+        uow: UnitOfWork с активной сессией БД.
+        org_id: ID организации.
+
+    Returns:
+        Кортеж `(max_tables, max_records)`.
+    """
     repo = AIRepository(uow.session)
     plan = await repo.resolve_effective_plan(org_id=org_id)
     max_tables = int(getattr(plan, "max_tables", 0) or 0)

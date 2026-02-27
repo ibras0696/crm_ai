@@ -1,8 +1,18 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, String, Integer, Boolean, text, CheckConstraint, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.common.base_model import BaseDBModel
@@ -88,8 +98,14 @@ class TokenLedger(BaseDBModel):
     __tablename__ = "token_ledger"
     __table_args__ = (
         CheckConstraint("delta_tokens != 0", name="ck_token_ledger_delta_non_zero"),
-        CheckConstraint("plan_delta_tokens IS NULL OR plan_delta_tokens != 0", name="ck_token_ledger_plan_delta_non_zero"),
-        CheckConstraint("addon_delta_tokens IS NULL OR addon_delta_tokens != 0", name="ck_token_ledger_addon_delta_non_zero"),
+        CheckConstraint(
+            "plan_delta_tokens IS NULL OR plan_delta_tokens != 0",
+            name="ck_token_ledger_plan_delta_non_zero",
+        ),
+        CheckConstraint(
+            "addon_delta_tokens IS NULL OR addon_delta_tokens != 0",
+            name="ck_token_ledger_addon_delta_non_zero",
+        ),
     )
 
     org_id: Mapped[uuid.UUID] = mapped_column(
@@ -129,4 +145,33 @@ class TokenUsageIdempotency(BaseDBModel):
     spent_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     spent_addon: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     spent_plan: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
+    meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+
+
+class BillingRuntimeSettings(BaseDBModel):
+    """Runtime-настройки платежного провайдера (из superadmin)."""
+
+    __tablename__ = "billing_runtime_settings"
+
+    yookassa_shop_id: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    yookassa_return_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    yookassa_webhook_url: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+
+class BillingRuntimeSecret(BaseDBModel):
+    """Секреты платежного провайдера (хранятся отдельно и шифруются)."""
+
+    __tablename__ = "billing_runtime_secrets"
+
+    yookassa_secret_key_encrypted: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+
+class BillingRuntimeAudit(BaseDBModel):
+    """Аудит изменений runtime-настроек billing."""
+
+    __tablename__ = "billing_runtime_audits"
+
+    actor: Mapped[str] = mapped_column(String(255), nullable=False, default="")
+    ip_address: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    changed_fields: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

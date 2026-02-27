@@ -16,9 +16,9 @@ from src.modules.ai.internal.chat_io import (
     build_messages,
     call_openai_compatible_api,
     call_timeweb_native_api,
-    get_or_create_session,
     resolve_timeweb_agent_id,
 )
+from src.modules.ai.internal.chat_session_service import get_or_create_session
 from src.modules.ai.internal.context_builder import build_org_context, build_org_context_for_user, context_flags, estimate_tokens
 from src.modules.ai.internal.handlers.dashboard_actions import handle_create_dashboard_action
 from src.modules.ai.internal.handlers.misc_actions import handle_create_kb_page_action, handle_create_schedule_event_action

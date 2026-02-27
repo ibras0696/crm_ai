@@ -166,10 +166,46 @@ class BillingService:
             }
 
         if not yk.shop_id or not yk.secret_key:
-            raise BillingOperationError(
-                "BILLING_NOT_CONFIGURED",
-                "Платежный шлюз не настроен. Укажите YooKassa shop_id и secret_key.",
-            )
+            # Для dev/test окружений допускаем оффлайн-начисление, чтобы не блокировать
+            # покупку токенов и автотесты отсутствием внешнего платежного шлюза.
+            is_prod = str(settings.ENVIRONMENT).lower() in {"prod", "production"}
+            if is_prod:
+                raise BillingOperationError(
+                    "BILLING_NOT_CONFIGURED",
+                    "Платежный шлюз не настроен. Укажите YooKassa shop_id и secret_key.",
+                )
+            async with UnitOfWork() as uow:
+                try:
+                    data = await purchase_addon_tokens(
+                        uow.session,
+                        org_id=org_id,
+                        user_id=user_id,
+                        package_code=package_code,
+                        months_valid=12,
+                        payment_id=f"dev-token-pack-{uuid.uuid4().hex[:12]}",
+                        purchase_meta={
+                            "purchase_kind": "token_package",
+                            "payment_status": "succeeded",
+                            "source": "dev_fallback_without_yookassa",
+                        },
+                    )
+                except ValueError as exc:
+                    if str(exc) == "UNKNOWN_PACKAGE":
+                        raise BillingOperationError("UNKNOWN_PACKAGE", "Неизвестный пакет токенов") from exc
+                    raise BillingOperationError("INVALID_PACKAGE", "Некорректный пакет токенов") from exc
+                await uow.commit()
+            return {
+                "purchase_applied": True,
+                "requires_payment": False,
+                "confirmation_url": "",
+                "payment_id": data.get("payment_id"),
+                "status": "succeeded",
+                "amount": amount,
+                "package_code": package.code,
+                "package_display_name": package.display_name,
+                "package_tokens": int(package.tokens or 0),
+                **data,
+            }
         data = await self._create_yookassa_payment(
             shop_id=yk.shop_id,
             secret_key=yk.secret_key,

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { orgApi, accessApi, reportsApi, type AccessRule } from '@/lib/api'
+import { orgApi, accessApi, reportsApi, type AccessRule, type OrgAILimitsInfo } from '@/lib/api'
 import { Users, Shield, Settings, Plus, Trash2, X, UserPlus, Crown, BarChart3, Database, Brain, Calendar, FileText, Table2 } from 'lucide-react'
 
 interface Member {
@@ -27,7 +27,7 @@ const RESOURCE_TYPES = [
 ]
 
 export default function AdminPage() {
-  const [tab, setTab] = useState<'members' | 'access' | 'org'>('members')
+  const [tab, setTab] = useState<'members' | 'access' | 'org' | 'ai_limits'>('members')
   const [org, setOrg] = useState<OrgInfo | null>(null)
   const [members, setMembers] = useState<Member[]>([])
   const [rules, setRules] = useState<AccessRule[]>([])
@@ -40,6 +40,11 @@ export default function AdminPage() {
   const [showAddRule, setShowAddRule] = useState(false)
   const [ruleForm, setRuleForm] = useState({ resource_type: 'table', role: 'employee', can_read: true, can_write: true, can_delete: false })
   const [summary, setSummary] = useState<{ tables_count: number; records_count: number; columns_count: number } | null>(null)
+  const [aiLimits, setAiLimits] = useState<OrgAILimitsInfo | null>(null)
+  const [orgAiDraft, setOrgAiDraft] = useState({ daily_tokens_limit: 0, monthly_tokens_limit: 0 })
+  const [savingOrgLimits, setSavingOrgLimits] = useState(false)
+  const [savingUserId, setSavingUserId] = useState<string | null>(null)
+  const [aiLimitsError, setAiLimitsError] = useState('')
 
   const loadAll = useCallback(async () => {
     setLoading(true)
@@ -54,6 +59,15 @@ export default function AdminPage() {
       if (memR.data.ok && memR.data.data) setMembers(memR.data.data as Member[])
       if (rulesR.data.ok && rulesR.data.data) setRules(rulesR.data.data as AccessRule[])
       if (sumR.data.ok && sumR.data.data) setSummary(sumR.data.data as any)
+      const aiR = await orgApi.getAiLimits()
+      if (aiR.data.ok && aiR.data.data) {
+        const data = aiR.data.data as OrgAILimitsInfo
+        setAiLimits(data)
+        setOrgAiDraft({
+          daily_tokens_limit: Number(data.org_limits.daily_tokens_limit || 0),
+          monthly_tokens_limit: Number(data.org_limits.monthly_tokens_limit || 0),
+        })
+      }
     } catch { /* ignore */ }
     setLoading(false)
   }, [])
@@ -139,6 +153,69 @@ export default function AdminPage() {
   const roleLabel = (r: string) => ROLES.find(x => x.value === r)?.label || r
   const roleColor = (r: string) => ROLES.find(x => x.value === r)?.color || ''
 
+  const mapAiLimitsError = (err: any): string => {
+    const code = err?.response?.data?.error?.code
+    const message = err?.response?.data?.error?.message
+    if (code === 'MEMBER_NOT_FOUND') return 'Сотрудник не найден в организации.'
+    if (code === 'VALIDATION_ERROR') return message || 'Проверьте значения лимитов.'
+    return message || 'Не удалось сохранить AI лимиты.'
+  }
+
+  const saveOrgAiLimits = async () => {
+    setAiLimitsError('')
+    const daily = Math.max(0, Number(orgAiDraft.daily_tokens_limit || 0))
+    const monthly = Math.max(0, Number(orgAiDraft.monthly_tokens_limit || 0))
+    if (!Number.isFinite(daily) || !Number.isFinite(monthly)) {
+      setAiLimitsError('Введите корректные числовые лимиты.')
+      return
+    }
+    setSavingOrgLimits(true)
+    try {
+      const r = await orgApi.updateAiOrgLimits({
+        daily_tokens_limit: Math.trunc(daily),
+        monthly_tokens_limit: Math.trunc(monthly),
+      })
+      if (r.data.ok && r.data.data) {
+        const data = r.data.data as OrgAILimitsInfo
+        setAiLimits(data)
+        setOrgAiDraft({
+          daily_tokens_limit: Number(data.org_limits.daily_tokens_limit || 0),
+          monthly_tokens_limit: Number(data.org_limits.monthly_tokens_limit || 0),
+        })
+      } else {
+        setAiLimitsError(r.data.error?.message || 'Не удалось сохранить лимиты организации.')
+      }
+    } catch (e: any) {
+      setAiLimitsError(mapAiLimitsError(e))
+    }
+    setSavingOrgLimits(false)
+  }
+
+  const saveUserAiLimits = async (userId: string, dailyLimit: number, rpmLimit: number) => {
+    setAiLimitsError('')
+    const daily = Math.max(0, Number(dailyLimit || 0))
+    const rpm = Math.max(0, Number(rpmLimit || 0))
+    if (!Number.isFinite(daily) || !Number.isFinite(rpm)) {
+      setAiLimitsError('Введите корректные лимиты сотрудника.')
+      return
+    }
+    setSavingUserId(userId)
+    try {
+      const r = await orgApi.upsertAiUserLimits(userId, {
+        daily_tokens_limit: Math.trunc(daily),
+        rpm_limit: Math.trunc(rpm),
+      })
+      if (r.data.ok && r.data.data) {
+        setAiLimits(r.data.data as OrgAILimitsInfo)
+      } else {
+        setAiLimitsError(r.data.error?.message || 'Не удалось сохранить лимит сотрудника.')
+      }
+    } catch (e: any) {
+      setAiLimitsError(mapAiLimitsError(e))
+    }
+    setSavingUserId(null)
+  }
+
   if (loading) return <div className="flex items-center justify-center py-32"><div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>
 
   return (
@@ -173,12 +250,86 @@ export default function AdminPage() {
 
       {/* Tabs */}
       <div className="flex items-center gap-1 rounded-lg border border-border p-0.5 bg-secondary/30 w-fit">
-        {([['members', 'Участники'], ['access', 'Доступ'], ['org', 'Организация']] as const).map(([key, label]) => (
+        {([['members', 'Участники'], ['access', 'Доступ'], ['ai_limits', 'AI лимиты'], ['org', 'Организация']] as const).map(([key, label]) => (
           <button key={key} onClick={() => setTab(key)} className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === key ? 'bg-background shadow text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
             {label}
           </button>
         ))}
       </div>
+
+      {tab === 'ai_limits' && (
+        <div className="space-y-4">
+          {aiLimitsError && <div className="text-sm text-red-500">{aiLimitsError}</div>}
+          <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+            <h2 className="font-semibold flex items-center gap-2"><Brain className="h-4 w-4 text-primary" /> Лимиты организации</h2>
+            <div className="text-xs text-muted-foreground">
+              Тариф по умолчанию: {aiLimits?.effective_defaults.plan_daily_tokens_limit || 0} токенов/день, {aiLimits?.effective_defaults.plan_rpm_per_user || 0} req/min на пользователя.
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="space-y-1">
+                <span className="text-xs text-muted-foreground">Дневной лимит токенов (org)</span>
+                <input
+                  type="number"
+                  min={0}
+                  className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm"
+                  value={orgAiDraft.daily_tokens_limit}
+                  onChange={(e) => setOrgAiDraft((p) => ({ ...p, daily_tokens_limit: Number(e.target.value || 0) }))}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-xs text-muted-foreground">Месячный лимит токенов (org)</span>
+                <input
+                  type="number"
+                  min={0}
+                  className="w-full h-10 px-3 rounded-lg border border-input bg-background text-sm"
+                  value={orgAiDraft.monthly_tokens_limit}
+                  onChange={(e) => setOrgAiDraft((p) => ({ ...p, monthly_tokens_limit: Number(e.target.value || 0) }))}
+                />
+              </label>
+            </div>
+            <div className="flex justify-end">
+              <button
+                onClick={saveOrgAiLimits}
+                disabled={savingOrgLimits}
+                className="h-9 px-4 rounded-lg bg-primary text-white text-sm disabled:opacity-50"
+              >
+                {savingOrgLimits ? 'Сохранение...' : 'Сохранить лимиты org'}
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="px-4 py-3 border-b border-border font-semibold">Лимиты сотрудников</div>
+            <div className="overflow-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-secondary/20">
+                    <th className="px-3 py-2 text-left">Сотрудник</th>
+                    <th className="px-3 py-2 text-center">Роль</th>
+                    <th className="px-3 py-2 text-center">Usage день</th>
+                    <th className="px-3 py-2 text-center">Usage месяц</th>
+                    <th className="px-3 py-2 text-center">Req/min</th>
+                    <th className="px-3 py-2 text-center">Daily limit</th>
+                    <th className="px-3 py-2 text-center">RPM limit</th>
+                    <th className="px-3 py-2 text-center">Действие</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(aiLimits?.users || []).map((u, idx) => (
+                    <UserLimitRow
+                      key={u.user_id}
+                      item={u}
+                      zebra={idx % 2 === 1}
+                      saving={savingUserId === u.user_id}
+                      onSave={(daily, rpm) => saveUserAiLimits(u.user_id, daily, rpm)}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Members tab */}
       {tab === 'members' && (
@@ -360,5 +511,65 @@ export default function AdminPage() {
         </div>
       )}
     </div>
+  )
+}
+
+function UserLimitRow({
+  item,
+  zebra,
+  saving,
+  onSave,
+}: {
+  item: OrgAILimitsInfo['users'][number]
+  zebra: boolean
+  saving: boolean
+  onSave: (daily: number, rpm: number) => void
+}) {
+  const [daily, setDaily] = useState<number>(Number(item.daily_tokens_limit || 0))
+  const [rpm, setRpm] = useState<number>(Number(item.rpm_limit || 0))
+
+  useEffect(() => {
+    setDaily(Number(item.daily_tokens_limit || 0))
+    setRpm(Number(item.rpm_limit || 0))
+  }, [item.daily_tokens_limit, item.rpm_limit, item.user_id])
+
+  return (
+    <tr className={`border-b border-border/40 ${zebra ? 'bg-secondary/5' : ''}`}>
+      <td className="px-3 py-2">
+        <div className="font-medium">{[item.first_name, item.last_name].filter(Boolean).join(' ') || item.email || item.user_id}</div>
+        <div className="text-xs text-muted-foreground">{item.email || item.user_id}</div>
+      </td>
+      <td className="px-3 py-2 text-center">{item.role}</td>
+      <td className="px-3 py-2 text-center">{Number(item.usage_today_tokens || 0).toLocaleString('ru-RU')}</td>
+      <td className="px-3 py-2 text-center">{Number(item.usage_month_tokens || 0).toLocaleString('ru-RU')}</td>
+      <td className="px-3 py-2 text-center">{Number(item.usage_last_min_requests || 0)}</td>
+      <td className="px-3 py-2">
+        <input
+          type="number"
+          min={0}
+          className="w-28 h-8 px-2 rounded border border-input bg-background text-xs"
+          value={daily}
+          onChange={(e) => setDaily(Number(e.target.value || 0))}
+        />
+      </td>
+      <td className="px-3 py-2">
+        <input
+          type="number"
+          min={0}
+          className="w-20 h-8 px-2 rounded border border-input bg-background text-xs"
+          value={rpm}
+          onChange={(e) => setRpm(Number(e.target.value || 0))}
+        />
+      </td>
+      <td className="px-3 py-2 text-center">
+        <button
+          disabled={saving}
+          onClick={() => onSave(Math.max(0, Math.trunc(daily || 0)), Math.max(0, Math.trunc(rpm || 0)))}
+          className="h-8 px-3 rounded border border-border text-xs hover:bg-secondary disabled:opacity-50"
+        >
+          {saving ? '...' : 'Сохранить'}
+        </button>
+      </td>
+    </tr>
   )
 }

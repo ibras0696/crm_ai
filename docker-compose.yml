@@ -51,6 +51,12 @@ x-backend-env: &backend_env
   AUTH_COOKIE_SAMESITE: ${AUTH_COOKIE_SAMESITE:-lax}
   AUTH_COOKIE_DOMAIN: ${AUTH_COOKIE_DOMAIN:-}
   AUTH_COOKIE_PATH: ${AUTH_COOKIE_PATH:-/}
+  
+  DOCS_ONLYOFFICE_ENABLED: ${DOCS_ONLYOFFICE_ENABLED:-true}
+  DOCS_ONLYOFFICE_DOCUMENT_SERVER_URL: ${DOCS_ONLYOFFICE_DOCUMENT_SERVER_URL:-http://onlyoffice:80}
+  DOCS_ONLYOFFICE_JWT_SECRET: ${DOCS_ONLYOFFICE_JWT_SECRET:-your-jwt-secret-key-change-in-production}
+  DOCS_ONLYOFFICE_CALLBACK_URL: ${DOCS_ONLYOFFICE_CALLBACK_URL:-http://api:8000/api/v1/docs/integrations/onlyoffice/callback}
+  DOCS_ONLYOFFICE_EDITOR_LANG: ${DOCS_ONLYOFFICE_EDITOR_LANG:-ru}
 
 services:
   db:
@@ -126,6 +132,25 @@ services:
       timeout: 10s
       retries: 5
 
+  onlyoffice:
+    image: onlyoffice/documentserver:7.5.1
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${DOCS_ONLYOFFICE_JWT_SECRET:-your-jwt-secret-key-change-in-production}
+      JWT_HEADER: "Authorization"
+      JWT_PAYLOAD_PAYLOAD: "payload"
+    volumes:
+      - onlyoffice_data:/var/www/onlyoffice/Data
+      - onlyoffice_logs:/var/log/onlyoffice
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
   bootstrap:
     build:
       context: ./backend
@@ -159,6 +184,8 @@ services:
       rabbitmq:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      onlyoffice:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/readiness', timeout=2).read()"]
@@ -276,5 +303,7 @@ volumes:
   redis_data:
   rabbitmq_data:
   minio_data:
+  onlyoffice_data:
+  onlyoffice_logs:
   prometheus_data:
   grafana_data:

@@ -10,19 +10,21 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from src.infrastructure.database import Base
 
 # Import all models so Alembic can detect them
-from src.modules.auth.models import User, RefreshToken  # noqa: F401
-from src.modules.org.models import Organization, Membership, Invite, Subscription  # noqa: F401
-from src.modules.audit.models import AuditLog  # noqa: F401
-from src.modules.notifications.models import Notification  # noqa: F401
-from src.modules.files.models import File  # noqa: F401
-from src.modules.tables.models import Table, Column, TableView  # noqa: F401
-from src.modules.tables.records import Record  # noqa: F401
-from src.modules.knowledge.models import KBPage  # noqa: F401
-from src.modules.billing.models import Plan  # noqa: F401
-from src.modules.schedule.models import Event  # noqa: F401
-from src.modules.ai.models import AIUsageLog, AIChatSession, AIChatMessage  # noqa: F401
-from src.modules.access.models import AccessRule  # noqa: F401
-from src.modules.reports.models import ReportDashboard, ReportWidget  # noqa: F401
+import importlib
+import pkgutil
+import src.modules
+
+for _, _module_name, _ispkg in pkgutil.iter_modules(src.modules.__path__):
+    if _ispkg:
+        try:
+            importlib.import_module(f"src.modules.{_module_name}.models")
+        except ModuleNotFoundError:
+            pass
+        try:
+            importlib.import_module(f"src.modules.{_module_name}.records")
+        except ModuleNotFoundError:
+            pass
+
 
 config = context.config
 

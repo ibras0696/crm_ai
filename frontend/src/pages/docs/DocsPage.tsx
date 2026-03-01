@@ -35,6 +35,10 @@ import {
   X,
 } from 'lucide-react'
 
+import { DocxEditorPanel } from './DocxEditorPanel'
+import { PdfSignerPanel } from './PdfSignerPanel'
+
+
 const MAX_DEPTH = 2
 const STATUS_POLL_INTERVAL_MS = 2000
 const STATUS_POLL_TIMEOUT_MS = 120000
@@ -742,13 +746,12 @@ export default function DocsPage() {
     return (
       <div key={folder.id}>
         <div
-          className={`group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
-            isDropActive
+          className={`group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${isDropActive
               ? 'bg-primary/10 text-primary ring-1 ring-primary/40'
               : isSelected
                 ? 'bg-primary/10 text-primary'
                 : 'hover:bg-secondary/60'
-          }`}
+            }`}
           style={{ paddingLeft: `${8 + depth * 16}px` }}
           onDragOver={(event) => {
             if (!draggedFileId) return
@@ -942,13 +945,12 @@ export default function DocsPage() {
           </CardHeader>
           <CardContent className="space-y-1">
             <button
-              className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
-                dropTargetFolderId === 'root'
+              className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${dropTargetFolderId === 'root'
                   ? 'bg-primary/10 text-primary ring-1 ring-primary/40'
                   : selectedFolderId === null
                     ? 'bg-primary/10 text-primary'
                     : 'hover:bg-secondary/60'
-              }`}
+                }`}
               onClick={() => onSelectFolder(null)}
               onDragOver={(event) => {
                 if (!draggedFileId) return

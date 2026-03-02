@@ -725,6 +725,57 @@ def cleanup_old_doc_versions() -> dict[str, int | str]:
     return {"status": "ok", "deleted": int(deleted_count), "scanned_files": int(scanned_files)}
 
 
+@celery.task(name="docs_cleanup_stale_files")
+def docs_cleanup_stale_files() -> dict[str, int | str]:
+    """Удалить зависшие UPLOADING и DRAFT файлы и их временные S3 объекты."""
+    threshold = datetime.now(UTC) - timedelta(hours=24)
+    batch_size = max(1, int(getattr(settings, "DOCS_RETENTION_BATCH_SIZE", 200) or 200))
+    deleted_count = 0
+    
+    with sync_session_factory() as session:
+        files = session.execute(
+            select(File)
+            .where(
+                File.status.in_([FileStatus.UPLOADING.value, FileStatus.DRAFT.value]),
+                File.created_at < threshold,
+            )
+            .limit(batch_size)
+        ).scalars().all()
+        
+        try:
+            from src.modules.files.storage import get_s3_client
+            s3_client = get_s3_client()
+        except Exception:
+            s3_client = None
+
+        for file_obj in files:
+            # Освобождаем reserved квоту
+            try:
+                from src.modules.docs.repository import DocsRepository # sync access needs async, so we'll just do manual query
+                usage = session.execute(
+                    select(OrgStorageUsage).where(OrgStorageUsage.org_id == file_obj.org_id).with_for_update()
+                ).scalar_one_or_none()
+                if usage:
+                    usage.reserved_bytes = max(0, int(usage.reserved_bytes) - int(file_obj.size or 0))
+            except Exception:
+                pass
+            
+            # Удаляем из S3
+            if s3_client and getattr(file_obj, "s3_bucket", None) and getattr(file_obj, "s3_key", None):
+                try:
+                    s3_client.delete_object(Bucket=file_obj.s3_bucket, Key=file_obj.s3_key)
+                except Exception:
+                    pass
+            
+            session.execute(delete(File).where(File.id == file_obj.id))
+            deleted_count += 1
+            
+        session.commit()
+    
+    _inc_retention_metric("stale_files_ok")
+    return {"status": "ok", "deleted": deleted_count}
+
+
 async def _mark_ai_job_failed(
     *,
     uow: UnitOfWork,
@@ -893,6 +944,49 @@ def _inc_ai_generate_error_metric(reason: str) -> None:
 
 
 def _inc_retention_metric(status: str) -> None:
-    """Безопасно инкрементировать метрику retention-cleanup."""
-    with suppress(Exception):
         DOCS_RETENTION_CLEANUP_TOTAL.labels(status=status).inc()
+
+
+@celery.task(name="docs_delete_file_background")
+def docs_delete_file_background(file_id: str) -> dict[str, int | str]:
+    """Фоновое удаление файла и всех его версий из S3 и БД."""
+    try:
+        file_uuid = uuid.UUID(str(file_id))
+    except Exception:
+        return {"status": "error", "reason": "invalid_file_id"}
+
+    deleted_versions = 0
+    with sync_session_factory() as session:
+        file_obj = session.execute(select(File).where(File.id == file_uuid)).scalar_one_or_none()
+        if not file_obj:
+            return {"status": "skipped", "reason": "file_not_found"}
+
+        try:
+            from src.modules.files.storage import get_s3_client
+            s3_client = get_s3_client()
+        except Exception:
+            s3_client = None
+
+        versions = session.execute(select(FileVersion).where(FileVersion.file_id == file_uuid)).scalars().all()
+        
+        # Удаляем каждую версию из S3 и БД
+        for version in versions:
+            if s3_client and version.s3_bucket and version.s3_key:
+                try:
+                    s3_client.delete_object(Bucket=version.s3_bucket, Key=version.s3_key)
+                except Exception:
+                    pass
+            session.execute(delete(FileVersion).where(FileVersion.id == version.id))
+            deleted_versions += 1
+            
+        # Зачастую `file_obj.s3_key` есть, а `FileVersion` нет (незавершенная загрузка или упавшая AI генерация).
+        # Пытаемся удалить из S3 и `file_obj.s3_key`.
+        if s3_client and getattr(file_obj, "s3_bucket", None) and getattr(file_obj, "s3_key", None):
+            try:
+                s3_client.delete_object(Bucket=file_obj.s3_bucket, Key=file_obj.s3_key)
+            except Exception:
+                pass
+        
+        session.execute(delete(File).where(File.id == file_uuid))
+        session.commit()
+    return {"status": "ok", "deleted_versions": deleted_versions}

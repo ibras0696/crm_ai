@@ -5,8 +5,11 @@ from __future__ import annotations
 import logging
 import uuid  # noqa: TC003
 
-from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, Request, HTTPException
+from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.background import BackgroundTask
+import jwt
+import io
 
 from src.common.enums import UserRole
 from src.common.schemas import ApiResponse
@@ -244,6 +247,29 @@ async def create_empty_file(
     return ApiResponse(data=item)
 
 
+@router.delete("/files/{file_id}", response_model=ApiResponse[None])
+async def delete_file(
+    file_id: uuid.UUID,
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE),
+    ),
+    _: None = Depends(require_access(resource_type="files", permission="can_write", resource_id_param="file_id")),
+):
+    """Удалить файл документа и запустить фоновую очистку в S3."""
+    async with UnitOfWork() as uow:
+        service = DocsService(uow.session)
+        try:
+            await service.delete_file(
+                org_id=current_user.org_id,
+                user_id=current_user.user_id,
+                file_id=file_id,
+            )
+            await uow.commit()
+        except DocsModuleError as error:
+            return _error_response(error)
+    return ApiResponse(data=None)
+
+
 @router.patch("/files/{file_id}", response_model=ApiResponse[FileOut])
 async def move_file(
     file_id: uuid.UUID,
@@ -435,6 +461,39 @@ async def open_docx(
     return ApiResponse(data=payload)
 
 
+@router.get("/files/internal-download/{version_id}")
+async def internal_download(version_id: uuid.UUID, token: str):
+    """Внутренний роут для скачивания файла сервером OnlyOffice."""
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+        if payload.get("action") != "internal_download" or payload.get("sub") != str(version_id):
+            raise HTTPException(status_code=403, detail="Invalid token scope")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=403, detail="Invalid token")
+
+    async with UnitOfWork() as uow:
+        service = DocsService(uow.session)
+        try:
+            version = await service.repo.get_file_version_by_id(version_id=version_id)
+            if not version or not version.s3_key:
+                raise HTTPException(status_code=404, detail="Version not found")
+        except DocsModuleError:
+            raise HTTPException(status_code=404, detail="Version not found")
+
+    from src.modules.files.storage import get_s3_client
+    s3 = get_s3_client()
+    try:
+        resp = s3.get_object(Bucket=version.s3_bucket, Key=version.s3_key)
+        body = resp["Body"]
+        return StreamingResponse(
+            body,
+            media_type=resp.get("ContentType", "application/octet-stream"),
+        )
+    except Exception as e:
+        logger.error(f"S3 download failed internally: {e}")
+        raise HTTPException(status_code=500, detail="Storage error")
+
+
 @router.post("/integrations/onlyoffice/callback")
 async def onlyoffice_callback(request: Request):
     """Callback от OnlyOffice при сохранении DOCX."""
@@ -568,6 +627,26 @@ async def get_download_url(
             return _error_response(error)
         item = DownloadOut.model_validate(payload)
     return ApiResponse(data=item)
+
+
+@router.get("/files/{file_id}/export-pdf", response_model=ApiResponse[DownloadOut])
+async def get_export_pdf_url(
+    file_id: uuid.UUID,
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY),
+    ),
+    _: None = Depends(require_access(resource_type="files", permission="can_read", resource_id_param="file_id")),
+):
+    """Экспортировать TXT/DOCX в PDF и вернуть временную ссылку на скачивание."""
+    async with UnitOfWork() as uow:
+        service = DocsService(uow.session)
+        try:
+            payload = await service.export_pdf(org_id=current_user.org_id, file_id=file_id)
+        except DocsModuleError as error:
+            return _error_response(error)
+        item = DownloadOut.model_validate(payload)
+    return ApiResponse(data=item)
+
 
 
 @router.get("/usage", response_model=ApiResponse[UsageOut])

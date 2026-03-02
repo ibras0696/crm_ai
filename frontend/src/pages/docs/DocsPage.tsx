@@ -30,6 +30,8 @@ import {
   Pencil,
   Save,
   Sparkles,
+  Maximize2,
+  Minimize2,
   Trash2,
   Upload,
   X,
@@ -78,12 +80,13 @@ function statusLabel(status: DocsFile['status']): string {
   if (status === 'scanning') return 'На проверке'
   if (status === 'ready') return 'Готов'
   if (status === 'blocked') return 'Заблокирован'
+  if (status === 'draft') return 'Генерируется'
   return status || 'unknown'
 }
 
 function statusClass(status: DocsFile['status']): string {
   if (status === 'ready') return 'text-emerald-600'
-  if (status === 'scanning' || status === 'uploading') return 'text-amber-600'
+  if (status === 'scanning' || status === 'uploading' || status === 'draft') return 'text-amber-600'
   if (status === 'blocked') return 'text-destructive'
   return 'text-muted-foreground'
 }
@@ -128,7 +131,8 @@ export default function DocsPage() {
   const [pdfSignerFile, setPdfSignerFile] = useState<DocsFile | null>(null)
   const [docxEditorFile, setDocxEditorFile] = useState<DocsFile | null>(null)
   const [docxLoading, setDocxLoading] = useState(false)
-  const [docxConfig, setDocxConfig] = useState<OnlyOfficeConfig | null>(null)
+  const [isEditorFullscreen, setIsEditorFullscreen] = useState(false)
+  const [docxConfig, setDocxConfig] = useState<Record<string, unknown> | null>(null)
   const [docxServerUrl, setDocxServerUrl] = useState('')
   const [aiType, setAiType] = useState<DocsFileType>('txt')
   const [aiPrompt, setAiPrompt] = useState('')
@@ -385,6 +389,22 @@ export default function DocsPage() {
       if (selectedFolderId === folder.id) setSelectedFolderId(null)
     } catch (error) {
       setErrorText(extractError(error, 'Не удалось удалить папку'))
+    }
+  }
+
+  const deleteFile = async (file: DocsFile) => {
+    if (!window.confirm(`Удалить файл «${file.title || file.original_name}»?`)) return
+    setErrorText('')
+    try {
+      const response = await docsApi.deleteFile(file.id)
+      if (!response.data.ok) {
+        setErrorText(response.data.error?.message || 'Не удалось удалить файл')
+        return
+      }
+      setFiles((prev) => prev.filter((item) => item.id !== file.id))
+      await loadUsage()
+    } catch (error) {
+      setErrorText(extractError(error, 'Не удалось удалить файл'))
     }
   }
 
@@ -671,6 +691,7 @@ export default function DocsPage() {
     }
   }
 
+
   const abortUploadingFile = async (file: DocsFile) => {
     if (file.status !== 'uploading') return
     setErrorText('')
@@ -713,7 +734,7 @@ export default function DocsPage() {
       }
       setDocxEditorFile(response.data.data.file)
       setDocxServerUrl(response.data.data.document_server_url)
-      setDocxConfig(response.data.data.config as unknown as OnlyOfficeConfig)
+      setDocxConfig((response.data.data?.config as Record<string, unknown>) || null)
     } catch (error) {
       setErrorText(extractError(error, 'Не удалось открыть DOCX редактор'))
     } finally {
@@ -747,10 +768,10 @@ export default function DocsPage() {
       <div key={folder.id}>
         <div
           className={`group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${isDropActive
-              ? 'bg-primary/10 text-primary ring-1 ring-primary/40'
-              : isSelected
-                ? 'bg-primary/10 text-primary'
-                : 'hover:bg-secondary/60'
+            ? 'bg-primary/10 text-primary ring-1 ring-primary/40'
+            : isSelected
+              ? 'bg-primary/10 text-primary'
+              : 'hover:bg-secondary/60'
             }`}
           style={{ paddingLeft: `${8 + depth * 16}px` }}
           onDragOver={(event) => {
@@ -823,7 +844,6 @@ export default function DocsPage() {
           >
             <option value="txt">TXT</option>
             <option value="docx">DOCX</option>
-            <option value="pdf">PDF</option>
           </select>
           <input
             className="h-10 w-56 rounded-md border border-input bg-background px-3 text-sm"
@@ -879,7 +899,6 @@ export default function DocsPage() {
             >
               <option value="txt">TXT</option>
               <option value="docx">DOCX</option>
-              <option value="pdf">PDF</option>
             </select>
             <input
               className="h-10 rounded-md border border-input bg-background px-3 text-sm md:col-span-2"
@@ -910,7 +929,7 @@ export default function DocsPage() {
             <p className="text-xs text-muted-foreground">
               Файл создается как новая версия через pipeline AI → SCANNING → READY/BLOCKED.
             </p>
-            <Button onClick={() => void createAIDocument()} disabled={aiGenerating || aiPrompt.trim().length < 3}>
+            <Button onClick={() => void createAIDocument()} disabled={aiGenerating}>
               {aiGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
               Сгенерировать
             </Button>
@@ -946,10 +965,10 @@ export default function DocsPage() {
           <CardContent className="space-y-1">
             <button
               className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${dropTargetFolderId === 'root'
-                  ? 'bg-primary/10 text-primary ring-1 ring-primary/40'
-                  : selectedFolderId === null
-                    ? 'bg-primary/10 text-primary'
-                    : 'hover:bg-secondary/60'
+                ? 'bg-primary/10 text-primary ring-1 ring-primary/40'
+                : selectedFolderId === null
+                  ? 'bg-primary/10 text-primary'
+                  : 'hover:bg-secondary/60'
                 }`}
               onClick={() => onSelectFolder(null)}
               onDragOver={(event) => {
@@ -1001,7 +1020,7 @@ export default function DocsPage() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">{file.title || file.original_name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {fileTypeLabel(file)} · {formatBytes(file.size)} · статус: {file.status || 'unknown'}
+                        {fileTypeLabel(file)} · {formatBytes(file.size)} · статус: {statusLabel(file.status).toLowerCase()}
                       </p>
                       {file.status === 'scanning' && (
                         <p className="text-xs text-amber-600">Файл на проверке. Скачивание будет доступно после сканирования.</p>
@@ -1021,7 +1040,7 @@ export default function DocsPage() {
                       </Button>
                     )}
                     {file.type === 'docx' && (
-                      <Button variant="outline" size="sm" onClick={() => void onDocxOpen(file)} disabled={file.status !== 'ready'}>
+                      <Button variant="outline" size="sm" onClick={() => void onDocxOpen(file)} disabled={file.status !== 'ready' || docxLoading || docxEditorFile?.id === file.id}>
                         <Pencil className="mr-1 h-4 w-4" /> Открыть в редакторе
                       </Button>
                     )}
@@ -1033,6 +1052,9 @@ export default function DocsPage() {
                     <Button variant="outline" size="sm" onClick={() => void downloadFile(file)} disabled={file.status !== 'ready'}>
                       <Download className="mr-1 h-4 w-4" /> Скачать
                     </Button>
+                    <Button variant="outline" size="sm" className="text-destructive hover:bg-destructive hover:text-destructive-foreground" onClick={() => void deleteFile(file)} disabled={file.status !== 'ready' || docxEditorFile?.id === file.id || editorFile?.id === file.id || pdfSignerFile?.id === file.id}>
+                      <Trash2 className="mr-1 h-4 w-4" /> Удалить
+                    </Button>
                     <span className={`text-xs font-medium ${statusClass(file.status)}`}>{statusLabel(file.status)}</span>
                   </div>
                 ))}
@@ -1040,103 +1062,187 @@ export default function DocsPage() {
             )}
 
             {editorFile && (
-              <div className="mt-6 grid grid-cols-1 gap-4 border-t border-border pt-4 lg:grid-cols-3">
-                <div className="lg:col-span-2 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <h3 className="text-sm font-semibold">TXT редактор: {editorFile.title || editorFile.original_name}</h3>
-                      <p className="text-xs text-muted-foreground">Каждое сохранение создаёт новую версию файла.</p>
+              <div className="fixed inset-0 z-[100] flex flex-col bg-background/95 backdrop-blur-sm animate-in fade-in zoom-in duration-200">
+                <div className="flex items-center justify-between border-b border-border bg-background px-4 py-3 shadow-md">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100/80 text-violet-600 shadow-sm dark:bg-violet-900/40 dark:text-violet-400">
+                      <FileText className="h-5 w-5" />
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="sm" onClick={() => void closeEditor()}>
-                        <X className="mr-1 h-4 w-4" /> Закрыть
-                      </Button>
-                      <Button size="sm" onClick={() => void saveText()} disabled={saveLoading || editorLoading || !hasUnsavedChanges}>
-                        {saveLoading ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}
-                        Сохранить
-                      </Button>
+                    <div>
+                      <h2 className="text-base font-semibold leading-tight">{editorFile.title || editorFile.original_name}</h2>
+                      <p className="text-xs text-muted-foreground mt-0.5 font-medium flex items-center gap-1.5">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                        </span>
+                        Текстовый редактор
+                      </p>
                     </div>
                   </div>
-
-                  {editorLoading ? (
-                    <div className="flex h-48 items-center justify-center rounded-md border border-dashed border-border">
-                      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                    </div>
-                  ) : (
-                    <div className="overflow-hidden rounded-md border border-input">
-                      <Editor
-                        height="360px"
-                        defaultLanguage="plaintext"
-                        value={editorContent}
-                        onChange={(value) => setEditorContent(value ?? '')}
-                        options={{
-                          minimap: { enabled: false },
-                          fontSize: 13,
-                          wordWrap: 'on',
-                          lineNumbers: 'on',
-                          scrollBeyondLastLine: false,
-                          automaticLayout: true,
-                        }}
-                      />
-                    </div>
-                  )}
-
-                  <p className={`text-xs ${hasUnsavedChanges ? 'text-amber-600' : 'text-muted-foreground'}`}>
-                    {hasUnsavedChanges ? 'Есть несохраненные изменения.' : 'Все изменения сохранены.'}
-                  </p>
+                  <div className="flex items-center gap-3">
+                    <p className={`text-xs font-medium mr-2 ${hasUnsavedChanges ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                      {hasUnsavedChanges ? 'Есть несохраненные изменения' : 'Все изменения сохранены'}
+                    </p>
+                    <Button size="sm" onClick={() => void saveText()} disabled={saveLoading || editorLoading || !hasUnsavedChanges} className="h-9 gap-2 px-4 shadow-sm">
+                      {saveLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                      Сохранить
+                    </Button>
+                    <div className="w-px h-6 bg-border mx-1"></div>
+                    <Button variant="outline" size="sm" onClick={() => void closeEditor()} className="h-9 gap-2 shadow-sm border-border hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all">
+                      <X className="h-4 w-4" />
+                      Закрыть
+                    </Button>
+                  </div>
                 </div>
 
-                <div className="space-y-2">
-                  <h3 className="text-sm font-semibold">История версий</h3>
-                  {versionsLoading ? (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Загрузка...
-                    </div>
-                  ) : versions.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">Версий пока нет</p>
-                  ) : (
-                    <div className="max-h-[360px] space-y-2 overflow-auto pr-1">
-                      {versions.map((version) => (
-                        <div key={version.id} className="rounded-md border border-border px-3 py-2">
-                          <p className="text-xs font-medium">v: {version.id.slice(0, 8)}</p>
-                          <p className="text-xs text-muted-foreground">{formatDate(version.created_at)}</p>
-                          <p className="text-xs text-muted-foreground">{formatBytes(version.size_bytes)} · {version.mime}</p>
+                <div className="flex flex-1 overflow-hidden bg-background">
+                  <div className="flex-1 p-4 lg:p-6 lg:border-r border-border overflow-hidden flex flex-col">
+                    {editorLoading ? (
+                      <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-border bg-secondary/20">
+                        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : (
+                      <div className="flex-1 overflow-hidden rounded-xl border border-input shadow-sm relative">
+                        {/* Adding a custom monaco editor styling context */}
+                        <Editor
+                          height="100%"
+                          defaultLanguage="plaintext"
+                          value={editorContent}
+                          onChange={(value) => setEditorContent(value ?? '')}
+                          options={{
+                            minimap: { enabled: false },
+                            fontSize: 14,
+                            wordWrap: 'on',
+                            lineNumbers: 'on',
+                            scrollBeyondLastLine: false,
+                            automaticLayout: true,
+                            fontFamily: "system-ui, -apple-system, sans-serif",
+                            padding: { top: 16, bottom: 16 },
+                          }}
+                          className="bg-transparent"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="w-80 flex-shrink-0 bg-secondary/10 p-4 border-l border-border hidden lg:flex lg:flex-col overflow-hidden">
+                    <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
+                      <HardDrive className="h-4 w-4" /> Иcтория версий
+                    </h3>
+                    <div className="flex-1 overflow-auto pr-2 space-y-3 custom-scrollbar">
+                      {versionsLoading ? (
+                        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground py-10">
+                          <Loader2 className="h-5 w-5 animate-spin" />
                         </div>
-                      ))}
+                      ) : versions.length === 0 ? (
+                        <div className="text-center py-10 border border-dashed rounded-lg">
+                          <p className="text-sm text-muted-foreground">Версий пока нет</p>
+                        </div>
+                      ) : (
+                        versions.map((version) => (
+                          <div key={version.id} className="rounded-lg border border-border bg-background p-3 shadow-sm hover:border-primary/50 transition-colors">
+                            <div className="flex items-center justify-between mb-1">
+                              <p className="text-xs font-bold text-foreground font-mono">v: {version.id.slice(0, 8)}</p>
+                              {version.id === editorFile.current_version_id && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 font-semibold uppercase">Current</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-muted-foreground mb-1">{formatDate(version.created_at)}</p>
+                            <p className="text-xs font-medium bg-secondary text-secondary-foreground inline-flex px-1.5 py-0.5 rounded uppercase">{formatBytes(version.size_bytes)} · {version.mime.split('/').pop()}</p>
+                          </div>
+                        ))
+                      )}
                     </div>
-                  )}
+                  </div>
                 </div>
               </div>
             )}
-
-            {pdfSignerFile && (
-              <PdfSignerPanel
-                file={pdfSignerFile}
-                onClose={() => setPdfSignerFile(null)}
-                onError={setErrorText}
-                onFileUpdated={onFileUpdated}
-                pollFileStatus={pollFilesStatus}
-              />
-            )}
-
-            {docxEditorFile && docxConfig && docxServerUrl && (
-              <DocxEditorPanel
-                file={docxEditorFile}
-                documentServerUrl={docxServerUrl}
-                config={docxConfig}
-                loading={docxLoading}
-                onClose={() => {
-                  setDocxEditorFile(null)
-                  setDocxConfig(null)
-                  setDocxServerUrl('')
-                }}
-                onError={setErrorText}
-                onFileUpdated={onFileUpdated}
-              />
-            )}
           </CardContent>
         </Card>
+        {pdfSignerFile && (
+          <div className="fixed inset-0 z-[100] flex flex-col bg-background/95 backdrop-blur-sm animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center justify-between border-b border-border bg-background px-4 py-3 shadow-md">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-100/80 text-rose-600 shadow-sm dark:bg-rose-900/40 dark:text-rose-400">
+                  <FileText className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold leading-tight px-2">{pdfSignerFile.title || pdfSignerFile.original_name}</h2>
+                  <p className="text-xs text-muted-foreground mt-0.5 font-medium flex items-center gap-1.5 px-2">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                    </span>
+                    Инструмент подписания PDF
+                  </p>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => setPdfSignerFile(null)} className="h-9 gap-2 shadow-sm border-border hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all">
+                <X className="h-4 w-4" />
+                Закрыть
+              </Button>
+            </div>
+            <div className="flex-1 overflow-auto bg-[#f4f4f4] dark:bg-neutral-900 p-4 lg:p-8 flex justify-center">
+              <div className="w-full max-w-5xl bg-background rounded-xl shadow-sm border border-border">
+                <PdfSignerPanel
+                  file={pdfSignerFile}
+                  onClose={() => setPdfSignerFile(null)}
+                  onError={setErrorText}
+                  onFileUpdated={onFileUpdated}
+                  pollFileStatus={pollFilesStatus}
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {docxEditorFile && docxConfig && docxServerUrl && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-0 lg:p-4 bg-background/50 backdrop-blur-sm animate-in fade-in zoom-in duration-200">
+            <div className={`flex flex-col bg-background shadow-2xl border border-border border-t-0 lg:border-t overflow-hidden transition-all duration-300 ${isEditorFullscreen ? 'fixed inset-0 w-full h-full rounded-none lg:rounded-none' : 'w-full lg:w-[95vw] h-full lg:h-[90vh] lg:rounded-xl shadow-2xl'}`}>
+              <div className="flex items-center justify-between border-b border-border bg-background px-4 py-3 shadow-md flex-shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100/80 text-blue-600 shadow-sm dark:bg-blue-900/40 dark:text-blue-400">
+                    <FileText className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-semibold leading-tight">{docxEditorFile.title || docxEditorFile.original_name}</h2>
+                    <p className="text-xs text-muted-foreground mt-0.5 font-medium flex items-center gap-1.5">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                      </span>
+                      Редактор OnlyOffice
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setIsEditorFullscreen(!isEditorFullscreen)} className="h-9 w-9 p-0 hover:bg-secondary hidden lg:flex">
+                    {isEditorFullscreen ? <Minimize2 className="h-4 w-4 opacity-70" /> : <Maximize2 className="h-4 w-4 opacity-70" />}
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => {
+                    setDocxEditorFile(null)
+                    setDocxConfig(null)
+                    setDocxServerUrl('')
+                    setIsEditorFullscreen(false)
+                  }} className="h-9 gap-2 shadow-sm border-border hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all">
+                    <X className="h-4 w-4" />
+                    Закрыть редактор
+                  </Button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-hidden bg-[#f4f4f4] dark:bg-neutral-900 shadow-inner flex flex-col pt-3 min-h-0">
+                <DocxEditorPanel
+                  file={docxEditorFile}
+                  documentServerUrl={docxServerUrl}
+                  config={docxConfig}
+                  loading={docxLoading}
+                  onError={setErrorText}
+                  onFileUpdated={onFileUpdated}
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

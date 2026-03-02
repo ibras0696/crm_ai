@@ -651,6 +651,59 @@ async def handle_create_kb_page_action(
     }
 
 
+async def handle_edit_kb_page_action(
+    uow: UnitOfWork,
+    org_id: uuid.UUID,
+    user_id: uuid.UUID,
+    action_payload: dict[str, Any],
+    user_message: str | None = None,
+) -> dict[str, Any]:
+    """Отредактировать существующую страницу базы знаний."""
+    repo = AIRepository(uow.session)
+    page_id_raw = action_payload.get("page_id") or action_payload.get("id")
+    if not page_id_raw:
+        return {"action": "edit_kb_page", "ok": False, "error": "page_id_required"}
+    
+    try:
+        page_id = uuid.UUID(str(page_id_raw))
+    except Exception:
+        return {"action": "edit_kb_page", "ok": False, "error": "invalid_page_id"}
+
+    page = await repo.get_kb_page_for_org(org_id=org_id, page_id=page_id)
+    if not page:
+        return {"action": "edit_kb_page", "ok": False, "error": "page_not_found"}
+
+    updated = False
+    if "title" in action_payload and action_payload["title"]:
+        title_str = str(action_payload["title"])[:500]
+        if page.title != title_str:
+            page.title = title_str
+            page.slug = _build_kb_slug(title_str)
+            updated = True
+            
+    if "content" in action_payload:
+        content_str = str(action_payload["content"]) if action_payload.get("content") is not None else None
+        if page.content != content_str:
+            page.content = content_str
+            updated = True
+            
+    if "icon" in action_payload:
+        icon_str = str(action_payload["icon"]).strip()[:50] if action_payload.get("icon") else None
+        if page.icon != icon_str:
+            page.icon = icon_str
+            updated = True
+            
+    if updated:
+        await uow.session.flush()
+
+    return {
+        "action": "edit_kb_page",
+        "ok": True,
+        "page": {"id": str(page.id), "title": page.title, "slug": page.slug},
+        "updated": updated
+    }
+
+
 async def _resolve_kb_limit(uow: UnitOfWork, *, org_id: uuid.UUID) -> int:
     """Получить лимит страниц KB для организации по тарифу.
 

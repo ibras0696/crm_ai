@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import sentry_sdk
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -41,6 +42,13 @@ def create_app() -> FastAPI:
         openapi_url="/api/openapi.json" if docs_enabled else None,
         lifespan=lifespan,
     )
+
+    if settings.ENABLE_SENTRY and settings.SENTRY_DSN:
+        sentry_sdk.init(
+            dsn=settings.SENTRY_DSN,
+            environment=str(settings.ENVIRONMENT),
+            traces_sample_rate=0.1,  # Adjust as needed for prod
+        )
 
     if settings.ENABLE_METRICS:
         setup_metrics(application, version=settings.APP_VERSION)

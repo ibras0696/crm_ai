@@ -4,6 +4,9 @@ import RegisterPage from './pages/auth/RegisterPage'
 import LandingPage from './pages/auth/LandingPage'
 import PrivacyPolicyPage from './pages/auth/PrivacyPolicyPage'
 import PersonalDataConsentPage from './pages/auth/PersonalDataConsentPage'
+import ForgotPasswordPage from './pages/auth/ForgotPasswordPage'
+import ResetPasswordPage from './pages/auth/ResetPasswordPage'
+import AcceptInvitePage from './pages/auth/AcceptInvitePage'
 import DashboardPage from './pages/org/DashboardPage'
 import MembersPage from './pages/org/MembersPage'
 import SettingsPage from './pages/org/SettingsPage'
@@ -34,6 +37,9 @@ export default function App() {
       <Route path="/landing" element={<LandingPage />} />
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
+      <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/auth/accept-invite" element={<AcceptInvitePage />} />
       <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
       <Route path="/personal-data-consent" element={<PersonalDataConsentPage />} />
       <Route element={<AppLayout />}>

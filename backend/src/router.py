@@ -11,6 +11,7 @@ from src.modules.docs.routes import router as docs_router
 from src.modules.files.routes import router as files_router
 from src.modules.knowledge.routes import router as kb_router
 from src.modules.notifications.routes import router as notif_router
+from src.modules.notifications.ws import router as ws_router
 from src.modules.org.routes import router as org_router
 from src.modules.reports.routes import router as reports_router
 from src.modules.schedule.routes import router as schedule_router
@@ -24,6 +25,7 @@ router.include_router(audit_router)
 router.include_router(files_router)
 router.include_router(docs_router)
 router.include_router(notif_router)
+router.include_router(ws_router)
 router.include_router(tables_router)
 router.include_router(kb_router)
 router.include_router(reports_router)

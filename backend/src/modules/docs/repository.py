@@ -135,6 +135,11 @@ class DocsRepository:
         stmt = select(FileVersion).where(FileVersion.id == version_id, FileVersion.file_id == file_id)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def get_file_version_by_id(self, *, version_id: uuid.UUID) -> FileVersion | None:
+        """Получить версию файла по id (для внутренних нужд)."""
+        stmt = select(FileVersion).where(FileVersion.id == version_id).limit(1)
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def list_file_versions(self, *, file_id: uuid.UUID, limit: int = 50) -> list[FileVersion]:
         """Получить историю версий файла (сначала новые)."""
         stmt = (

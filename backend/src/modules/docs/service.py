@@ -184,21 +184,38 @@ class DocsService:
             )
         return await self.repo.update_folder(folder)
 
-    async def delete_folder(self, *, org_id: uuid.UUID, folder_id: uuid.UUID) -> None:
-        """Удалить папку, если она пуста."""
-        folder = await self.repo.get_folder(folder_id=folder_id, org_id=org_id)
-        if folder is None:
-            raise DocsModuleError(code="NOT_FOUND", message="Папка не найдена", status_code=404)
-
-        children_count = await self.repo.count_child_folders(folder_id=folder_id, org_id=org_id)
-        if children_count > 0:
-            raise DocsModuleError(code="FOLDER_NOT_EMPTY", message="Нельзя удалить папку с вложенными папками")
-
-        files_count = await self.repo.count_files_in_folder(folder_id=folder_id, org_id=org_id)
-        if files_count > 0:
-            raise DocsModuleError(code="FOLDER_NOT_EMPTY", message="Нельзя удалить папку с файлами")
-
         await self.repo.delete_folder(folder)
+
+    async def delete_file(
+        self,
+        *,
+        org_id: uuid.UUID,
+        user_id: uuid.UUID,
+        file_id: uuid.UUID,
+    ) -> None:
+        """Пометить файл как удаленный и запустить фоновую очистку в S3."""
+        file_obj = await self.repo.get_doc_file(file_id=file_id, org_id=org_id)
+        if file_obj is None:
+            raise DocsModuleError(code="NOT_FOUND", message="Файл не найден", status_code=404)
+
+        if file_obj.status == FileStatus.DELETED.value:
+            return  # Уже удален
+
+        usage = await self.repo.get_storage_usage_for_update(org_id=org_id)
+        if file_obj.status == FileStatus.UPLOADING.value or file_obj.status == FileStatus.DRAFT.value:
+            usage.reserved_bytes = max(0, int(usage.reserved_bytes) - int(file_obj.size or 0))
+        elif file_obj.status in (FileStatus.READY.value, FileStatus.BLOCKED.value, FileStatus.SCANNING.value):
+            usage.used_bytes = max(0, int(usage.used_bytes) - int(file_obj.size or 0))
+
+        file_obj.status = FileStatus.DELETED.value
+        await self.repo.update_file(file_obj)
+        await self.repo.update_storage_usage(usage)
+
+        from src.modules.docs.tasks import docs_delete_file_background
+        try:
+            docs_delete_file_background.delay(str(file_id))
+        except Exception:
+            pass
 
     async def init_upload(
         self,
@@ -214,6 +231,12 @@ class DocsService:
     ) -> dict:
         """Инициализировать загрузку файла и зарезервировать место по квоте."""
         file_type = self._resolve_file_type(filename=filename, content_type=content_type)
+        if file_type == FileType.PDF:
+            raise DocsModuleError(
+                code="UNSUPPORTED_TYPE",
+                message="Загрузка PDF-файлов запрещена",
+                status_code=400,
+            )
         self._validate_upload_size(size_bytes)
 
         if folder_id is not None:
@@ -420,7 +443,7 @@ class DocsService:
         title: str | None,
     ) -> File:
         """Создать пустой TXT/PDF/DOCX документ как READY-файл с версией v1."""
-        normalized_type = self._resolve_ai_file_type(file_type)
+        normalized_type = self._resolve_generated_file_type(file_type)
         if folder_id is not None:
             folder = await self.repo.get_folder(folder_id=folder_id, org_id=org_id)
             if folder is None:
@@ -733,11 +756,15 @@ class DocsService:
         if version is None:
             raise DocsModuleError(code="FILE_VERSION_NOT_FOUND", message="Текущая версия файла не найдена")
 
-        download_url = self.storage.generate_presigned_get_url(
-            bucket=version.s3_bucket,
-            key=version.s3_key,
-            expires_in=3600,
-        )
+        import jwt
+        from datetime import datetime, timezone, timedelta
+        token_payload = {
+            "sub": str(version.id),
+            "action": "internal_download",
+            "exp": datetime.now(timezone.utc) + timedelta(hours=2)
+        }
+        internal_token = jwt.encode(token_payload, settings.SECRET_KEY, algorithm="HS256")
+        download_url = f"http://api:8000/api/v1/docs/files/internal-download/{version.id}?token={internal_token}"
         state_token = DEFAULT_DOC_EDITOR_PROVIDER.build_state_token(
             org_id=str(org_id),
             file_id=str(file_obj.id),
@@ -901,7 +928,7 @@ class DocsService:
         if len(normalized_prompt) > max_prompt_chars:
             raise DocsModuleError(code="PROMPT_TOO_LARGE", message="Слишком длинный prompt для генерации документа")
 
-        normalized_type = self._resolve_ai_file_type(file_type)
+        normalized_type = self._resolve_generated_file_type(file_type)
         if folder_id is not None:
             folder = await self.repo.get_folder(folder_id=folder_id, org_id=org_id)
             if folder is None:
@@ -1129,16 +1156,90 @@ class DocsService:
         return by_mime or by_ext  # type: ignore[return-value]
 
     @staticmethod
-    def _resolve_ai_file_type(raw_type: str) -> FileType:
-        """Преобразовать строковый тип AI-документа в enum."""
+    def _resolve_generated_file_type(raw_type: str) -> FileType:
+        """Преобразовать строковый тип документа в enum для создания пустого или AI-генерации."""
         value = str(raw_type or "").strip().lower()
         if value == FileType.TXT.value:
             return FileType.TXT
         if value == FileType.DOCX.value:
             return FileType.DOCX
-        if value == FileType.PDF.value:
-            return FileType.PDF
-        raise InvalidTypeError("Для AI-генерации поддерживаются только TXT, PDF, DOCX")
+        raise InvalidTypeError("Для создания или генерации поддерживаются только форматы TXT и DOCX")
+
+    async def export_pdf(self, *, org_id: uuid.UUID, file_id: uuid.UUID) -> dict[str, object]:
+        """Экспортировать TXT или DOCX файл в формат PDF и вернуть ссылку на скачивание."""
+        file_obj = await self.get_file(org_id=org_id, file_id=file_id)
+        if file_obj.status != FileStatus.READY.value:
+            raise DocsModuleError(code="FILE_NOT_READY", message="Файл недоступен для экспорта")
+        if file_obj.type == FileType.PDF.value:
+            # Уже PDF, просто вернуть ссылку на скачивание оригинального файла
+            return await self.build_download(org_id=org_id, file_id=file_id)
+            
+        version = await self.repo.get_file_version(version_id=file_obj.current_version_id, file_id=file_obj.id)
+        if version is None:
+            raise DocsModuleError(code="FILE_VERSION_NOT_FOUND", message="Текущая версия файла не найдена")
+
+        try:
+            payload = self.storage.get_object_bytes(bucket=version.s3_bucket, key=version.s3_key)
+        except Exception as exc:
+            raise DocsModuleError(code="STORAGE_READ_ERROR", message="Не удалось прочитать файл из хранилища") from exc
+
+        pdf_bytes = b""
+        if file_obj.type == FileType.TXT.value:
+            from src.modules.docs.document_render import _build_pdf_bytes
+            try:
+                text = payload.decode("utf-8")
+                pdf_bytes = _build_pdf_bytes(text=text, title=file_obj.title or file_obj.original_name)
+            except Exception as exc:
+                raise DocsModuleError(
+                    code="CONVERSION_ERROR", message="Не удалось сконвертировать текстовый файл в PDF"
+                ) from exc
+        elif file_obj.type == FileType.DOCX.value:
+            from src.modules.docs.doc_editor_provider import DEFAULT_DOC_EDITOR_PROVIDER
+            DEFAULT_DOC_EDITOR_PROVIDER.ensure_configured()
+            
+            # Нам нужно передать URL скачивания в сервис конвертации
+            download_url_info = await self.build_download(org_id=org_id, file_id=file_id)
+            try:
+                pdf_bytes = await DEFAULT_DOC_EDITOR_PROVIDER.convert_to_pdf(
+                    file_url=str(download_url_info["url"]),
+                    file_type="docx"
+                )
+            except DocsModuleError:
+                raise
+            except Exception as exc:
+                raise DocsModuleError(
+                    code="ONLYOFFICE_CONVERT_ERROR", message=f"Ошибка конвертации DOCX: {exc}"
+                ) from exc
+        else:
+            raise DocsModuleError(code="UNSUPPORTED_TYPE", message="Данный тип файла не поддерживает экспорт в PDF")
+            
+        # Загружаем экспортированный PDF обратно во временное/постоянное хранилище
+        export_key = f"exports/{org_id}/{file_id}/{uuid.uuid4()}.pdf"
+        try:
+            self.storage.put_object_bytes(
+                bucket=DEFAULT_BUCKET,
+                key=export_key,
+                payload=pdf_bytes,
+                content_type="application/pdf",
+            )
+        except Exception as exc:
+            raise DocsModuleError(
+                code="STORAGE_WRITE_ERROR", message="Не удалось сохранить экспортированный PDF"
+            ) from exc
+            
+        try:
+            url = self.storage.generate_presigned_get_url(
+                bucket=DEFAULT_BUCKET,
+                key=export_key,
+                expires_in=3600,
+                filename=f"{file_obj.title or 'Документ'}.pdf"
+            )
+        except Exception as exc:
+            raise DocsModuleError(
+                code="STORAGE_URL_ERROR", message="Не удалось сформировать ссылку для экспортированного PDF"
+            ) from exc
+
+        return {"url": url, "expires_in": 3600, "filename": f"{file_obj.title or 'Документ'}.pdf"}
 
     @staticmethod
     def _resolve_mime_and_ext(file_type: FileType) -> tuple[str, str]:
@@ -1176,10 +1277,32 @@ class DocsService:
 
     async def _download_onlyoffice_file(self, file_url: str) -> bytes:
         """Скачать сохраненный OnlyOffice файл по callback URL."""
+        from urllib.parse import urlparse, urlunparse
+        
+        # Если backend и OnlyOffice оба в Docker, а клиент снаружи по localhost,
+        # URL из коллбека может быть недоступен (например, localhost:8080).
+        # Подменяем хост на внутренний (DOCS_ONLYOFFICE_DOCUMENT_SERVER_INTERNAL_URL).
+        internal_url_base = str(getattr(settings, "DOCS_ONLYOFFICE_DOCUMENT_SERVER_INTERNAL_URL", "http://onlyoffice:80")).rstrip("/")
+        if internal_url_base:
+            parsed_internal = urlparse(internal_url_base)
+            parsed_file = urlparse(file_url)
+            
+            # Подменяем схему и хост (netloc) на внутренние из настроек.
+            file_url_internal = urlunparse((
+                parsed_internal.scheme,
+                parsed_internal.netloc,
+                parsed_file.path,
+                parsed_file.params,
+                parsed_file.query,
+                parsed_file.fragment
+            ))
+        else:
+            file_url_internal = file_url
+
         timeout_s = float(getattr(settings, "DOCS_ONLYOFFICE_REQUEST_TIMEOUT_S", 20.0) or 20.0)
         timeout = httpx.Timeout(timeout_s)
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-            response = await client.get(file_url)
+            response = await client.get(file_url_internal)
             response.raise_for_status()
             return bytes(response.content)
 

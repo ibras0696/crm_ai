@@ -38,4 +38,6 @@ export const authApi = {
   refresh: () => api.post<ApiResponse<TokenResponse>>('/auth/refresh', {}),
   me: () => api.get<ApiResponse<UserInfo>>('/auth/me'),
   logout: () => api.post<ApiResponse<null>>('/auth/logout', {}),
+  forgotPassword: (data: { email: string }) => api.post<ApiResponse<null>>('/auth/forgot-password', data),
+  resetPassword: (data: { token: string; new_password: string }) => api.post<ApiResponse<null>>('/auth/reset-password', data),
 }

@@ -34,10 +34,27 @@ class StorageProvider:
         )
         return url, {"Content-Type": content_type}
 
-    def generate_presigned_get_url(self, *, bucket: str, key: str, expires_in: int = 900) -> str:
+    def generate_presigned_get_url(self, *, bucket: str, key: str, expires_in: int = 900, filename: str | None = None) -> str:
         """Сформировать URL для скачивания объекта из S3."""
         ensure_bucket()
         s3 = get_s3_presign_client()
+        params = {"Bucket": bucket, "Key": key}
+        if filename:
+            from urllib.parse import quote
+            safe_filename = quote(filename.encode("utf-8"))
+            params["ResponseContentDisposition"] = f"attachment; filename*=UTF-8''{safe_filename}"
+            
+        return s3.generate_presigned_url(
+            "get_object",
+            Params=params,
+            ExpiresIn=expires_in,
+        )
+
+    def generate_internal_presigned_get_url(self, *, bucket: str, key: str, expires_in: int = 900) -> str:
+        """Сформировать внутренний URL (доступен только из Docker) для скачивания объекта OnlyOffice сервером."""
+        ensure_bucket()
+        from src.modules.files.storage import get_s3_client
+        s3 = get_s3_client()
         return s3.generate_presigned_url(
             "get_object",
             Params={"Bucket": bucket, "Key": key},

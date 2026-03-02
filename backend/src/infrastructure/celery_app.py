@@ -1,7 +1,17 @@
 from celery import Celery
 from celery.schedules import crontab
+import sentry_sdk
+from sentry_sdk.integrations.celery import CeleryIntegration
 
 from src.config import settings
+
+if settings.ENABLE_SENTRY and settings.SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        environment=str(settings.ENVIRONMENT),
+        integrations=[CeleryIntegration()],
+        traces_sample_rate=0.1,
+    )
 
 celery = Celery(
     "crm_platform",
@@ -39,6 +49,10 @@ celery.conf.update(
         "docs-retention-cleanup-daily": {
             "task": "docs_cleanup_old_versions",
             "schedule": crontab(hour=3, minute=20),
+        },
+        "docs-cleanup-stale-files-daily": {
+            "task": "docs_cleanup_stale_files",
+            "schedule": crontab(hour=4, minute=0),
         },
         "create-monthly-partition": {
             "task": "create_monthly_partition",

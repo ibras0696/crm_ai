@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
 
+import httpx
 import jwt
 
 from src.config import settings
@@ -89,10 +90,54 @@ class OnlyOfficeDocumentEditorProvider:
             return jwt.decode(str(token), self._state_secret(), algorithms=["HS256"])
         except Exception as exc:
             raise DocsModuleError(
-                code="ONLYOFFICE_STATE_INVALID",
-                message="Некорректный state callback",
-                status_code=401,
+                code="ONLYOFFICE_SIGNATURE_INVALID",
+                message="Некорректная подпись callback от OnlyOffice",
+                status_code=403,
             ) from exc
+
+    async def convert_to_pdf(self, *, file_url: str, file_type: str) -> bytes:
+        """Сконвертировать файл в PDF через ConvertService.ashx OnlyOffice."""
+        self.ensure_configured()
+        
+        convert_url = f"{self.document_server_url}/ConvertService.ashx"
+        payload = {
+            "async": False,
+            "filetype": str(file_type).replace(".", "").lower(),
+            "key": str(int(datetime.now(UTC).timestamp())),
+            "outputtype": "pdf",
+            "url": file_url,
+        }
+        
+        if self.jwt_secret:
+            token = jwt.encode(payload, self.jwt_secret, algorithm="HS256")
+            payload["token"] = token
+            
+        timeout_s = float(getattr(settings, "DOCS_ONLYOFFICE_REQUEST_TIMEOUT_S", 60.0) or 60.0)
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_s), follow_redirects=True) as client:
+            response = await client.post(
+                convert_url, 
+                json=payload, 
+                headers={"Accept": "application/json"}
+            )
+            response.raise_for_status()
+            data = response.json()
+            
+            if data.get("error"):
+                raise DocsModuleError(
+                    code="ONLYOFFICE_CONVERT_ERROR",
+                    message=f"Ошибка конвертации OnlyOffice: {data.get('error')}"
+                )
+                
+            file_url = data.get("fileUrl")
+            if not file_url:
+                raise DocsModuleError(
+                    code="ONLYOFFICE_CONVERT_ERROR", 
+                    message="OnlyOffice не вернул ссылку на сконвертированный файл"
+                )
+                
+            pdf_resp = await client.get(file_url)
+            pdf_resp.raise_for_status()
+            return bytes(pdf_resp.content)
 
     def build_open_docx_payload(
         self,

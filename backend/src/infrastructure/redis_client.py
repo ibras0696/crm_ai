@@ -32,3 +32,6 @@ class RedisClient:
 async def ping_with_timeout(client: aioredis.Redis, timeout_s: float = 2.0) -> Any:
     return await asyncio.wait_for(client.ping(), timeout=timeout_s)
 
+# Global synchronous redis client wrapper for background tasks and services
+redis_client = RedisClient(settings.REDIS_URL)
+

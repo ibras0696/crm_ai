@@ -25,6 +25,7 @@ import {
   Sparkles,
   MessageSquareDashed,
   X,
+  Languages,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -82,6 +83,7 @@ export default function AIPage() {
   const [currentChatId, setCurrentChatId] = useState<string>('')
   const [loadingChats, setLoadingChats] = useState(false)
   const [historyMobileOpen, setHistoryMobileOpen] = useState(false)
+  const [language, setLanguage] = useState<'ru' | 'ce' | 'en'>('ru')
 
   const [contextSources, setContextSources] = useState<{ kb_pages: AIContextSourcePage[]; tables: AIContextSourceTable[] }>({ kb_pages: [], tables: [] })
   const [contextTableFolders, setContextTableFolders] = useState<FolderInfo[]>([])
@@ -210,6 +212,7 @@ export default function AIPage() {
         context_options: contextOptions,
         ui_intent: uiIntent?.type,
         ui_intent_params: uiIntent?.params,
+        language: language,
       })
       if (r.data.ok && r.data.data) {
         const d = r.data.data
@@ -347,6 +350,19 @@ export default function AIPage() {
                     tableFolders={contextTableFolders}
                     tableFolderById={contextTableFolderById}
                   />
+                  <div className="relative group">
+                    <button className="h-8 flex items-center gap-1.5 px-2 rounded-md border border-border bg-card hover:bg-secondary transition-colors text-sm">
+                      <Languages className="h-4 w-4" />
+                      <span className="hidden sm:inline">
+                        {language === 'ru' ? 'Русский' : language === 'ce' ? 'Нохчийн' : 'English'}
+                      </span>
+                    </button>
+                    <div className="absolute top-full left-0 mt-1 w-36 bg-popover border border-border shadow-lg rounded-md overflow-hidden z-[60] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all">
+                      <button onClick={() => setLanguage('ru')} className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary ${language === 'ru' ? 'font-medium bg-secondary/50' : ''}`}>Русский</button>
+                      <button onClick={() => setLanguage('ce')} className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary ${language === 'ce' ? 'font-medium bg-secondary/50' : ''}`}>Нохчийн</button>
+                      <button onClick={() => setLanguage('en')} className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary ${language === 'en' ? 'font-medium bg-secondary/50' : ''}`}>English</button>
+                    </div>
+                  </div>
                 </div>
                 <button
                   onClick={handleNewChat}

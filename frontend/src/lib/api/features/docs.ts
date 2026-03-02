@@ -143,6 +143,7 @@ export const docsApi = {
   updateFolder: (folderId: string, payload: { name?: string; parent_id?: string | null; position?: number }) =>
     api.patch<ApiResponse<DocsFolder>>(`/docs/folders/${folderId}`, payload),
   deleteFolder: (folderId: string) => api.delete<ApiResponse<null>>(`/docs/folders/${folderId}`),
+  deleteFile: (fileId: string) => api.delete<ApiResponse<null>>(`/docs/files/${fileId}`),
   initUpload: (payload: InitUploadPayload) => api.post<ApiResponse<InitUploadResult>>('/docs/files/init-upload', payload),
   createEmptyFile: (payload: CreateEmptyFilePayload) => api.post<ApiResponse<DocsFile>>('/docs/files/create-empty', payload),
   finishUpload: (payload: { file_id: string; size_bytes: number; sha256?: string }) =>
@@ -163,5 +164,6 @@ export const docsApi = {
   getAIGenerationJob: (jobId: string) =>
     api.get<ApiResponse<DocsAIGenerationJob>>(`/docs/files/ai/jobs/${jobId}`),
   getDownload: (fileId: string) => api.get<ApiResponse<{ url: string; expires_in: number }>>(`/docs/files/${fileId}/download`),
+  exportPdf: (fileId: string) => api.get<ApiResponse<{ url: string; expires_in: number, filename?: string }>>(`/docs/files/${fileId}/export-pdf`),
   getUsage: () => api.get<ApiResponse<DocsUsageInfo>>('/docs/usage'),
 }

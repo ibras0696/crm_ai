@@ -13,7 +13,6 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"  # development|staging|production
 
     # Feature flags
-    ENABLE_AI: bool = True
     ENABLE_SENTRY: bool = False
     ENABLE_METRICS: bool = True
     ENABLE_RATE_LIMIT: bool = True
@@ -35,25 +34,36 @@ class Settings(BaseSettings):
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "application/vnd.ms-excel",
     ]
-    # Docs module security pipeline
+    # --------------------------------------------------------------------------
+    # Docs Module Security & Pipeline
+    # --------------------------------------------------------------------------
     DOCS_AV_MODE: str = "mock_clean"  # mock_clean | clamav
     DOCS_CLAMAV_HOST: str = "clamav"
     DOCS_CLAMAV_PORT: int = 3310
     DOCS_CLAMAV_TIMEOUT_S: float = 10.0
     DOCS_SCAN_CHUNK_SIZE_KB: int = 256
     DOCS_TEXT_SAVE_RPM: int = 20
+    
+    # --- OnlyOffice Document Server ---
     DOCS_ONLYOFFICE_ENABLED: bool = False
     DOCS_ONLYOFFICE_DOCUMENT_SERVER_URL: str = ""
+    DOCS_ONLYOFFICE_DOCUMENT_SERVER_INTERNAL_URL: str = "http://onlyoffice:80"
     DOCS_ONLYOFFICE_JWT_SECRET: str = ""
     DOCS_ONLYOFFICE_CALLBACK_URL: str = "http://api:8000/api/v1/docs/integrations/onlyoffice/callback"
     DOCS_ONLYOFFICE_EDITOR_LANG: str = "ru"
     DOCS_ONLYOFFICE_REQUEST_TIMEOUT_S: float = 20.0
+    
+    # --- AI Document Generation ---
     DOCS_AI_GENERATION_ENABLED: bool = True
     DOCS_AI_MAX_PROMPT_CHARS: int = 12000
     DOCS_AI_MAX_CHARS_TXT: int = 60000
     DOCS_AI_MAX_CHARS_DOCX: int = 80000
     DOCS_AI_MAX_CHARS_PDF: int = 70000
     DOCS_AI_RESERVED_BYTES_BASE: int = 262144
+    
+    # --------------------------------------------------------------------------
+    # Retention & Cleanup
+    # --------------------------------------------------------------------------
     DOCS_RETENTION_DAYS: int = 0
     DOCS_RETENTION_KEEP_LATEST: int = 5
     DOCS_RETENTION_BATCH_SIZE: int = 200
@@ -233,7 +243,8 @@ class Settings(BaseSettings):
     SUPERADMIN_LOCK_BASE_S: int = 30
     SUPERADMIN_LOCK_MAX_S: int = 1800
 
-    # AI (Timeweb Agent / OpenAI-compatible)
+    # --- AI (Timeweb Agent / OpenAI-compatible) ---
+    ENABLE_AI: bool = True
     OPENAI_API_KEY: str = ""
     OPENAI_BEARER_TOKEN: str = ""
     OPENAI_MODEL: str = "gpt-4.1"
@@ -254,7 +265,7 @@ class Settings(BaseSettings):
     AI_PROVIDER_MODE: str = "openai_compatible"  # openai_compatible | timeweb_native
     AI_ENFORCE_EXACT_USAGE: bool = True
     AI_SEND_SYSTEM_PROMPT_ONCE_PER_CHAT: bool = True
-    AI_PROVIDER_TIMEOUT_S: float = 90.0
+    AI_PROVIDER_TIMEOUT_S: float = 60.0
     AI_SYSTEM_PROMPT: str = "You are an AI assistant for the CRM platform. Reply in Russian."
 
     @model_validator(mode="after")

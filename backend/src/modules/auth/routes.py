@@ -11,8 +11,12 @@ from src.modules.auth.schemas import (
     TokenResponse,
     UpdateMeRequest,
     UserResponse,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
 )
 from src.modules.auth.service import AuthService
+from src.infrastructure.cache import CacheService
+from src.infrastructure.redis_client import redis_client
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -95,10 +99,19 @@ async def logout(request: Request, response: Response, body: RefreshRequest | No
 
 @router.get("/me", response_model=ApiResponse[UserResponse])
 async def me(current_user: CurrentUser = Depends(get_current_user)):
+    cache = CacheService(redis_client)
+    cache_key = f"user_profile:{current_user.user_id}"
+    cached = await cache.get(cache_key)
+    if cached:
+        return ApiResponse(data=cached)
+
     user = await _auth_service.get_user(current_user.user_id)
     if not user:
         raise NotFoundError("User")
-    return ApiResponse(data=UserResponse.model_validate(user))
+    
+    response_data = UserResponse.model_validate(user).model_dump(mode="json")
+    await cache.set(cache_key, response_data, ttl=300)
+    return ApiResponse(data=response_data)
 
 
 @router.patch("/me", response_model=ApiResponse[UserResponse])
@@ -106,4 +119,25 @@ async def update_me(body: UpdateMeRequest, current_user: CurrentUser = Depends(g
     user = await _auth_service.update_user(current_user.user_id, body)
     if not user:
         raise NotFoundError("User")
+        
+    cache = CacheService(redis_client)
+    cache_key = f"user_profile:{current_user.user_id}"
+    await cache.delete(cache_key)
+    
     return ApiResponse(data=UserResponse.model_validate(user))
+
+
+@router.post("/forgot-password", response_model=ApiResponse)
+async def forgot_password(body: ForgotPasswordRequest):
+    # Always return success to prevent user enum
+    await _auth_service.request_password_reset(body.email)
+    return ApiResponse(data=None)
+
+
+@router.post("/reset-password", response_model=ApiResponse)
+async def reset_password(body: ResetPasswordRequest):
+    success = await _auth_service.reset_password(body.token, body.new_password)
+    from src.common.exceptions import BadRequestError
+    if not success:
+        raise BadRequestError("Неверный токен или срок его действия истек")
+    return ApiResponse(data=None)

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { X, Loader2 } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import type { DocsFile } from '@/lib/api'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -11,7 +10,6 @@ interface DocxEditorPanelProps {
   documentServerUrl: string
   config: OnlyOfficeConfig
   loading: boolean
-  onClose: () => void
   onError: (msg: string) => void
   onFileUpdated: (file: DocsFile) => void
 }
@@ -21,7 +19,6 @@ export function DocxEditorPanel({
   documentServerUrl,
   config,
   loading,
-  onClose,
   onError,
 }: DocxEditorPanelProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -107,24 +104,14 @@ export function DocxEditorPanel({
   }, [scriptLoaded, scriptFailed, file.id, config, onError])
 
   return (
-    <div className="mt-6 border-t border-border pt-4">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h3 className="text-sm font-semibold">Редактор DOCX: {file.title || file.original_name}</h3>
-          <p className="text-xs text-muted-foreground">Сохранение происходит автоматически</p>
-        </div>
-        <Button variant="outline" size="sm" onClick={onClose}>
-          <X className="mr-1 h-4 w-4" /> Закрыть
-        </Button>
-      </div>
-
+    <div className="flex-1 flex flex-col min-h-0 w-full">
       {(loading || !scriptLoaded) && !scriptFailed ? (
-        <div className="flex h-[600px] w-full items-center justify-center rounded-md border border-dashed border-border">
+        <div className="flex h-full min-h-[500px] w-full items-center justify-center rounded-md border border-dashed border-border flex-1">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>
       ) : (
-        <div className="h-[600px] w-full rounded-md border border-input overflow-hidden">
-          <div ref={containerRef} className="h-full w-full" />
+        <div className="flex-1 h-full min-h-[500px] w-full rounded-md border border-input overflow-hidden flex flex-col">
+          <div ref={containerRef} className="flex-1 w-full" />
         </div>
       )}
     </div>

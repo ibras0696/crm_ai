@@ -51,9 +51,9 @@ x-backend-env: &backend_env
   AUTH_COOKIE_SAMESITE: ${AUTH_COOKIE_SAMESITE:-lax}
   AUTH_COOKIE_DOMAIN: ${AUTH_COOKIE_DOMAIN:-}
   AUTH_COOKIE_PATH: ${AUTH_COOKIE_PATH:-/}
-  
+
   DOCS_ONLYOFFICE_ENABLED: ${DOCS_ONLYOFFICE_ENABLED:-true}
-  DOCS_ONLYOFFICE_DOCUMENT_SERVER_URL: ${DOCS_ONLYOFFICE_DOCUMENT_SERVER_URL:-http://onlyoffice:80}
+  DOCS_ONLYOFFICE_DOCUMENT_SERVER_URL: ${DOCS_ONLYOFFICE_DOCUMENT_SERVER_URL:-http://localhost:8080}
   DOCS_ONLYOFFICE_JWT_SECRET: ${DOCS_ONLYOFFICE_JWT_SECRET:-your-jwt-secret-key-change-in-production}
   DOCS_ONLYOFFICE_CALLBACK_URL: ${DOCS_ONLYOFFICE_CALLBACK_URL:-http://api:8000/api/v1/docs/integrations/onlyoffice/callback}
   DOCS_ONLYOFFICE_EDITOR_LANG: ${DOCS_ONLYOFFICE_EDITOR_LANG:-ru}
@@ -71,7 +71,7 @@ services:
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      test: [ "CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB" ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -84,7 +84,7 @@ services:
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -101,7 +101,7 @@ services:
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      test: [ "CMD", "rabbitmq-diagnostics", "ping" ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -127,7 +127,7 @@ services:
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "kill -0 1"]
+      test: [ "CMD-SHELL", "kill -0 1" ]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -146,7 +146,7 @@ services:
       - onlyoffice_data:/var/www/onlyoffice/Data
       - onlyoffice_logs:/var/log/onlyoffice
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      test: [ "CMD", "curl", "-f", "http://localhost:80/" ]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -188,7 +188,7 @@ services:
       onlyoffice:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/readiness', timeout=2).read()"]
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/readiness', timeout=2).read()" ]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -218,7 +218,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    profiles: ["dev"]
+    profiles: [ "dev" ]
     command: celery -A src.infrastructure.celery_app worker --loglevel=info
     environment:
       <<: *backend_env
@@ -234,7 +234,7 @@ services:
       minio:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "celery -A src.infrastructure.celery_app inspect ping -t 5 | grep -q 'OK'"]
+      test: [ "CMD-SHELL", "celery -A src.infrastructure.celery_app inspect ping -t 5 | grep -q 'OK'" ]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -246,7 +246,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    profiles: ["dev"]
+    profiles: [ "dev" ]
     command: celery -A src.infrastructure.celery_app beat --loglevel=info
     environment:
       <<: *backend_env
@@ -262,7 +262,7 @@ services:
       minio:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "kill -0 1"]
+      test: [ "CMD-SHELL", "kill -0 1" ]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -281,7 +281,7 @@ services:
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=7d'
     ports:
-      - "9090:9090"
+      - "9110:9090"
 
   grafana:
     image: grafana/grafana:11.2.0

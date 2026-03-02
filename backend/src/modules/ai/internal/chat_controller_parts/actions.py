@@ -12,6 +12,7 @@ from src.modules.ai.service import (
     handle_create_records_action,
     handle_create_schedule_event_action,
     handle_create_table_action,
+    handle_edit_kb_page_action,
 )
 from src.modules.auth.dependencies import CurrentUser
 
@@ -22,6 +23,7 @@ ACTION_HANDLERS = {
     "create_records": handle_create_records_action,
     "create_schedule_event": handle_create_schedule_event_action,
     "create_kb_page": handle_create_kb_page_action,
+    "edit_kb_page": handle_edit_kb_page_action,
 }
 
 ACTION_ALIASES = {
@@ -34,6 +36,9 @@ ACTION_ALIASES = {
     "create_course": "create_kb_page",
     "create_kb_course": "create_kb_page",
     "create_knowledge_article": "create_kb_page",
+    "update_kb": "edit_kb_page",
+    "edit_knowledge_page": "edit_kb_page",
+    "update_kb_page": "edit_kb_page",
 }
 
 ACTION_ALLOWED_ROLES = {
@@ -43,6 +48,7 @@ ACTION_ALLOWED_ROLES = {
     "create_records": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value},
     "create_schedule_event": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.EMPLOYEE.value},
     "create_kb_page": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value},
+    "edit_kb_page": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value},
 }
 
 CONFIRMABLE_ACTIONS = {"create_columns", "create_records"}

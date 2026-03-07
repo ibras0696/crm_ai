@@ -1,9 +1,12 @@
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.common.enums import SubscriptionStatus
+from src.modules.billing.models import Plan
 from src.modules.files.models import File
+from src.modules.org.models import Organization, Subscription
 
 
 class FileRepository:
@@ -44,3 +47,29 @@ class FileRepository:
         """Delete file row."""
         await self.session.delete(file)
         await self.session.flush()
+
+    async def get_org_storage_bytes(self, org_id: uuid.UUID) -> int:
+        """Get current total storage size for organization."""
+        result = await self.session.execute(
+            select(func.coalesce(func.sum(File.size), 0)).where(File.org_id == org_id)
+        )
+        return int(result.scalar_one() or 0)
+
+    async def resolve_effective_plan(self, org_id: uuid.UUID) -> Plan | None:
+        """Resolve effective organization plan (subscription first, fallback to org.plan)."""
+        sub = (
+            await self.session.execute(select(Subscription).where(Subscription.org_id == org_id).limit(1))
+        ).scalar_one_or_none()
+        plan_name = None
+        if sub and sub.status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE}:
+            plan_name = str(getattr(sub.plan, "value", sub.plan))
+        if not plan_name:
+            org_plan = (
+                await self.session.execute(select(Organization.plan).where(Organization.id == org_id).limit(1))
+            ).scalar_one_or_none()
+            plan_name = str(getattr(org_plan, "value", org_plan or "free"))
+        return (
+            await self.session.execute(
+                select(Plan).where(Plan.name == plan_name.lower(), Plan.is_active.is_(True))
+            )
+        ).scalar_one_or_none()

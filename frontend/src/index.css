@@ -92,9 +92,11 @@
   * {
     @apply border-border;
   }
+
   html {
     color-scheme: var(--color-scheme, dark);
   }
+
   body {
     @apply bg-background text-foreground antialiased;
     font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
@@ -106,28 +108,115 @@
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--muted)) transparent;
   }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted));
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground));
+  }
+
   /* AI chat: force-wrap long "no-space" strings (tokens/urls/json) without breaking layout. */
   .ai-message {
     min-width: 0;
   }
+
   .ai-message :where(*) {
     max-width: 100%;
   }
+
   .ai-message :where(code, pre, a) {
     overflow-wrap: anywhere;
     word-break: break-word;
   }
+
   .ai-message :where(pre, code) {
     white-space: pre-wrap;
   }
+
   .gradient-primary {
     background: linear-gradient(135deg, hsl(210 100% 52%) 0%, hsl(280 65% 60%) 100%);
   }
+
+  .gradient-subtle {
+    background: linear-gradient(135deg, hsl(var(--background)) 0%, hsl(var(--muted)) 100%);
+  }
+
+  .gradient-mesh {
+    background-color: hsl(var(--background));
+    background-image:
+      radial-gradient(at 0% 0%, hsla(210, 100%, 52%, 0.15) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, hsla(280, 65%, 60%, 0.15) 0px, transparent 50%),
+      radial-gradient(at 100% 100%, hsla(330, 80%, 60%, 0.1) 0px, transparent 50%),
+      radial-gradient(at 0% 100%, hsla(160, 80%, 50%, 0.1) 0px, transparent 50%);
+  }
+
   .gradient-card {
     background: linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--secondary)) 100%);
   }
+
   .glass {
     backdrop-filter: blur(12px);
-    background: hsl(var(--background) / 0.8);
+    background: hsl(var(--background) / 0.6);
+    border: 1px solid hsl(var(--border) / 0.4);
+  }
+
+  .glass-card {
+    backdrop-filter: blur(8px);
+    background: hsl(var(--card) / 0.4);
+    border: 1px solid hsl(var(--border) / 0.3);
+  }
+
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400;
+  }
+
+  @keyframes float {
+    0% {
+      transform: translateY(0px);
+    }
+
+    50% {
+      transform: translateY(-10px);
+    }
+
+    100% {
+      transform: translateY(0px);
+    }
+  }
+
+  .animate-float {
+    animation: float 4s ease-in-out infinite;
+  }
+
+  @keyframes pulse-glow {
+
+    0%,
+    100% {
+      opacity: 0.5;
+      filter: blur(40px);
+    }
+
+    50% {
+      opacity: 0.8;
+      filter: blur(60px);
+    }
+  }
+
+  .animate-pulse-glow {
+    animation: pulse-glow 6s ease-in-out infinite;
   }
 }

@@ -1,5 +1,6 @@
 """S3/MinIO storage service."""
 import uuid
+from contextlib import suppress
 from typing import BinaryIO
 
 import boto3
@@ -9,11 +10,11 @@ from botocore.exceptions import ClientError
 from src.config import settings
 
 
-def get_s3_client():
+def _build_s3_client(*, endpoint_url: str):
     addressing_style = "path" if settings.S3_FORCE_PATH_STYLE else "auto"
     return boto3.client(
         "s3",
-        endpoint_url=settings.S3_ENDPOINT,
+        endpoint_url=endpoint_url,
         aws_access_key_id=settings.S3_ACCESS_KEY,
         aws_secret_access_key=settings.S3_SECRET_KEY,
         region_name=settings.S3_REGION,
@@ -23,12 +24,43 @@ def get_s3_client():
     )
 
 
+def get_s3_client():
+    return _build_s3_client(endpoint_url=settings.S3_ENDPOINT)
+
+
+def get_s3_presign_client():
+    public_endpoint = str(settings.S3_PUBLIC_ENDPOINT or "").strip()
+    return _build_s3_client(endpoint_url=public_endpoint or settings.S3_ENDPOINT)
+
+
+def _build_bucket_cors_rules() -> list[dict]:
+    origins = [str(item).strip() for item in (settings.CORS_ORIGINS or []) if str(item).strip()]
+    if not origins:
+        return []
+    return [
+        {
+            "AllowedOrigins": origins,
+            "AllowedMethods": ["GET", "PUT", "HEAD"],
+            "AllowedHeaders": ["*"],
+            "ExposeHeaders": ["ETag", "x-amz-request-id", "x-amz-id-2"],
+            "MaxAgeSeconds": 3600,
+        },
+    ]
+
+
 def ensure_bucket():
     s3 = get_s3_client()
     try:
         s3.head_bucket(Bucket=settings.S3_BUCKET)
     except ClientError:
         s3.create_bucket(Bucket=settings.S3_BUCKET)
+    cors_rules = _build_bucket_cors_rules()
+    if cors_rules:
+        with suppress(ClientError):
+            s3.put_bucket_cors(
+                Bucket=settings.S3_BUCKET,
+                CORSConfiguration={"CORSRules": cors_rules},
+            )
 
 
 def upload_file(data: bytes, content_type: str, org_id: uuid.UUID, original_name: str) -> tuple[str, str]:
@@ -69,7 +101,8 @@ def delete_file(s3_key: str, bucket: str):
 
 
 def generate_presigned_url(s3_key: str, bucket: str, expires_in: int = 3600) -> str:
-    s3 = get_s3_client()
+    ensure_bucket()
+    s3 = get_s3_presign_client()
     return s3.generate_presigned_url(
         "get_object",
         Params={"Bucket": bucket, "Key": s3_key},

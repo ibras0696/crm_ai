@@ -4,17 +4,15 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.common.enums import SubscriptionStatus
-from src.modules.billing.models import Plan
-from src.modules.org.models import Organization, Subscription
 from src.modules.tables.models import Column, FieldType, Table, TableFolder, TableView
+from src.modules.tables.errors import TablesModuleError
 from src.modules.tables.records import Record, RecordRepository
 from src.modules.tables.repository import (
     ColumnRepository,
     TableFolderRepository,
+    TablePlanLimitsRepository,
     TableRepository,
     TableViewRepository,
 )
@@ -32,13 +30,11 @@ from src.modules.tables.schemas import (
 )
 
 
-class TableServiceError(Exception):
+class TableServiceError(TablesModuleError):
     """Domain error for tables module operations."""
 
     def __init__(self, *, code: str, message: str):
-        super().__init__(message)
-        self.code = code
-        self.message = message
+        super().__init__(code=code, message=message, status_code=422)
 
 
 class TablesService:
@@ -46,10 +42,10 @@ class TablesService:
     MAX_FOLDER_DEPTH = 2
 
     def __init__(self, session: AsyncSession):
-        self.session = session
         self.folder_repo = TableFolderRepository(session)
         self.table_repo = TableRepository(session)
         self.column_repo = ColumnRepository(session)
+        self.plan_limits_repo = TablePlanLimitsRepository(session)
 
     async def create_folder(
         self,
@@ -258,7 +254,9 @@ class TablesService:
         if current_folder_id is not None and parent_id == current_folder_id:
             raise TableServiceError(code="INVALID_PARENT", message="Нельзя вложить папку в саму себя")
 
-        parent = await self.folder_repo.get_by_id(parent_id)
+        folders = await self.folder_repo.list_by_org(org_id)
+        folders_by_id = {folder.id: folder for folder in folders}
+        parent = folders_by_id.get(parent_id)
         if not parent or parent.org_id != org_id:
             raise TableServiceError(code="NOT_FOUND", message="Родительская папка не найдена")
 
@@ -268,7 +266,7 @@ class TablesService:
             while cursor.parent_id is not None:
                 if cursor.parent_id == current_folder_id:
                     raise TableServiceError(code="INVALID_PARENT", message="Нельзя вложить папку в своего потомка")
-                cursor = await self.folder_repo.get_by_id(cursor.parent_id)
+                cursor = folders_by_id.get(cursor.parent_id)
                 if cursor is None or cursor.org_id != org_id:
                     break
 
@@ -276,7 +274,7 @@ class TablesService:
         cursor = parent
         while cursor.parent_id is not None:
             depth += 1
-            cursor = await self.folder_repo.get_by_id(cursor.parent_id)
+            cursor = folders_by_id.get(cursor.parent_id)
             if cursor is None or cursor.org_id != org_id:
                 break
             if depth > self.MAX_FOLDER_DEPTH:
@@ -291,46 +289,25 @@ class TablesService:
         return parent_id
 
     async def _enforce_table_limit(self, *, org_id: uuid.UUID) -> None:
-        plan = await self._resolve_effective_plan(org_id=org_id)
+        plan = await self.plan_limits_repo.resolve_effective_plan(org_id=org_id)
         limit = int(getattr(plan, "max_tables", 0) or 0)
         if limit <= 0:
             return
-        current = int(
-            (await self.session.execute(select(func.count(Table.id)).where(Table.org_id == org_id))).scalar()
-            or 0
-        )
+        current = await self.table_repo.count_by_org(org_id)
         if current >= limit:
             raise TableServiceError(
                 code="TABLE_LIMIT_REACHED",
                 message=f"Достигнут лимит тарифа по таблицам ({limit})",
             )
 
-    async def _resolve_effective_plan(self, *, org_id: uuid.UUID) -> Plan | None:
-        sub_stmt = select(Subscription).where(Subscription.org_id == org_id).limit(1)
-        sub = (await self.session.execute(sub_stmt)).scalar_one_or_none()
-
-        plan_name = None
-        if sub and sub.status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE}:
-            plan_name = sub.plan.value
-        if not plan_name:
-            org_stmt = select(Organization.plan).where(Organization.id == org_id).limit(1)
-            org_plan = (await self.session.execute(org_stmt)).scalar_one_or_none()
-            plan_name = str(getattr(org_plan, "value", org_plan or "free")).lower()
-
-        if not plan_name:
-            return None
-        return (
-            await self.session.execute(select(Plan).where(Plan.name == plan_name, Plan.is_active.is_(True)))
-        ).scalar_one_or_none()
-
 
 class TableRecordsService:
     """Application service for table records CRUD and ordering."""
 
     def __init__(self, session: AsyncSession):
-        self.session = session
         self.table_repo = TableRepository(session)
         self.record_repo = RecordRepository(session)
+        self.plan_limits_repo = TablePlanLimitsRepository(session)
 
     async def create_record(
         self,
@@ -436,37 +413,16 @@ class TableRecordsService:
         return table
 
     async def _enforce_record_limit(self, *, org_id: uuid.UUID) -> None:
-        plan = await self._resolve_effective_plan(org_id=org_id)
+        plan = await self.plan_limits_repo.resolve_effective_plan(org_id=org_id)
         limit = int(getattr(plan, "max_records", 0) or 0)
         if limit <= 0:
             return
-        current = int(
-            (await self.session.execute(select(func.count(Record.id)).where(Record.org_id == org_id))).scalar()
-            or 0
-        )
+        current = await self.plan_limits_repo.count_records_by_org(org_id)
         if current >= limit:
             raise TableServiceError(
                 code="RECORD_LIMIT_REACHED",
                 message=f"Достигнут лимит тарифа по записям ({limit})",
             )
-
-    async def _resolve_effective_plan(self, *, org_id: uuid.UUID) -> Plan | None:
-        sub_stmt = select(Subscription).where(Subscription.org_id == org_id).limit(1)
-        sub = (await self.session.execute(sub_stmt)).scalar_one_or_none()
-
-        plan_name = None
-        if sub and sub.status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE}:
-            plan_name = sub.plan.value
-        if not plan_name:
-            org_stmt = select(Organization.plan).where(Organization.id == org_id).limit(1)
-            org_plan = (await self.session.execute(org_stmt)).scalar_one_or_none()
-            plan_name = str(getattr(org_plan, "value", org_plan or "free")).lower()
-
-        if not plan_name:
-            return None
-        return (
-            await self.session.execute(select(Plan).where(Plan.name == plan_name, Plan.is_active.is_(True)))
-        ).scalar_one_or_none()
 
 
 class TableViewsService:

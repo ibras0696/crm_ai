@@ -1,8 +1,9 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 
 from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.models import AIUsageLog
@@ -173,7 +174,7 @@ async def test_superadmin_ai_quick_actions_reset_usage_and_kill_switch(client: A
                 completion_tokens=50,
                 total_tokens=150,
                 message_preview="quick-actions-test",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         await uow.commit()
@@ -215,3 +216,239 @@ async def test_superadmin_ai_quick_actions_reset_usage_and_kill_switch(client: A
     )
     assert enable.status_code == 200
     assert enable.json()["data"]["ai_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_superadmin_can_set_subscription_period_by_days(client: AsyncClient):
+    sa = await _login_sa(client)
+    _, org_id = await _register_owner(client, org_name="Timed Subscription Org")
+
+    resp = await client.patch(
+        f"/api/v1/superadmin/orgs/{org_id}/subscription",
+        json={"plan": "team", "period_days": 30},
+        headers=_h(sa),
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    data = body["data"]
+    assert data["plan"] == "team"
+    assert data["status"] == "active"
+    assert data["current_period_start"] is not None
+    assert data["current_period_end"] is not None
+
+    detail = await client.get(f"/api/v1/superadmin/orgs/{org_id}", headers=_h(sa))
+    assert detail.status_code == 200
+    sub = detail.json()["data"]["subscription"]
+    assert sub is not None
+    assert sub["plan"] == "team"
+    assert sub["status"] == "active"
+    assert sub["current_period_end"] is not None
+
+
+@pytest.mark.asyncio
+async def test_superadmin_set_subscription_period_validation(client: AsyncClient):
+    sa = await _login_sa(client)
+    _, org_id = await _register_owner(client, org_name="Timed Subscription Validation Org")
+
+    both = await client.patch(
+        f"/api/v1/superadmin/orgs/{org_id}/subscription",
+        json={
+            "plan": "team",
+            "period_days": 30,
+            "current_period_end": (datetime.now(UTC) + timedelta(days=45)).isoformat(),
+        },
+        headers=_h(sa),
+    )
+    assert both.status_code == 422
+
+    past = await client.patch(
+        f"/api/v1/superadmin/orgs/{org_id}/subscription",
+        json={
+            "plan": "team",
+            "current_period_end": (datetime.now(UTC) - timedelta(days=1)).isoformat(),
+        },
+        headers=_h(sa),
+    )
+    assert past.status_code == 200
+    assert past.json()["ok"] is False
+    assert past.json()["error"]["code"] == "INVALID_PERIOD"
+
+
+@pytest.mark.asyncio
+async def test_superadmin_can_manage_billing_config_plans_and_token_packages(client: AsyncClient):
+    sa = await _login_sa(client)
+    owner_token, owner_org_id = await _register_owner(client, org_name="Billing Org")
+
+    from src.modules.billing.seed import upsert_default_plans, upsert_default_token_packages
+    from src.modules.billing.models import TokenPackage
+
+    async with UnitOfWork() as uow:
+        await upsert_default_plans(uow.session)
+        await upsert_default_token_packages(uow.session)
+        pkg = (
+            await uow.session.execute(
+                select(TokenPackage).where(TokenPackage.code == "pack_50k")
+            )
+        ).scalars().first()
+        assert pkg is not None
+        pkg.price_rub_cents = 0
+        await uow.commit()
+
+    # Seed one purchase to validate superadmin purchases table.
+    purchased = await client.post(
+        "/api/v1/billing/tokens/purchase",
+        json={"package_code": "pack_50k"},
+        headers=_h(owner_token),
+    )
+    assert purchased.status_code == 200
+    assert purchased.json()["ok"] is True
+
+    cfg = await client.get("/api/v1/superadmin/billing/config", headers=_h(sa))
+    assert cfg.status_code == 200
+    assert cfg.json()["ok"] is True
+    data = cfg.json()["data"]
+    assert any(p["name"] == "free" for p in data["plans"])
+    assert any(p["code"] == "pack_50k" for p in data["token_packages"])
+    assert any(p["code"] == "pack_50k" and p["button_text"] == "Перейти к оплате" for p in data["token_packages"])
+    assert "yookassa" in data
+    assert "recent_purchases" in data
+    assert any(p["org_id"] == owner_org_id for p in data["recent_purchases"])
+
+    upd_plan = await client.patch(
+        "/api/v1/superadmin/billing/plans/team",
+        json={"price_monthly": 159000, "ai_tokens_per_day": 250000, "max_tables": 120},
+        headers=_h(sa),
+    )
+    assert upd_plan.status_code == 200
+    assert upd_plan.json()["ok"] is True
+    assert upd_plan.json()["data"]["price_monthly"] == 159000
+    assert upd_plan.json()["data"]["ai_tokens_per_day"] == 250000
+    assert upd_plan.json()["data"]["max_tables"] == 120
+
+    upd_pkg = await client.put(
+        "/api/v1/superadmin/billing/token-packages/pack_100k",
+        json={
+            "display_name": "Пакет 100k PRO",
+            "badge_text": "Хит",
+            "description": "Подходит для активной команды.",
+            "button_text": "Оплатить пакет",
+            "payment_note": "Токены поступят сразу после оплаты.",
+            "price_caption": "17 ₽ за 1 000 токенов",
+            "tokens": 120000,
+            "price_rub_cents": 199000,
+            "sort_order": 22,
+        },
+        headers=_h(sa),
+    )
+    assert upd_pkg.status_code == 200
+    assert upd_pkg.json()["ok"] is True
+    assert upd_pkg.json()["data"]["tokens"] == 120000
+    assert upd_pkg.json()["data"]["price_rub_cents"] == 199000
+    assert upd_pkg.json()["data"]["badge_text"] == "Хит"
+    assert upd_pkg.json()["data"]["button_text"] == "Оплатить пакет"
+
+    del_pkg = await client.delete("/api/v1/superadmin/billing/token-packages/pack_100k", headers=_h(sa))
+    assert del_pkg.status_code == 200
+    assert del_pkg.json()["ok"] is True
+    assert del_pkg.json()["data"]["is_active"] is False
+
+    upd_yk = await client.patch(
+        "/api/v1/superadmin/billing/yookassa",
+        json={
+            "yookassa_shop_id": "shop-runtime-001",
+            "yookassa_secret_key": "runtime-secret-001",
+            "yookassa_return_url": "https://example.com/return",
+            "yookassa_webhook_url": "https://example.com/webhook",
+        },
+        headers=_h(sa),
+    )
+    assert upd_yk.status_code == 200
+    assert upd_yk.json()["ok"] is True
+    assert upd_yk.json()["data"]["shop_id"] == "shop-runtime-001"
+    assert upd_yk.json()["data"]["secret_key_configured"] is True
+    assert upd_yk.json()["data"]["secret_key_masked"].startswith("runt")
+
+    import httpx
+
+    class _MockResponse:
+        def __init__(self, status_code: int, payload: dict):
+            self.status_code = status_code
+            self._payload = payload
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                req = httpx.Request("GET", "https://api.yookassa.ru/v3/me")
+                resp = httpx.Response(self.status_code, request=req)
+                raise httpx.HTTPStatusError("mock error", request=req, response=resp)
+
+        def json(self):
+            return self._payload
+
+    class _MockAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url: str, auth=None):
+            assert url == "https://api.yookassa.ru/v3/me"
+            assert auth == ("shop-runtime-001", "runtime-secret-001")
+            return _MockResponse(200, {"account_id": "acc-1", "test": True})
+
+    from src.modules.superadmin.services import billing as sa_billing_module
+
+    old_async_client = sa_billing_module.httpx.AsyncClient
+    sa_billing_module.httpx.AsyncClient = _MockAsyncClient
+    try:
+        test_yk = await client.post("/api/v1/superadmin/billing/yookassa/test", headers=_h(sa))
+    finally:
+        sa_billing_module.httpx.AsyncClient = old_async_client
+
+    assert test_yk.status_code == 200
+    assert test_yk.json()["ok"] is True
+    assert test_yk.json()["data"]["connected"] is True
+    assert test_yk.json()["data"]["account_id"] == "acc-1"
+
+
+@pytest.mark.asyncio
+async def test_superadmin_can_update_ai_runtime_config(client: AsyncClient):
+    sa = await _login_sa(client)
+
+    before = await client.get("/api/v1/superadmin/ai-config", headers=_h(sa))
+    assert before.status_code == 200
+    assert before.json()["ok"] is True
+    assert "runtime" in before.json()["data"]
+
+    patch = await client.patch(
+        "/api/v1/superadmin/ai-config",
+        json={
+            "model": "gpt-4.1-mini",
+            "ai_base_url": "https://example.ai/v1",
+            "ai_provider_mode": "openai_compatible",
+            "ai_bearer_token": "runtime-secret-token",
+            "system_prompt": "Отвечай кратко и по делу.",
+            "temperature": 0.4,
+            "max_tokens_per_request": 1800,
+            "strict_actions": True,
+        },
+        headers=_h(sa),
+    )
+    assert patch.status_code == 200
+    assert patch.json()["ok"] is True
+    runtime = patch.json()["data"]["runtime"]
+    assert runtime["model"] == "gpt-4.1-mini"
+    assert runtime["ai_base_url"] == "https://example.ai/v1"
+    assert runtime["ai_provider_mode"] == "openai_compatible"
+    assert runtime["ai_bearer_token_configured"] is True
+    assert runtime["ai_bearer_token_masked"].startswith("runt")
+    assert runtime["system_prompt"] == "Отвечай кратко и по делу."
+    assert float(runtime["temperature"]) == 0.4
+    assert int(runtime["max_tokens_per_request"]) == 1800
+    assert runtime["strict_actions"] is True
+    assert patch.json()["data"]["audit"]
+    assert "ai_bearer_token" in (patch.json()["data"]["audit"][0]["changed_fields"] or [])

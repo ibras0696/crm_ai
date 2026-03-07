@@ -5,9 +5,11 @@ function asString(v: unknown): string {
 }
 
 export function DashboardPreview({ result }: { result: Record<string, unknown> }) {
+  if (result.ok !== true) return null
   const dashboard = (result.dashboard || {}) as Record<string, unknown>
   const items = Array.isArray(result.items) ? (result.items as Array<Record<string, unknown>>) : []
   if (asString(result.action) !== 'create_dashboard') return null
+  if (!asString(dashboard.id) && !asString(dashboard.name)) return null
 
   return (
     <div className="mt-3 rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-3">
@@ -17,7 +19,7 @@ export function DashboardPreview({ result }: { result: Record<string, unknown> }
           <p className="text-sm font-semibold">{asString(dashboard.name) || 'AI дашборд'}</p>
         </div>
         <Link to="/reports" className="text-xs rounded-md border border-border px-2 py-1 hover:bg-secondary">
-          Открыть в отчетах
+          Открыть в аналитике
         </Link>
       </div>
 
@@ -47,6 +49,7 @@ export function DashboardPreview({ result }: { result: Record<string, unknown> }
 }
 
 export function TablePreview({ result }: { result: Record<string, unknown> }) {
+  if (result.ok !== true) return null
   const action = asString(result.action)
   const table = (result.table || {}) as Record<string, unknown>
   const tableId = asString(table.id)
@@ -95,6 +98,7 @@ export function TablePreview({ result }: { result: Record<string, unknown> }) {
 }
 
 export function KnowledgePreview({ result }: { result: Record<string, unknown> }) {
+  if (result.ok !== true) return null
   if (asString(result.action) !== 'create_kb_page') return null
   const page = (result.page || {}) as Record<string, unknown>
   const pageTitle = asString(page.title)
@@ -113,6 +117,7 @@ export function KnowledgePreview({ result }: { result: Record<string, unknown> }
 }
 
 export function SchedulePreview({ result }: { result: Record<string, unknown> }) {
+  if (result.ok !== true) return null
   if (asString(result.action) !== 'create_schedule_event') return null
   const event = (result.event || {}) as Record<string, unknown>
   const title = asString(event.title)
@@ -130,3 +135,71 @@ export function SchedulePreview({ result }: { result: Record<string, unknown> })
   )
 }
 
+export function ActionErrorPreview({ result }: { result: Record<string, unknown> }) {
+  const ok = Boolean(result.ok)
+  if (ok) return null
+  const error = asString(result.error)
+  if (!error) return null
+  const mapped: Record<string, string> = {
+    table_limit_reached: 'Достигнут лимит тарифа по таблицам. Освободите лимит или повысьте тариф.',
+    record_limit_reached: 'Достигнут лимит тарифа по записям. Освободите лимит или повысьте тариф.',
+    knowledge_limit_reached: 'Достигнут лимит тарифа по базе знаний. Освободите лимит или повысьте тариф.',
+  }
+  const text = asString(result.message) || mapped[error] || 'Не удалось выполнить действие.'
+  return (
+    <div className="mt-3 rounded-xl border border-destructive/40 bg-destructive/10 p-3">
+      <p className="text-xs text-muted-foreground">Действие не выполнено</p>
+      <p className="text-sm text-destructive mt-1">{text}</p>
+    </div>
+  )
+}
+
+export function PendingActionPreview({
+  result,
+  onConfirm,
+  onCancel,
+  disabled = false,
+}: {
+  result: Record<string, unknown>
+  onConfirm: () => void
+  onCancel: () => void
+  disabled?: boolean
+}) {
+  if (result.needs_confirmation !== true) return null
+  const action = asString(result.action)
+  const rowsCount = Number(result.rows_count ?? 0) || 0
+  const colsCount = Number(result.columns_count ?? 0) || 0
+  const tableRef = asString(result.table_ref)
+  const titleByAction: Record<string, string> = {
+    create_records: 'Заполнение таблицы',
+    create_columns: 'Изменение структуры таблицы',
+  }
+  const title = titleByAction[action] || 'Изменение таблицы'
+  return (
+    <div className="mt-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3">
+      <p className="text-xs text-muted-foreground">Требуется подтверждение</p>
+      <p className="text-sm font-semibold mt-1">{title}</p>
+      <p className="text-xs text-muted-foreground mt-1">
+        {tableRef ? `Таблица: ${tableRef}. ` : ''}
+        {rowsCount > 0 ? `Строк: ${rowsCount}. ` : ''}
+        {colsCount > 0 ? `Колонок: ${colsCount}.` : ''}
+      </p>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button
+          onClick={onConfirm}
+          disabled={disabled}
+          className="h-8 rounded-md bg-primary text-white text-xs hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Подтвердить
+        </button>
+        <button
+          onClick={onCancel}
+          disabled={disabled}
+          className="h-8 rounded-md border border-border text-xs hover:bg-secondary disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Отменить
+        </button>
+      </div>
+    </div>
+  )
+}

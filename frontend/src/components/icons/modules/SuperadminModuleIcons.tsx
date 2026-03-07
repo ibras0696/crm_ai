@@ -89,6 +89,17 @@ export function SaAiIcon(props: IconProps) {
   )
 }
 
+export function SaBillingIcon(props: IconProps) {
+  return (
+    <BaseIcon {...props}>
+      <rect x="3" y="6" width="18" height="12" rx="2.5" />
+      <path d="M3 10h18" />
+      <circle cx="8" cy="14" r="1" />
+      <path d="M13 14h5" />
+    </BaseIcon>
+  )
+}
+
 export function SaProfileIcon(props: IconProps) {
   return (
     <BaseIcon {...props}>

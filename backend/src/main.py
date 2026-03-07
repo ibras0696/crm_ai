@@ -1,18 +1,21 @@
 import asyncio
 import logging
+import sentry_sdk
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from src.common.exceptions import AppError
+from src.common.exceptions import BaseAppError
 from src.config import settings
 from src.infrastructure.logging import setup_logging
 from src.infrastructure.metrics import setup_metrics
 from src.infrastructure.redis_client import RedisClient, ping_with_timeout
 from src.middleware.correlation import CorrelationIdMiddleware
-from src.middleware.error_handler import app_error_handler, generic_error_handler
+from src.middleware.error_handler import app_error_handler, generic_error_handler, http_error_handler, validation_error_handler
 from src.middleware.request_size_limit import RequestSizeLimitMiddleware
 
 setup_logging(debug=settings.DEBUG)
@@ -39,6 +42,13 @@ def create_app() -> FastAPI:
         openapi_url="/api/openapi.json" if docs_enabled else None,
         lifespan=lifespan,
     )
+
+    if settings.ENABLE_SENTRY and settings.SENTRY_DSN:
+        sentry_sdk.init(
+            dsn=settings.SENTRY_DSN,
+            environment=str(settings.ENVIRONMENT),
+            traces_sample_rate=0.1,  # Adjust as needed for prod
+        )
 
     if settings.ENABLE_METRICS:
         setup_metrics(application, version=settings.APP_VERSION)
@@ -68,23 +78,23 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Security headers
-    from src.middleware.security_headers import SecurityHeadersMiddleware
+    # Security headers (only in production — BaseHTTPMiddleware can break POST body in dev)
+    if is_prod:
+        from src.middleware.security_headers import SecurityHeadersMiddleware
 
-    application.add_middleware(SecurityHeadersMiddleware)
+        application.add_middleware(SecurityHeadersMiddleware)
 
-    # Rate limiter
-    if settings.ENABLE_RATE_LIMIT:
+    # Rate limiter (only in production — BaseHTTPMiddleware can break POST body in dev)
+    if settings.ENABLE_RATE_LIMIT and is_prod:
         from src.middleware.rate_limit import RateLimitMiddleware
 
         rpm = int(settings.RATE_LIMIT_REQUESTS_PER_MINUTE or 120)
-        # Dev UX: avoid false-positive 429 under local proxy/HMR noise.
-        if str(settings.ENVIRONMENT).lower() != "production":
-            rpm = max(rpm, 600)
         application.add_middleware(RateLimitMiddleware, requests_per_minute=rpm)
 
     # Error handlers
-    application.add_exception_handler(AppError, app_error_handler)
+    application.add_exception_handler(BaseAppError, app_error_handler)
+    application.add_exception_handler(RequestValidationError, validation_error_handler)
+    application.add_exception_handler(StarletteHTTPException, http_error_handler)
     application.add_exception_handler(Exception, generic_error_handler)
 
     from src.router import router as api_router

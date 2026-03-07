@@ -15,20 +15,9 @@
         up-prod down-prod restart-prod logs-prod \
         test lint lint-fix clean clean-all gen-prod-secrets
 
-COMPOSE := docker compose
+COMPOSE_DEV := docker compose --profile dev -f docker-compose.yml -f secrets.yml
+COMPOSE_PROD := docker compose --profile prod -f docker-compose.prod.yml -f secrets.yml
 SECRETS_FILE ?= secrets.yml
-
-COMPOSE_DEV_FILES := -f docker-compose.yml
-ifneq ($(wildcard $(SECRETS_FILE)),)
-COMPOSE_DEV_FILES += -f $(SECRETS_FILE)
-endif
-COMPOSE_DEV := $(COMPOSE) --profile dev $(COMPOSE_DEV_FILES)
-
-COMPOSE_PROD_FILES := -f docker-compose.prod.yml
-ifneq ($(wildcard $(SECRETS_FILE)),)
-COMPOSE_PROD_FILES += -f $(SECRETS_FILE)
-endif
-COMPOSE_PROD := $(COMPOSE) $(COMPOSE_PROD_FILES)
 
 help:
 	@echo ""
@@ -155,7 +144,7 @@ restart-prod:
 
 gen-prod-secrets:
 	@if [ -z "$(domain)" ]; then echo "[WARN] Укажи domain=example.com"; exit 1; fi
-	./scripts/generate_prod_secrets.sh "$(domain)"
+	bash ./scripts/generate_prod_secrets.sh "$(domain)"
 
 ## Migrations / Shell (dev)
 migrate:

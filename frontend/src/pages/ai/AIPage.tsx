@@ -5,17 +5,16 @@ import {
   type AIChatMessage,
   type AIChatSession,
   type AIContextOptions,
-  type AIContextEstimate,
   type AIContextSourcePage,
   type AIContextSourceTable,
   type FolderInfo,
   type TableInfo,
 } from '@/lib/api'
-import ContextControl from '@/components/ai/ContextControl'
 import CapabilitiesMenu from '@/components/ai/CapabilitiesMenu'
-import { DashboardPreview, KnowledgePreview, SchedulePreview, TablePreview } from '@/components/ai/ActionPreviews'
+import { ActionErrorPreview, DashboardPreview, KnowledgePreview, PendingActionPreview, SchedulePreview, TablePreview } from '@/components/ai/ActionPreviews'
 import StatsTab from '@/components/ai/StatsTab'
 import ChatHistory from '@/components/ai/ChatHistory'
+import ContextHoverPickers from '@/components/ai/ContextHoverPickers'
 import {
   Send,
   Bot,
@@ -26,7 +25,7 @@ import {
   Sparkles,
   MessageSquareDashed,
   X,
-  Layers,
+  Languages,
 } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -37,6 +36,7 @@ interface Message {
   role: 'user' | 'assistant'
   content: string
   tokens?: number
+  tokensEstimated?: boolean
   actionResult?: Record<string, unknown> | null
 }
 
@@ -83,27 +83,28 @@ export default function AIPage() {
   const [currentChatId, setCurrentChatId] = useState<string>('')
   const [loadingChats, setLoadingChats] = useState(false)
   const [historyMobileOpen, setHistoryMobileOpen] = useState(false)
-  const [contextOpen, setContextOpen] = useState(false)
+  const [language, setLanguage] = useState<'ru' | 'ce' | 'en'>('ru')
 
   const [contextSources, setContextSources] = useState<{ kb_pages: AIContextSourcePage[]; tables: AIContextSourceTable[] }>({ kb_pages: [], tables: [] })
   const [contextTableFolders, setContextTableFolders] = useState<FolderInfo[]>([])
   const [contextTableFolderById, setContextTableFolderById] = useState<Record<string, string | null>>({})
-  const [includeContext, setIncludeContext] = useState(true)
+  const [includeContext] = useState(true)
   const [contextOptions, setContextOptions] = useState<AIContextOptions>({
     include_kb: true,
     include_table_schema: true,
     include_table_records: true,
-    kb_limit: 30,
-    tables_limit: 20,
+    table_records_mode: 'sample',
+    kb_limit: 1000,
+    tables_limit: 5000,
     records_per_table: 5,
     selected_kb_page_ids: [],
     selected_table_ids: [],
   })
-  const [contextEstimate, setContextEstimate] = useState<AIContextEstimate | null>(null)
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [uiIntent, setUiIntent] = useState<{ type: string; params?: Record<string, unknown> } | null>(null)
+  const [pendingActionLocks, setPendingActionLocks] = useState<Record<string, boolean>>({})
   const clearUiIntent = useCallback(() => setUiIntent(null), [])
 
   const loadStatus = useCallback(async () => {
@@ -173,6 +174,7 @@ export default function AIPage() {
           role: m.role,
           content: m.content,
           tokens: m.token_count || undefined,
+          tokensEstimated: Boolean((m.meta as Record<string, unknown> | null)?.usage_estimated),
           actionResult: (m.meta?.action_result as Record<string, unknown> | undefined) || null,
         }))
         setMessages(rows)
@@ -181,20 +183,6 @@ export default function AIPage() {
       // ignore
     }
   }, [])
-
-  const loadContextEstimate = useCallback(async () => {
-    try {
-      const r = await aiApi.estimatePrompt({
-        include_context: includeContext,
-        context_options: contextOptions,
-        history: messages.slice(-10).map((m) => ({ role: m.role, content: m.content })),
-        user_message: input || '',
-      })
-      if (r.data.ok && r.data.data) setContextEstimate(r.data.data)
-    } catch {
-      // ignore
-    }
-  }, [includeContext, contextOptions, messages, input])
 
   useEffect(() => {
     loadStatus()
@@ -205,26 +193,26 @@ export default function AIPage() {
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
   useEffect(() => { loadChatMessages(currentChatId) }, [currentChatId, loadChatMessages])
 
-  useEffect(() => {
-    const t = setTimeout(() => loadContextEstimate(), 200)
-    return () => clearTimeout(t)
-  }, [loadContextEstimate])
-
   const handleSend = async (preset?: string) => {
     const messageText = (preset ?? input).trim()
     if (!messageText || sending) return
     setMessages((prev) => [...prev, { role: 'user', content: messageText }])
     setInput('')
     setSending(true)
+    const requestId =
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `ai-${Date.now()}-${Math.random().toString(16).slice(2)}`
     try {
       const r = await aiApi.chat({
         message: messageText,
-        history: messages.slice(-10).map((m) => ({ role: m.role, content: m.content })),
         include_context: includeContext,
         chat_id: currentChatId || undefined,
+        request_id: requestId,
         context_options: contextOptions,
         ui_intent: uiIntent?.type,
         ui_intent_params: uiIntent?.params,
+        language: language,
       })
       if (r.data.ok && r.data.data) {
         const d = r.data.data
@@ -234,13 +222,13 @@ export default function AIPage() {
             role: 'assistant',
             content: d.reply,
             tokens: Number((d.usage as { total_tokens?: number } | null)?.total_tokens || 0) || undefined,
+            tokensEstimated: Boolean((d.usage as { estimated?: boolean } | null)?.estimated),
             actionResult: d.action_result || null,
           },
         ])
         if (d.chat_id && d.chat_id !== currentChatId) setCurrentChatId(d.chat_id)
         await loadChats()
         loadStatus()
-        if (d.context_estimate) setContextEstimate(d.context_estimate)
         // Сбрасываем режим, если AI реально выполнил действие (чтобы не было случайных повторов).
         if ((d.action_result as any)?.ok) setUiIntent(null)
       } else {
@@ -287,6 +275,16 @@ export default function AIPage() {
     }
   }
 
+  const getMessageKey = (msg: Message, index: number) => `${msg.id || 'm'}-${index}`
+  const isPendingActionMessage = (msg: Message) => msg.actionResult?.needs_confirmation === true
+  const lastPendingIndex = (() => {
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const msg = messages[i]
+      if (msg && isPendingActionMessage(msg)) return i
+    }
+    return -1
+  })()
+
   return (
     <div className="flex flex-col h-[calc(100vh-8rem)] gap-0">
       <div className="flex items-center gap-3 pb-4 flex-wrap">
@@ -318,7 +316,7 @@ export default function AIPage() {
           ))}
         </div>
         <button
-          onClick={() => { loadStatus(); loadChats(); loadContextEstimate(); loadContextSources() }}
+          onClick={() => { loadStatus(); loadChats(); loadContextSources() }}
           disabled={loadingStatus}
           className="h-9 w-9 rounded-lg border border-border flex items-center justify-center hover:bg-secondary transition-colors disabled:opacity-50"
         >
@@ -344,13 +342,27 @@ export default function AIPage() {
                   >
                     <History className="h-4 w-4" />
                   </button>
-                  <button
-                    onClick={() => setContextOpen(true)}
-                    className="h-8 w-8 rounded-md border border-border flex items-center justify-center hover:bg-secondary transition-colors"
-                    title="Контекст"
-                  >
-                    <Layers className="h-4 w-4" />
-                  </button>
+                  <ContextHoverPickers
+                    includeContext={includeContext}
+                    contextOptions={contextOptions}
+                    setContextOptions={(updater) => setContextOptions(updater)}
+                    contextSources={contextSources}
+                    tableFolders={contextTableFolders}
+                    tableFolderById={contextTableFolderById}
+                  />
+                  <div className="relative group">
+                    <button className="h-8 flex items-center gap-1.5 px-2 rounded-md border border-border bg-card hover:bg-secondary transition-colors text-sm">
+                      <Languages className="h-4 w-4" />
+                      <span className="hidden sm:inline">
+                        {language === 'ru' ? 'Русский' : language === 'ce' ? 'Нохчийн' : 'English'}
+                      </span>
+                    </button>
+                    <div className="absolute top-full left-0 mt-1 w-36 bg-popover border border-border shadow-lg rounded-md overflow-hidden z-[60] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all">
+                      <button onClick={() => setLanguage('ru')} className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary ${language === 'ru' ? 'font-medium bg-secondary/50' : ''}`}>Русский</button>
+                      <button onClick={() => setLanguage('ce')} className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary ${language === 'ce' ? 'font-medium bg-secondary/50' : ''}`}>Нохчийн</button>
+                      <button onClick={() => setLanguage('en')} className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary ${language === 'en' ? 'font-medium bg-secondary/50' : ''}`}>English</button>
+                    </div>
+                  </div>
                 </div>
                 <button
                   onClick={handleNewChat}
@@ -380,7 +392,7 @@ export default function AIPage() {
               ) : (
                 <div className="flex-1 overflow-y-auto p-4 space-y-4">
                   {messages.map((msg, i) => (
-                    <div key={`${msg.id || 'm'}-${i}`} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                    <div key={getMessageKey(msg, i)} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
                       <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-primary text-white' : 'bg-secondary'}`}>
                         {msg.role === 'user' ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                       </div>
@@ -392,13 +404,38 @@ export default function AIPage() {
                             <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
                           </div>
                         )}
-                        {msg.tokens && <p className={`text-xs mt-2 ${msg.role === 'user' ? 'text-white/60' : 'text-muted-foreground'}`}>{msg.tokens} токенов</p>}
+                        {msg.tokens && (
+                          <p className={`text-xs mt-2 ${msg.role === 'user' ? 'text-white/60' : 'text-muted-foreground'}`}>
+                            {msg.tokensEstimated ? `≈ ${msg.tokens} токенов (оценка)` : `${msg.tokens} токенов`}
+                          </p>
+                        )}
                         {msg.actionResult && (
                           <>
                             <TablePreview result={msg.actionResult} />
                             <DashboardPreview result={msg.actionResult} />
                             <SchedulePreview result={msg.actionResult} />
                             <KnowledgePreview result={msg.actionResult} />
+                            <PendingActionPreview
+                              result={msg.actionResult}
+                              disabled={
+                                sending
+                                || i !== lastPendingIndex
+                                || pendingActionLocks[getMessageKey(msg, i)] === true
+                              }
+                              onConfirm={() => {
+                                const key = getMessageKey(msg, i)
+                                if (pendingActionLocks[key] || sending || i !== lastPendingIndex) return
+                                setPendingActionLocks((prev) => ({ ...prev, [key]: true }))
+                                void handleSend('подтверждаю')
+                              }}
+                              onCancel={() => {
+                                const key = getMessageKey(msg, i)
+                                if (pendingActionLocks[key] || sending || i !== lastPendingIndex) return
+                                setPendingActionLocks((prev) => ({ ...prev, [key]: true }))
+                                void handleSend('отмена')
+                              }}
+                            />
+                            <ActionErrorPreview result={msg.actionResult} />
                           </>
                         )}
                       </div>
@@ -496,20 +533,6 @@ export default function AIPage() {
               onClose={() => setHistoryMobileOpen(false)}
             />
           )}
-
-          <ContextControl
-            showSummary={false}
-            open={contextOpen}
-            onOpenChange={setContextOpen}
-            includeContext={includeContext}
-            setIncludeContext={setIncludeContext}
-            contextOptions={contextOptions}
-            setContextOptions={(updater) => setContextOptions(updater)}
-            contextEstimate={contextEstimate}
-            contextSources={contextSources}
-            tableFolders={contextTableFolders}
-            tableFolderById={contextTableFolderById}
-          />
         </>
       )}
     </div>

@@ -1,4 +1,5 @@
-﻿import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+﻿import { type ReactNode, useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { isAxiosError } from 'axios'
 import { knowledgeApi, type KBPageInfo } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Plus, Trash2, ChevronRight, ChevronDown, FileText, FolderOpen, X, Save, Edit3, Search, Bold, Italic, Code, Heading1, Heading2, Heading3, List, ListOrdered, Link, Quote, Minus, Eye, EyeOff, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
@@ -9,6 +10,7 @@ interface KBPage {
   content: string
   parent_id: string | null
   slug: string
+  position: number
   created_at: string
   updated_at?: string
 }
@@ -20,38 +22,131 @@ function normalizePage(p: KBPageInfo): KBPage {
     content: p.content ?? '',
     parent_id: p.parent_id,
     slug: p.slug,
+    position: p.position,
     created_at: p.created_at,
     updated_at: p.updated_at || p.created_at,
   }
 }
 
 function buildTree(pages: KBPage[], parentId: string | null = null): KBPage[] {
-  return pages.filter(p => p.parent_id === parentId)
+  return pages
+    .filter(p => p.parent_id === parentId)
+    .sort((a, b) => {
+      const posDiff = a.position - b.position
+      if (posDiff !== 0) return posDiff
+      return a.title.localeCompare(b.title, 'ru')
+    })
 }
 
-function TreeNode({ page, pages, selected, onSelect, onDelete, depth = 0 }: {
+function collectDescendants(pages: KBPage[], rootId: string): Set<string> {
+  const descendants = new Set<string>()
+  const queue = [rootId]
+  while (queue.length > 0) {
+    const current = queue.shift()
+    if (!current) continue
+    for (const page of pages) {
+      if (page.parent_id === current && !descendants.has(page.id)) {
+        descendants.add(page.id)
+        queue.push(page.id)
+      }
+    }
+  }
+  return descendants
+}
+
+function TreeNode({ page, pages, selected, onSelect, onDelete, onMove, draggedPageId, dropTargetId, onDragStartPage, onDragEndPage, onDropTargetChange, depth = 0 }: {
   page: KBPage; pages: KBPage[]; selected: string | null
-  onSelect: (p: KBPage) => void; onDelete: (id: string) => void; depth?: number
+  onSelect: (p: KBPage) => void
+  onDelete: (id: string) => void
+  onMove: (pageId: string, parentId: string | null) => Promise<void>
+  draggedPageId: string | null
+  dropTargetId: string | null
+  onDragStartPage: (pageId: string) => void
+  onDragEndPage: () => void
+  onDropTargetChange: (pageId: string | null) => void
+  depth?: number
 }) {
   const [open, setOpen] = useState(true)
   const children = buildTree(pages, page.id)
   const isSelected = selected === page.id
+  const isDragging = draggedPageId === page.id
+  const isDropActive = dropTargetId === page.id
   return (
     <div>
-      <div className={`flex items-center gap-1 px-2 py-1.5 rounded-lg cursor-pointer group transition-colors ${isSelected ? 'bg-primary/10 text-primary' : 'hover:bg-secondary/50'}`}
-        style={{ paddingLeft: `${8 + depth * 16}px` }}>
-        <button onClick={() => setOpen(o => !o)} className="h-4 w-4 flex items-center justify-center text-muted-foreground shrink-0">
+      <div
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.effectAllowed = 'move'
+          e.dataTransfer.setData('text/plain', page.id)
+          onDragStartPage(page.id)
+        }}
+        onDragEnd={() => {
+          onDropTargetChange(null)
+          onDragEndPage()
+        }}
+        onDragOver={(e) => {
+          if (!draggedPageId || draggedPageId === page.id) return
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+          onDropTargetChange(page.id)
+        }}
+        onDragLeave={() => {
+          if (dropTargetId === page.id) onDropTargetChange(null)
+        }}
+        onDrop={async (e) => {
+          e.preventDefault()
+          if (!draggedPageId || draggedPageId === page.id) return
+          await onMove(draggedPageId, page.id)
+          onDropTargetChange(null)
+        }}
+        onClick={() => onSelect(page)}
+        className={`flex cursor-grab items-center gap-1 px-2 py-1.5 rounded-lg group transition-colors border ${isSelected ? 'bg-primary/10 text-primary border-primary/20' : 'hover:bg-secondary/50 border-transparent'} ${isDragging ? 'opacity-50' : ''} ${isDropActive ? 'bg-primary/10 border-primary/40' : ''}`}
+        style={{ paddingLeft: `${8 + depth * 16}px` }}
+      >
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            setOpen(o => !o)
+          }}
+          className="h-4 w-4 flex items-center justify-center text-muted-foreground shrink-0"
+          draggable={false}
+        >
           {children.length > 0 ? (open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />) : <span className="h-3.5 w-3.5" />}
         </button>
-        <span onClick={() => onSelect(page)} className="flex-1 flex items-center gap-1.5 text-sm min-w-0">
+        <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-sm active:cursor-grabbing">
           {children.length > 0 ? <FolderOpen className="h-3.5 w-3.5 shrink-0 opacity-60" /> : <FileText className="h-3.5 w-3.5 shrink-0 opacity-60" />}
           <span className="truncate">{page.title}</span>
-        </span>
-        <button onClick={() => onDelete(page.id)} className="h-5 w-5 flex items-center justify-center opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all shrink-0">
+        </div>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation()
+            onDelete(page.id)
+          }}
+          className="h-5 w-5 flex items-center justify-center opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all shrink-0"
+          draggable={false}
+        >
           <Trash2 className="h-3 w-3" />
         </button>
       </div>
-      {open && children.map(child => <TreeNode key={child.id} page={child} pages={pages} selected={selected} onSelect={onSelect} onDelete={onDelete} depth={depth + 1} />)}
+      {open && children.map(child => (
+        <TreeNode
+          key={child.id}
+          page={child}
+          pages={pages}
+          selected={selected}
+          onSelect={onSelect}
+          onDelete={onDelete}
+          onMove={onMove}
+          draggedPageId={draggedPageId}
+          dropTargetId={dropTargetId}
+          onDragStartPage={onDragStartPage}
+          onDragEndPage={onDragEndPage}
+          onDropTargetChange={onDropTargetChange}
+          depth={depth + 1}
+        />
+      ))}
     </div>
   )
 }
@@ -67,12 +162,33 @@ export default function KnowledgePage() {
   const [newForm, setNewForm] = useState({ title: '', content: '', parent_id: '' })
   const [search, setSearch] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [errorText, setErrorText] = useState('')
+  const [draggedPageId, setDraggedPageId] = useState<string | null>(null)
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null)
+
+  const getErrorMessage = (error: unknown, fallback: string): string => {
+    if (isAxiosError(error)) {
+      const code = error.response?.data?.error?.code
+      const message = error.response?.data?.error?.message
+      if (typeof message === 'string' && message.trim()) return message
+      if (code === 'KNOWLEDGE_LIMIT_REACHED') {
+        return 'Достигнут лимит тарифа по базе знаний. Удалите лишние записи или повысьте тариф.'
+      }
+    }
+    return fallback
+  }
 
   const load = useCallback(async () => {
     try {
       const r = await knowledgeApi.list()
-      if (r.data.ok && r.data.data) setPages(r.data.data.map(normalizePage))
-    } catch { /* ignore */ }
+      if (r.data.ok && r.data.data) {
+        setPages(r.data.data.map(normalizePage))
+      } else {
+        setErrorText(r.data.error?.message || 'Не удалось загрузить страницы базы знаний')
+      }
+    } catch (e) {
+      setErrorText(getErrorMessage(e, 'Не удалось загрузить страницы базы знаний'))
+    }
     setLoading(false)
   }, [])
 
@@ -84,6 +200,7 @@ export default function KnowledgePage() {
 
   const handleSave = async () => {
     if (!selected) return
+    setErrorText('')
     setSaving(true)
     try {
       const r = await knowledgeApi.update(selected.id, draft)
@@ -92,13 +209,18 @@ export default function KnowledgePage() {
         setPages(prev => prev.map(p => p.id === updated.id ? updated : p))
         setSelected(updated)
         setEditing(false)
+      } else {
+        setErrorText(r.data.error?.message || 'Не удалось сохранить страницу')
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      setErrorText(getErrorMessage(e, 'Не удалось сохранить страницу'))
+    }
     setSaving(false)
   }
 
   const handleCreate = async () => {
     if (!newForm.title.trim()) return
+    setErrorText('')
     setSaving(true)
     try {
       const r = await knowledgeApi.create({ ...newForm, parent_id: newForm.parent_id || undefined })
@@ -109,17 +231,63 @@ export default function KnowledgePage() {
         setDraft({ title: created.title, content: created.content })
         setShowNew(false)
         setNewForm({ title: '', content: '', parent_id: '' })
+      } else {
+        setErrorText(r.data.error?.message || 'Не удалось создать страницу')
       }
-    } catch { /* ignore */ }
+    } catch (e) {
+      setErrorText(getErrorMessage(e, 'Не удалось создать страницу'))
+    }
     setSaving(false)
   }
 
   const handleDelete = async (id: string) => {
+    setErrorText('')
     try {
       await knowledgeApi.delete(id)
       setPages(prev => prev.filter(p => p.id !== id))
       if (selected?.id === id) setSelected(null)
-    } catch { /* ignore */ }
+    } catch (e) {
+      setErrorText(getErrorMessage(e, 'Не удалось удалить страницу'))
+    }
+  }
+
+  const handleMove = async (pageId: string, parentId: string | null) => {
+    const page = pages.find(p => p.id === pageId)
+    if (!page) {
+      setDraggedPageId(null)
+      setDropTargetId(null)
+      return
+    }
+    if (page.parent_id === parentId) {
+      setDraggedPageId(null)
+      setDropTargetId(null)
+      return
+    }
+    const descendants = collectDescendants(pages, pageId)
+    if (parentId === pageId || (parentId && descendants.has(parentId))) {
+      setErrorText('Нельзя переместить страницу внутрь своей дочерней ветки.')
+      setDraggedPageId(null)
+      setDropTargetId(null)
+      return
+    }
+    setErrorText('')
+    try {
+      const response = await knowledgeApi.update(pageId, { parent_id: parentId })
+      if (response.data.ok && response.data.data) {
+        const updated = normalizePage(response.data.data)
+        setPages(prev => prev.map(p => (p.id === pageId ? updated : p)))
+        if (selected?.id === pageId) {
+          setSelected(updated)
+        }
+      } else {
+        setErrorText(response.data.error?.message || 'Не удалось переместить страницу')
+      }
+    } catch (e) {
+      setErrorText(getErrorMessage(e, 'Не удалось переместить страницу'))
+    } finally {
+      setDraggedPageId(null)
+      setDropTargetId(null)
+    }
   }
 
   const filtered = search ? pages.filter(p => p.title.toLowerCase().includes(search.toLowerCase()) || (p.content || '').toLowerCase().includes(search.toLowerCase())) : pages
@@ -148,6 +316,28 @@ export default function KnowledgePage() {
           </div>
         </div>
         <div className="flex-1 overflow-y-auto p-2 min-w-[256px]">
+          {draggedPageId && (
+            <div
+              onDragOver={(e) => {
+                e.preventDefault()
+                setDropTargetId('__root__')
+              }}
+              onDragLeave={() => {
+                if (dropTargetId === '__root__') setDropTargetId(null)
+              }}
+              onDrop={async (e) => {
+                e.preventDefault()
+                await handleMove(draggedPageId, null)
+              }}
+              className={`mb-2 rounded-lg border border-dashed px-3 py-2 text-xs transition-colors ${
+                dropTargetId === '__root__'
+                  ? 'border-primary/50 bg-primary/10 text-primary'
+                  : 'border-border text-muted-foreground'
+              }`}
+            >
+              Перетащите сюда, чтобы вынести страницу в корень
+            </div>
+          )}
           {loading ? (
             <div className="flex items-center justify-center py-8"><div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>
           ) : roots.length === 0 ? (
@@ -157,23 +347,28 @@ export default function KnowledgePage() {
               <button onClick={() => setShowNew(true)} className="mt-2 text-primary hover:underline">Создать первую</button>
             </div>
           ) : (
-            roots.map(p => <TreeNode key={p.id} page={p} pages={filtered} selected={selected?.id || null} onSelect={handleSelect} onDelete={handleDelete} />)
+            roots.map(p => (
+              <TreeNode
+                key={p.id}
+                page={p}
+                pages={filtered}
+                selected={selected?.id || null}
+                onSelect={handleSelect}
+                onDelete={handleDelete}
+                onMove={handleMove}
+                draggedPageId={draggedPageId}
+                dropTargetId={dropTargetId}
+                onDragStartPage={setDraggedPageId}
+                onDragEndPage={() => setDraggedPageId(null)}
+                onDropTargetChange={setDropTargetId}
+              />
+            ))
           )}
         </div>
       </div>
 
       {/* Editor */}
       <div className="flex-1 flex flex-col min-w-0 relative">
-        {/* Sidebar toggle when collapsed */}
-        {!sidebarOpen && (
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="absolute left-2 top-3 z-10 h-8 w-8 rounded-md border border-border bg-card flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors shadow-sm"
-            title="Показать панель"
-          >
-            <PanelLeftOpen className="h-4 w-4" />
-          </button>
-        )}
         {selected ? (
           <KBEditor
             selected={selected}
@@ -183,12 +378,35 @@ export default function KnowledgePage() {
             setDraft={setDraft}
             saving={saving}
             onSave={handleSave}
+            errorText={errorText}
+            sidebarToggle={!sidebarOpen ? (
+              <button
+                onClick={() => setSidebarOpen(true)}
+                className="h-8 w-8 rounded-md border border-border bg-background flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+                title="Показать панель"
+              >
+                <PanelLeftOpen className="h-4 w-4" />
+              </button>
+            ) : null}
           />
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-3">
+          <div className="flex-1 flex flex-col">
+            {!sidebarOpen && (
+              <div className="flex items-center gap-2 px-5 py-3 border-b border-border">
+                <button
+                  onClick={() => setSidebarOpen(true)}
+                  className="h-8 w-8 rounded-md border border-border bg-background flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
+                  title="Показать панель"
+                >
+                  <PanelLeftOpen className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+            <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-3">
             <FileText className="h-16 w-16 opacity-20" />
             <p className="text-lg font-medium">Выберите страницу</p>
             <p className="text-sm">или создайте новую нажав <span className="text-primary">+</span></p>
+            </div>
           </div>
         )}
       </div>
@@ -257,7 +475,7 @@ function renderMarkdown(md: string): string {
 }
 
 /* ─── KBEditor component ─── */
-function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSave }: {
+function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSave, errorText, sidebarToggle }: {
   selected: KBPage
   editing: boolean
   setEditing: (v: boolean) => void
@@ -265,6 +483,8 @@ function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSa
   setDraft: (fn: (d: { title: string; content: string }) => { title: string; content: string }) => void
   saving: boolean
   onSave: () => Promise<void>
+  errorText: string
+  sidebarToggle?: ReactNode
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [preview, setPreview] = useState(false)
@@ -310,6 +530,7 @@ function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSa
   return (
     <>
       <div className="flex items-center gap-3 px-5 py-3 border-b border-border">
+        {sidebarToggle}
         {editing ? (
           <input value={draft.title} onChange={e => setDraft(d => ({ ...d, title: e.target.value }))} className="flex-1 text-lg font-bold bg-transparent outline-none border-b border-primary/50 pb-0.5" />
         ) : (
@@ -354,15 +575,20 @@ function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSa
             className="w-full h-full min-h-[400px] text-sm bg-transparent outline-none resize-none font-mono leading-relaxed"
             placeholder="Содержимое страницы (поддерживается Markdown)..." />
         ) : (
-          <div className="prose prose-sm dark:prose-invert max-w-none">
+          <div className="prose prose-sm dark:prose-invert max-w-none prose-p:break-words prose-li:break-words prose-pre:whitespace-pre-wrap prose-pre:break-words">
             {(editing ? draft.content : selected.content) ? (
-              <div className="text-sm leading-relaxed text-foreground" dangerouslySetInnerHTML={{ __html: renderedHtml }} />
+              <div className="text-sm leading-relaxed text-foreground break-words [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: renderedHtml }} />
             ) : (
               <p className="text-muted-foreground italic">Страница пуста. Нажмите «Редактировать» для добавления содержимого.</p>
             )}
           </div>
         )}
       </div>
+      {errorText && (
+        <div className="mx-5 mb-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {errorText}
+        </div>
+      )}
       <div className="px-5 py-2 border-t border-border text-xs text-muted-foreground flex items-center justify-between">
         <span>Изменено: {new Date(selected.updated_at || selected.created_at).toLocaleString('ru')}</span>
         {editing && <span className="text-primary/60">Markdown поддерживается</span>}

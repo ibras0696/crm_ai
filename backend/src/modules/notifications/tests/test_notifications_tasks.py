@@ -9,12 +9,12 @@ def test_send_invite_email_skips_when_validation_fails(monkeypatch):
         assert invite_token == "inv-token"
         return False, "already_member"
 
-    def _mock_send_email_notification(*args, **kwargs):
+    def _mock_send_email_notification_impl(*args, **kwargs):
         sent["called"] = True
         return {"status": "sent"}
 
     monkeypatch.setattr(tasks, "_can_send_invite_email", _mock_can_send_invite_email)
-    monkeypatch.setattr(tasks, "send_email_notification", _mock_send_email_notification)
+    monkeypatch.setattr(tasks, "_send_email_notification_impl", _mock_send_email_notification_impl)
 
     result = tasks.send_invite_email(
         to_email="user@example.com",
@@ -35,7 +35,7 @@ def test_send_invite_email_sends_when_validation_passes(monkeypatch):
         assert invite_token == "inv-token"
         return True, "ok"
 
-    def _mock_send_email_notification(*, to_email: str, subject: str, body: str, kind: str = "generic"):
+    def _mock_send_email_notification_impl(*args, to_email: str, subject: str, body: str, kind: str = "generic"):
         sent["called"] += 1
         assert to_email == "user@example.com"
         assert "Приглашение в организацию" in subject
@@ -44,7 +44,7 @@ def test_send_invite_email_sends_when_validation_passes(monkeypatch):
         return {"status": "sent", "to": to_email}
 
     monkeypatch.setattr(tasks, "_can_send_invite_email", _mock_can_send_invite_email)
-    monkeypatch.setattr(tasks, "send_email_notification", _mock_send_email_notification)
+    monkeypatch.setattr(tasks, "_send_email_notification_impl", _mock_send_email_notification_impl)
 
     result = tasks.send_invite_email(
         to_email="user@example.com",

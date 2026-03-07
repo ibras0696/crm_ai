@@ -618,7 +618,7 @@ export default function SchedulePage() {
             {!form.all_day && (
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-muted-foreground">Дата начала</label>
+                  <label className="text-xs text-muted-foreground block mb-1">Дата начала</label>
                   <input
                     type="date"
                     min={todayIso()}
@@ -627,7 +627,7 @@ export default function SchedulePage() {
                       setForm(f => ({ ...f, start_at: withDate(f.start_at, e.target.value) }))
                       setFormError('')
                     }}
-                    className="w-full h-9 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary mt-1"
+                    className="w-full h-9 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary"
                   />
                 </div>
                 <TimeWheelField
@@ -639,13 +639,13 @@ export default function SchedulePage() {
                   }}
                 />
                 <div>
-                  <label className="text-xs text-muted-foreground">Дата конца</label>
+                  <label className="text-xs text-muted-foreground block mb-1">Дата конца</label>
                   <input
                     type="date"
                     min={splitDateTime(form.start_at).date || todayIso()}
                     value={splitDateTime(form.end_at).date}
                     onChange={e => setForm(f => ({ ...f, end_at: withDate(f.end_at || f.start_at, e.target.value) }))}
-                    className="w-full h-9 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary mt-1"
+                    className="w-full h-9 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary"
                   />
                 </div>
                 <TimeWheelField
@@ -764,7 +764,7 @@ export default function SchedulePage() {
             {!editForm.all_day && (
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-muted-foreground">Дата начала</label>
+                  <label className="text-xs text-muted-foreground block mb-1">Дата начала</label>
                   <input
                     type="date"
                     min={todayIso()}
@@ -773,7 +773,7 @@ export default function SchedulePage() {
                       setEditForm(f => ({ ...f, start_at: withDate(f.start_at, e.target.value) }))
                       setEditError('')
                     }}
-                    className="w-full h-9 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary mt-1"
+                    className="w-full h-9 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary"
                   />
                 </div>
                 <TimeWheelField
@@ -785,13 +785,13 @@ export default function SchedulePage() {
                   }}
                 />
                 <div>
-                  <label className="text-xs text-muted-foreground">Дата конца</label>
+                  <label className="text-xs text-muted-foreground block mb-1">Дата конца</label>
                   <input
                     type="date"
                     min={splitDateTime(editForm.start_at).date || todayIso()}
                     value={splitDateTime(editForm.end_at).date}
                     onChange={e => setEditForm(f => ({ ...f, end_at: withDate(f.end_at || f.start_at, e.target.value) }))}
-                    className="w-full h-9 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary mt-1"
+                    className="w-full h-9 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary"
                   />
                 </div>
                 <TimeWheelField

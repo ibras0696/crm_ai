@@ -2,6 +2,11 @@ import uuid
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+
+from src.infrastructure.uow import UnitOfWork
+from src.modules.ai.models import AIOrgLimit, AIUserLimit
+from src.modules.billing.models import Plan
 
 
 def _headers(token: str) -> dict:
@@ -23,6 +28,33 @@ async def _register(client: AsyncClient, email: str | None = None, org_name: str
     )
     assert resp.status_code == 201
     return resp.json()["data"]
+
+
+async def _set_free_plan_members_limit(limit: int) -> None:
+    async with UnitOfWork() as uow:
+        free_plan = (
+            await uow.session.execute(select(Plan).where(Plan.name == "free", Plan.is_active.is_(True)))
+        ).scalar_one_or_none()
+        if free_plan is None:
+            free_plan = Plan(
+                name="free",
+                display_name="Бесплатный",
+                price_monthly=0,
+                price_yearly=0,
+                max_members=limit,
+                max_tables=10,
+                max_records=10000,
+                max_storage_mb=500,
+                has_ai=True,
+                ai_max_tokens_per_request=2000,
+                ai_tokens_per_day=20000,
+                ai_rpm_per_user=30,
+                is_active=True,
+            )
+            uow.session.add(free_plan)
+        else:
+            free_plan.max_members = limit
+        await uow.commit()
 
 
 @pytest.mark.asyncio
@@ -167,6 +199,59 @@ async def test_create_invite_forbidden_for_employee(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_create_invite_enforces_member_limit(client: AsyncClient):
+    owner_tokens = await _register(client, org_name="Invite Member Limit")
+    await _set_free_plan_members_limit(1)
+
+    resp = await client.post(
+        "/api/v1/orgs/invites",
+        json={"email": f"limit-{uuid.uuid4().hex[:8]}@example.com", "role": "employee"},
+        headers=_headers(owner_tokens["access_token"]),
+    )
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "MEMBER_LIMIT_REACHED"
+    await _set_free_plan_members_limit(10)
+
+
+@pytest.mark.asyncio
+async def test_register_with_invite_enforces_member_limit(client: AsyncClient):
+    owner_tokens = await _register(client, org_name="Invite Register Limit")
+    invite_email = f"invite-lim-{uuid.uuid4().hex[:8]}@example.com"
+
+    await _set_free_plan_members_limit(2)
+
+    inv = await client.post(
+        "/api/v1/orgs/invites",
+        json={"email": invite_email, "role": "employee"},
+        headers=_headers(owner_tokens["access_token"]),
+    )
+    assert inv.status_code == 201
+    invite_token = inv.json()["data"]["token"]
+
+    await _set_free_plan_members_limit(1)
+
+    reg = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": invite_email,
+            "password": "StrongPass123!",
+            "first_name": "Emp",
+            "last_name": "User",
+            "org_name": "ignored",
+            "accepted_privacy_policy": True,
+            "invite_token": invite_token,
+        },
+    )
+    assert reg.status_code == 422
+    body = reg.json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "MEMBER_LIMIT_REACHED"
+    await _set_free_plan_members_limit(10)
+
+
+@pytest.mark.asyncio
 async def test_register_cannot_self_assign_to_foreign_org(client: AsyncClient):
     # Create a foreign organization to attempt unauthorized join/escalation.
     foreign_owner_tokens = await _register(client, org_name="Foreign Org")
@@ -253,3 +338,51 @@ async def test_register_with_invite_cannot_override_invited_role(client: AsyncCl
         headers=_headers(invited_token),
     )
     assert forbidden.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_org_admin_can_manage_ai_limits(client: AsyncClient):
+    owner_tokens = await _register(client, org_name="AI Limits Org Admin")
+    owner_access = owner_tokens["access_token"]
+    members_resp = await client.get("/api/v1/orgs/members", headers=_headers(owner_access))
+    assert members_resp.status_code == 200
+    owner_user_id = members_resp.json()["data"][0]["user_id"]
+
+    initial = await client.get("/api/v1/orgs/ai/limits", headers=_headers(owner_access))
+    assert initial.status_code == 200
+    assert initial.json()["ok"] is True
+    assert "org_limits" in initial.json()["data"]
+
+    upd_org = await client.patch(
+        "/api/v1/orgs/ai/limits",
+        json={"daily_tokens_limit": 1111, "monthly_tokens_limit": 2222},
+        headers=_headers(owner_access),
+    )
+    assert upd_org.status_code == 200
+    body = upd_org.json()["data"]
+    assert int(body["org_limits"]["daily_tokens_limit"]) == 1111
+    assert int(body["org_limits"]["monthly_tokens_limit"]) == 2222
+
+    upd_user = await client.put(
+        f"/api/v1/orgs/ai/limits/users/{owner_user_id}",
+        json={"daily_tokens_limit": 333, "rpm_limit": 4},
+        headers=_headers(owner_access),
+    )
+    assert upd_user.status_code == 200
+    rows = upd_user.json()["data"]["users"]
+    me = next((x for x in rows if str(x["user_id"]) == str(owner_user_id)), None)
+    assert me is not None
+    assert int(me["daily_tokens_limit"]) == 333
+    assert int(me["rpm_limit"]) == 4
+
+    async with UnitOfWork() as uow:
+        org_limit = (await uow.session.execute(select(AIOrgLimit))).scalars().first()
+        assert org_limit is not None
+        assert int(org_limit.daily_tokens_limit) == 1111
+        assert int(org_limit.monthly_tokens_limit) == 2222
+        user_limit = (
+            await uow.session.execute(select(AIUserLimit).where(AIUserLimit.user_id == uuid.UUID(owner_user_id)))
+        ).scalars().first()
+        assert user_limit is not None
+        assert int(user_limit.daily_tokens_limit) == 333
+        assert int(user_limit.rpm_limit) == 4

@@ -1,10 +1,14 @@
 import uuid
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.common.enums import SubscriptionStatus
+from src.modules.billing.models import Plan
+from src.modules.org.models import Organization, Subscription
 from src.modules.tables.models import Column, Table, TableFolder, TableView
+from src.modules.tables.records import Record
 
 
 class TableFolderRepository:
@@ -101,6 +105,11 @@ class TableRepository:
         await self.session.delete(table)
         await self.session.flush()
 
+    async def count_by_org(self, org_id: uuid.UUID) -> int:
+        stmt = select(func.count(Table.id)).where(Table.org_id == org_id)
+        result = await self.session.execute(stmt)
+        return int(result.scalar() or 0)
+
 
 class ColumnRepository:
     def __init__(self, session: AsyncSession):
@@ -128,7 +137,6 @@ class ColumnRepository:
         await self.session.flush()
 
     async def get_max_position(self, table_id: uuid.UUID) -> int:
-        from sqlalchemy import func
         stmt = select(func.coalesce(func.max(Column.position), -1)).where(Column.table_id == table_id)
         result = await self.session.execute(stmt)
         return result.scalar() or 0
@@ -173,3 +181,34 @@ class TableViewRepository:
     async def delete(self, view: TableView) -> None:
         await self.session.delete(view)
         await self.session.flush()
+
+
+class TablePlanLimitsRepository:
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def count_records_by_org(self, org_id: uuid.UUID) -> int:
+        stmt = select(func.count(Record.id)).where(Record.org_id == org_id)
+        result = await self.session.execute(stmt)
+        return int(result.scalar() or 0)
+
+    async def resolve_effective_plan(self, *, org_id: uuid.UUID) -> Plan | None:
+        sub = (
+            await self.session.execute(select(Subscription).where(Subscription.org_id == org_id).limit(1))
+        ).scalar_one_or_none()
+
+        plan_name = None
+        if sub and sub.status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE}:
+            plan_name = str(getattr(sub.plan, "value", sub.plan))
+        if not plan_name:
+            org_plan = (
+                await self.session.execute(select(Organization.plan).where(Organization.id == org_id).limit(1))
+            ).scalar_one_or_none()
+            plan_name = str(getattr(org_plan, "value", org_plan or "free"))
+
+        if not plan_name:
+            return None
+
+        return (
+            await self.session.execute(select(Plan).where(Plan.name == plan_name.lower(), Plan.is_active.is_(True)))
+        ).scalar_one_or_none()

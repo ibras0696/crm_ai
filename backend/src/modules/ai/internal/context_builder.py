@@ -34,14 +34,22 @@ def context_flags(options: dict | None) -> dict[str, Any]:
     kb_ids = [str(x) for x in (src.get("selected_kb_page_ids") or []) if str(x).strip()]
     table_ids = [str(x) for x in (src.get("selected_table_ids") or []) if str(x).strip()]
     schedule_ids = [str(x) for x in (src.get("selected_schedule_event_ids") or []) if str(x).strip()]
+    table_records_mode_raw = str(src.get("table_records_mode", "sample") or "sample").strip().lower()
+    table_records_mode = "all" if table_records_mode_raw == "all" else "sample"
+    sample_records_per_table = max(1, min(int(src.get("records_per_table", 5)), 20))
+    # Режим "all" ограничиваем серверным потолком, чтобы не убить БД и prompt.
+    # Дальше все равно сработает max_context_tokens и обрезка контекста.
+    records_limit_per_table = 5000 if table_records_mode == "all" else sample_records_per_table
     return {
         "include_kb": bool(src.get("include_kb", True)),
         "include_table_schema": bool(src.get("include_table_schema", True)),
         "include_table_records": bool(src.get("include_table_records", True)),
         "include_schedule": bool(src.get("include_schedule", True)),
-        "kb_limit": max(1, min(int(src.get("kb_limit", 30)), 300)),
-        "tables_limit": max(1, min(int(src.get("tables_limit", 20)), 200)),
-        "records_per_table": max(1, min(int(src.get("records_per_table", 5)), 20)),
+        "kb_limit": max(1, min(int(src.get("kb_limit", 1000)), 5000)),
+        "tables_limit": max(1, min(int(src.get("tables_limit", 5000)), 10000)),
+        "table_records_mode": table_records_mode,
+        "records_per_table": records_limit_per_table,
+        "records_per_table_sample": sample_records_per_table,
         "schedule_days": max(1, min(int(src.get("schedule_days", 30)), 180)),
         "max_context_tokens": max(200, min(int(src.get("max_context_tokens", 2500)), 20000)),
         "selected_kb_page_ids": kb_ids,
@@ -89,6 +97,7 @@ async def _build_org_context_internal(
             "tables": flags["selected_table_ids"],
             "schedule_events": flags["selected_schedule_event_ids"],
         },
+        "table_records_mode": flags["table_records_mode"],
         "model_overhead_tokens": 280,
         "max_context_tokens": flags["max_context_tokens"],
         "used_context_tokens": 0,
@@ -102,6 +111,7 @@ async def _build_org_context_internal(
         async with UnitOfWork() as uow:
             if flags["include_kb"]:
                 kb_stmt = select(KBPage).where(KBPage.org_id == org_id, KBPage.is_published.is_(True))
+                kb_manual_scope = False
                 if flags["selected_kb_page_ids"]:
                     valid: list[uuid.UUID] = []
                     for raw in flags["selected_kb_page_ids"]:
@@ -111,8 +121,13 @@ async def _build_org_context_internal(
                             continue
                     if valid:
                         kb_stmt = kb_stmt.where(KBPage.id.in_(valid))
-                kb_stmt = kb_stmt.order_by(KBPage.position.asc()).limit(flags["kb_limit"])
-                kb_rows = (await uow.session.execute(kb_stmt)).scalars().all()
+                        kb_manual_scope = True
+                # Без явного выбора не тянем KB автоматически.
+                if kb_manual_scope:
+                    kb_stmt = kb_stmt.order_by(KBPage.position.asc())
+                    kb_rows = (await uow.session.execute(kb_stmt)).scalars().all()
+                else:
+                    kb_rows = []
                 if kb_rows:
                     kb_lines = [f"--- {p.title} ---\n{(p.content or '')[:500]}" for p in kb_rows]
                     kb_block = "\n".join(kb_lines)
@@ -126,6 +141,7 @@ async def _build_org_context_internal(
                 .where(Table.org_id == org_id, Table.is_archived.is_(False))
                 .options(selectinload(Table.columns))
             )
+            table_manual_scope = False
             if flags["selected_table_ids"]:
                 valid_tids: list[uuid.UUID] = []
                 for raw in flags["selected_table_ids"]:
@@ -135,8 +151,12 @@ async def _build_org_context_internal(
                         continue
                 if valid_tids:
                     tbl_stmt = tbl_stmt.where(Table.id.in_(valid_tids))
-            tbl_stmt = tbl_stmt.limit(flags["tables_limit"])
-            tables = (await uow.session.execute(tbl_stmt)).scalars().all()
+                    table_manual_scope = True
+            # Без явного выбора не тянем таблицы автоматически.
+            if table_manual_scope:
+                tables = (await uow.session.execute(tbl_stmt)).scalars().all()
+            else:
+                tables = []
 
             if tables and (flags["include_table_schema"] or flags["include_table_records"]):
                 parts.append("\n=== TABLES ===")

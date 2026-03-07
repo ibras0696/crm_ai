@@ -96,3 +96,65 @@ async def test_superadmin_table_records_and_export(client: AsyncClient):
     xlsx = await client.get(f"/api/v1/superadmin/orgs/{org_id}/tables/{table_id}/export/xlsx", headers=_h(sa))
     assert xlsx.status_code == 200
     assert "application/vnd.openxmlformats" in xlsx.headers.get("content-type", "")
+
+
+@pytest.mark.asyncio
+async def test_superadmin_tables_invalid_ids_are_safe_api_errors(client: AsyncClient):
+    sa = await _login_sa(client)
+
+    bad_list = await client.get("/api/v1/superadmin/orgs/not-a-uuid/tables", headers=_h(sa))
+    assert bad_list.status_code == 200
+    assert bad_list.json()["ok"] is False
+    assert bad_list.json()["error"]["code"] == "INVALID_ID"
+
+    bad_detail = await client.get(
+        "/api/v1/superadmin/orgs/not-a-uuid/tables/not-a-uuid",
+        headers=_h(sa),
+    )
+    assert bad_detail.status_code == 200
+    assert bad_detail.json()["ok"] is False
+    assert bad_detail.json()["error"]["code"] == "INVALID_ID"
+
+    bad_records = await client.get(
+        "/api/v1/superadmin/orgs/not-a-uuid/tables/not-a-uuid/records",
+        headers=_h(sa),
+    )
+    assert bad_records.status_code == 200
+    assert bad_records.json()["ok"] is False
+    assert bad_records.json()["error"]["code"] == "INVALID_ID"
+
+    bad_csv = await client.get(
+        "/api/v1/superadmin/orgs/not-a-uuid/tables/not-a-uuid/export/csv",
+        headers=_h(sa),
+    )
+    assert bad_csv.status_code == 200
+    assert bad_csv.json()["ok"] is False
+    assert bad_csv.json()["error"]["code"] == "INVALID_ID"
+
+    bad_xlsx = await client.get(
+        "/api/v1/superadmin/orgs/not-a-uuid/tables/not-a-uuid/export/xlsx",
+        headers=_h(sa),
+    )
+    assert bad_xlsx.status_code == 200
+    assert bad_xlsx.json()["ok"] is False
+    assert bad_xlsx.json()["error"]["code"] == "INVALID_ID"
+
+
+@pytest.mark.asyncio
+async def test_superadmin_tables_limit_validation(client: AsyncClient):
+    sa = await _login_sa(client)
+    owner_token, org_id = await _register_owner(client, org_name="Org Limits")
+    table_id, _ = await _create_table_with_data(client, owner_token, name="Tmp")
+    # list limit out of allowed range -> FastAPI query validation
+    too_large_list = await client.get(
+        f"/api/v1/superadmin/orgs/{org_id}/tables?limit=1000&offset=0",
+        headers=_h(sa),
+    )
+    assert too_large_list.status_code == 422
+
+    # records limit out of allowed range -> FastAPI query validation
+    too_large_records = await client.get(
+        f"/api/v1/superadmin/orgs/{org_id}/tables/{table_id}/records?limit=10000&offset=0",
+        headers=_h(sa),
+    )
+    assert too_large_records.status_code == 422

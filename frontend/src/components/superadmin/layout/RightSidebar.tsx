@@ -4,6 +4,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import {
   SaAiIcon,
   SaAuditIcon,
+  SaBillingIcon,
   SaDashboardIcon,
   SaOrganizationsIcon,
   SaProfileIcon,
@@ -12,7 +13,7 @@ import {
   SaUsersIcon,
 } from '@/components/icons/modules/SuperadminModuleIcons'
 
-type TabKey = 'dashboard' | 'orgs' | 'tables' | 'users' | 'audit' | 'ai' | 'profile'
+type TabKey = 'dashboard' | 'orgs' | 'tables' | 'users' | 'audit' | 'ai' | 'billing' | 'profile'
 
 type Props = {
   tab: TabKey
@@ -36,6 +37,7 @@ const TABS: TabDef[] = [
   { key: 'users', label: 'Пользователи', Icon: SaUsersIcon },
   { key: 'audit', label: 'Аудит', Icon: SaAuditIcon },
   { key: 'ai', label: 'AI', Icon: SaAiIcon },
+  { key: 'billing', label: 'Тарифы', Icon: SaBillingIcon },
   { key: 'profile', label: 'Профиль', Icon: SaProfileIcon },
 ]
 

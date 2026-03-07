@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.common.enums import InviteStatus, UserRole
+from src.modules.billing.models import Plan
 from src.modules.org.models import Invite, Membership, Organization, Subscription
 
 
@@ -75,6 +76,11 @@ class MembershipRepository:
             Membership.org_id == org_id,
             Membership.role == UserRole.OWNER,
         )
+        result = await self.session.execute(stmt)
+        return int(result.scalar_one() or 0)
+
+    async def count_org_members(self, org_id: uuid.UUID) -> int:
+        stmt = select(func.count(Membership.id)).where(Membership.org_id == org_id)
         result = await self.session.execute(stmt)
         return int(result.scalar_one() or 0)
 
@@ -154,3 +160,21 @@ class SubscriptionRepository:
         self.session.add(sub)
         await self.session.flush()
         return sub
+
+    async def get_effective_plan(self, org_id: uuid.UUID) -> Plan | None:
+        sub = await self.get_by_org(org_id)
+        plan_name = None
+        if sub is not None:
+            status = str(getattr(sub.status, "value", sub.status))
+            if status in {"active", "past_due"}:
+                plan_name = str(getattr(sub.plan, "value", sub.plan))
+
+        if not plan_name:
+            org_plan = (
+                await self.session.execute(select(Organization.plan).where(Organization.id == org_id).limit(1))
+            ).scalar_one_or_none()
+            plan_name = str(getattr(org_plan, "value", org_plan or "free"))
+
+        return (
+            await self.session.execute(select(Plan).where(Plan.name == plan_name.lower(), Plan.is_active.is_(True)))
+        ).scalar_one_or_none()

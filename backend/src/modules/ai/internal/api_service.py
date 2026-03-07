@@ -5,7 +5,6 @@ from __future__ import annotations
 Здесь нет SQL. Этот слой собирает данные в структуры, удобные для API/интерфейса.
 """
 
-import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -14,10 +13,10 @@ from src.config import settings
 from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.limits import is_org_ai_enabled, resolve_org_plan, resolve_plan_limits
 from src.modules.ai.models import AIChatMessage
+from src.modules.ai.internal.runtime_secrets import decrypt_runtime_secret
 from src.modules.ai.repository import AIRepository
+from src.modules.billing.token_wallet import get_token_balance_view
 from src.modules.ai.service import build_messages, build_org_context_for_user, estimate_tokens
-
-logger = logging.getLogger(__name__)
 
 
 async def build_ai_status(*, org_id: uuid.UUID) -> dict[str, Any]:
@@ -29,23 +28,22 @@ async def build_ai_status(*, org_id: uuid.UUID) -> dict[str, Any]:
     Returns:
         Словарь со статусом включенности, наличием credentials, планом, статистикой и лимитами.
     """
-    credentials_present = bool(settings.OPENAI_BEARER_TOKEN or settings.OPENAI_API_KEY)
     now = datetime.now(timezone.utc)
     day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
 
-    try:
-        async with UnitOfWork() as uow:
-            repo = AIRepository(uow.session)
-            org_ai_enabled = await is_org_ai_enabled(uow.session, org_id=org_id)
-            plan_tier = await resolve_org_plan(uow.session, org_id=org_id)
-            plan = plan_tier.value
-            plan_db = await repo.get_active_plan(name=plan)
+    async with UnitOfWork() as uow:
+        repo = AIRepository(uow.session)
+        runtime_secret = await repo.get_runtime_secret()
+        org_ai_enabled = await is_org_ai_enabled(uow.session, org_id=org_id)
+        plan_tier = await resolve_org_plan(uow.session, org_id=org_id)
+        plan = plan_tier.value
+        plan_db = await repo.get_active_plan(name=plan)
 
-            total = await repo.usage_stats(org_id=org_id)
-            today = await repo.usage_stats(org_id=org_id, since=day_start)
-    except Exception as exc:
-        logger.exception("ai_build_status_failed", exc_info=exc)
-        raise
+        total = await repo.usage_stats(org_id=org_id)
+        today = await repo.usage_stats(org_id=org_id, since=day_start)
+        wallet = await get_token_balance_view(uow.session, org_id=org_id)
+        runtime_token = decrypt_runtime_secret(runtime_secret.bearer_token_encrypted) if runtime_secret else ""
+        credentials_present = bool(runtime_token.strip() or settings.OPENAI_BEARER_TOKEN or settings.OPENAI_API_KEY)
 
     limits = resolve_plan_limits(plan_tier, plan_db)
 
@@ -74,6 +72,7 @@ async def build_ai_status(*, org_id: uuid.UUID) -> dict[str, Any]:
             "rpm_per_user": int(limits["rpm_per_user"]),
             "max_tokens_per_request": int(limits["max_tokens_per_request"]),
         },
+        "token_wallet": wallet,
     }
 
 
@@ -86,17 +85,13 @@ async def build_ai_usage_by_user(*, org_id: uuid.UUID) -> list[dict[str, Any]]:
     Returns:
         Список словарей: user_id, requests, tokens.
     """
-    try:
-        async with UnitOfWork() as uow:
-            repo = AIRepository(uow.session)
-            rows = await repo.usage_by_user(org_id=org_id)
-            return [
-                {"user_id": str(user_id) if user_id is not None else None, "requests": reqs, "tokens": tokens}
-                for user_id, reqs, tokens in rows
-            ]
-    except Exception as exc:
-        logger.exception("ai_build_usage_by_user_failed", exc_info=exc)
-        raise
+    async with UnitOfWork() as uow:
+        repo = AIRepository(uow.session)
+        rows = await repo.usage_by_user(org_id=org_id)
+        return [
+            {"user_id": str(user_id) if user_id is not None else None, "requests": reqs, "tokens": tokens}
+            for user_id, reqs, tokens in rows
+        ]
 
 
 async def build_chat_sessions(*, org_id: uuid.UUID, user_id: uuid.UUID, limit: int, offset: int) -> list[dict[str, Any]]:
@@ -111,23 +106,19 @@ async def build_chat_sessions(*, org_id: uuid.UUID, user_id: uuid.UUID, limit: i
     Returns:
         Список словарей с данными ChatSessionOut.
     """
-    try:
-        async with UnitOfWork() as uow:
-            repo = AIRepository(uow.session)
-            rows = await repo.list_sessions_with_last_preview(org_id=org_id, user_id=user_id, limit=limit, offset=offset)
-            return [
-                {
-                    "id": str(session_id),
-                    "title": title,
-                    "created_at": created_at,
-                    "updated_at": updated_at,
-                    "last_message_preview": (str(last_content)[:80] if last_content else None),
-                }
-                for session_id, title, created_at, updated_at, last_content in rows
-            ]
-    except Exception as exc:
-        logger.exception("ai_build_chat_sessions_failed", exc_info=exc)
-        raise
+    async with UnitOfWork() as uow:
+        repo = AIRepository(uow.session)
+        rows = await repo.list_sessions_with_last_preview(org_id=org_id, user_id=user_id, limit=limit, offset=offset)
+        return [
+            {
+                "id": str(session_id),
+                "title": title,
+                "created_at": created_at,
+                "updated_at": updated_at,
+                "last_message_preview": (str(last_content)[:80] if last_content else None),
+            }
+            for session_id, title, created_at, updated_at, last_content in rows
+        ]
 
 
 async def create_chat_session(*, org_id: uuid.UUID, user_id: uuid.UUID, title: str) -> dict[str, Any]:
@@ -141,21 +132,17 @@ async def create_chat_session(*, org_id: uuid.UUID, user_id: uuid.UUID, title: s
     Returns:
         Словарь с данными ChatSessionOut.
     """
-    try:
-        async with UnitOfWork() as uow:
-            repo = AIRepository(uow.session)
-            session = await repo.create_session(org_id=org_id, user_id=user_id, title=title)
-            await uow.commit()
-            return {
-                "id": str(session.id),
-                "title": session.title,
-                "created_at": session.created_at,
-                "updated_at": session.updated_at,
-                "last_message_preview": None,
-            }
-    except Exception as exc:
-        logger.exception("ai_create_chat_session_failed", exc_info=exc)
-        raise
+    async with UnitOfWork() as uow:
+        repo = AIRepository(uow.session)
+        session = await repo.create_session(org_id=org_id, user_id=user_id, title=title)
+        await uow.commit()
+        return {
+            "id": str(session.id),
+            "title": session.title,
+            "created_at": session.created_at,
+            "updated_at": session.updated_at,
+            "last_message_preview": None,
+        }
 
 
 async def delete_chat_session(*, org_id: uuid.UUID, user_id: uuid.UUID, chat_id: uuid.UUID) -> bool:
@@ -169,18 +156,14 @@ async def delete_chat_session(*, org_id: uuid.UUID, user_id: uuid.UUID, chat_id:
     Returns:
         True если удалили, иначе False.
     """
-    try:
-        async with UnitOfWork() as uow:
-            repo = AIRepository(uow.session)
-            session = await repo.get_session(org_id=org_id, user_id=user_id, session_id=chat_id)
-            if not session:
-                return False
-            await repo.delete_session(session)
-            await uow.commit()
-            return True
-    except Exception as exc:
-        logger.exception("ai_delete_chat_session_failed", exc_info=exc)
-        raise
+    async with UnitOfWork() as uow:
+        repo = AIRepository(uow.session)
+        session = await repo.get_session(org_id=org_id, user_id=user_id, session_id=chat_id)
+        if not session:
+            return False
+        await repo.delete_session(session)
+        await uow.commit()
+        return True
 
 
 async def build_chat_messages(
@@ -203,22 +186,18 @@ async def build_chat_messages(
     Returns:
         Список сообщений или None, если сессия не найдена/не принадлежит пользователю.
     """
-    try:
-        async with UnitOfWork() as uow:
-            repo = AIRepository(uow.session)
-            session = await repo.get_session(org_id=org_id, user_id=user_id, session_id=chat_id)
-            if not session:
-                return None
-            return await repo.list_messages(
-                org_id=org_id,
-                user_id=user_id,
-                session_id=chat_id,
-                limit=limit,
-                offset=offset,
-            )
-    except Exception as exc:
-        logger.exception("ai_build_chat_messages_failed", exc_info=exc)
-        raise
+    async with UnitOfWork() as uow:
+        repo = AIRepository(uow.session)
+        session = await repo.get_session(org_id=org_id, user_id=user_id, session_id=chat_id)
+        if not session:
+            return None
+        return await repo.list_messages(
+            org_id=org_id,
+            user_id=user_id,
+            session_id=chat_id,
+            limit=limit,
+            offset=offset,
+        )
 
 
 async def build_context_estimate(
@@ -295,32 +274,28 @@ async def build_context_sources(*, org_id: uuid.UUID) -> dict[str, Any]:
     Returns:
         Словарь со списками kb_pages/tables/schedule_events.
     """
-    try:
-        async with UnitOfWork() as uow:
-            repo = AIRepository(uow.session)
-            kb_pages = await repo.list_kb_pages(org_id=org_id, limit=300)
-            tables = await repo.list_tables_with_columns(org_id=org_id, limit=200)
-            schedule_events = await repo.list_schedule_events(org_id=org_id, limit=100)
-            return {
-                "kb_pages": [{"id": str(p.id), "title": p.title, "parent_id": str(p.parent_id) if p.parent_id else None} for p in kb_pages],
-                "tables": [
-                    {
-                        "id": str(t.id),
-                        "name": t.name,
-                        "columns": [{"id": str(c.id), "name": c.name} for c in sorted(t.columns, key=lambda x: x.position)],
-                    }
-                    for t in tables
-                ],
-                "schedule_events": [
-                    {
-                        "id": str(ev.id),
-                        "title": ev.title,
-                        "start_at": ev.start_at.isoformat() if ev.start_at else None,
-                        "recurrence": ev.recurrence,
-                    }
-                    for ev in schedule_events
-                ],
-            }
-    except Exception as exc:
-        logger.exception("ai_build_context_sources_failed", exc_info=exc)
-        raise
+    async with UnitOfWork() as uow:
+        repo = AIRepository(uow.session)
+        kb_pages = await repo.list_kb_pages(org_id=org_id, limit=300)
+        tables = await repo.list_tables_with_columns(org_id=org_id, limit=200)
+        schedule_events = await repo.list_schedule_events(org_id=org_id, limit=100)
+        return {
+            "kb_pages": [{"id": str(p.id), "title": p.title, "parent_id": str(p.parent_id) if p.parent_id else None} for p in kb_pages],
+            "tables": [
+                {
+                    "id": str(t.id),
+                    "name": t.name,
+                    "columns": [{"id": str(c.id), "name": c.name} for c in sorted(t.columns, key=lambda x: x.position)],
+                }
+                for t in tables
+            ],
+            "schedule_events": [
+                {
+                    "id": str(ev.id),
+                    "title": ev.title,
+                    "start_at": ev.start_at.isoformat() if ev.start_at else None,
+                    "recurrence": ev.recurrence,
+                }
+                for ev in schedule_events
+            ],
+        }

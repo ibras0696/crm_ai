@@ -13,13 +13,14 @@ import {
   SuperadminAuditView,
   SuperadminAuth,
   SuperadminDashboardView,
+  SuperadminBillingView,
   SuperadminProfileView,
   SuperadminRightSidebar,
   SuperadminTablesView,
   UsersListView,
 } from '@/components/superadmin'
 
-type TabKey = 'dashboard' | 'orgs' | 'tables' | 'users' | 'audit' | 'ai' | 'profile'
+type TabKey = 'dashboard' | 'orgs' | 'tables' | 'users' | 'audit' | 'ai' | 'billing' | 'profile'
 
 const EMPTY_DASHBOARD: SuperadminDashboard = {
   totals: { orgs: 0, users: 0, tables: 0, records: 0, files: 0, storage_bytes: 0, ai_requests: 0, ai_tokens: 0 },
@@ -161,6 +162,8 @@ export default function SuperAdminPage() {
         {tab === 'audit' && <SuperadminAuditView selectedOrgId={effectiveSelectedOrgId} />}
 
         {tab === 'ai' && <SuperadminAIView />}
+
+        {tab === 'billing' && <SuperadminBillingView />}
 
         {tab === 'profile' && (
           <SuperadminProfileView

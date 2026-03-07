@@ -14,6 +14,13 @@ from src.modules.tables.repository import TableRepository
 class SuperadminTablesService:
     """Table-focused read-only use-cases for superadmin."""
 
+    @staticmethod
+    def _parse_uuid(raw: str, *, field_name: str) -> uuid.UUID:
+        try:
+            return uuid.UUID(str(raw))
+        except Exception as exc:
+            raise ValueError(f"invalid_{field_name}") from exc
+
     async def org_tables_page(
         self,
         org_id: str,
@@ -25,8 +32,9 @@ class SuperadminTablesService:
     ) -> dict:
         async with UnitOfWork() as uow:
             repo = SuperadminRepository(uow.session)
+            org_uuid = self._parse_uuid(org_id, field_name="org_id")
             items, total = await repo.list_tables_by_org_page(
-                org_id=uuid.UUID(org_id),
+                org_id=org_uuid,
                 q=q,
                 include_archived=include_archived,
                 limit=limit,
@@ -37,7 +45,9 @@ class SuperadminTablesService:
     async def org_table_detail(self, org_id: str, table_id: str) -> dict:
         async with UnitOfWork() as uow:
             repo = SuperadminRepository(uow.session)
-            table = await repo.get_table_in_org(org_id=uuid.UUID(org_id), table_id=uuid.UUID(table_id))
+            org_uuid = self._parse_uuid(org_id, field_name="org_id")
+            table_uuid = self._parse_uuid(table_id, field_name="table_id")
+            table = await repo.get_table_in_org(org_id=org_uuid, table_id=table_uuid)
             if not table:
                 raise LookupError("NOT_FOUND")
             columns = [
@@ -81,12 +91,14 @@ class SuperadminTablesService:
             sort_dir = "asc"
         async with UnitOfWork() as uow:
             repo = SuperadminRepository(uow.session)
-            table = await repo.get_table_in_org(org_id=uuid.UUID(org_id), table_id=uuid.UUID(table_id))
+            org_uuid = self._parse_uuid(org_id, field_name="org_id")
+            table_uuid = self._parse_uuid(table_id, field_name="table_id")
+            table = await repo.get_table_in_org(org_id=org_uuid, table_id=table_uuid)
             if not table:
                 raise LookupError("NOT_FOUND")
             rows, total = await repo.list_table_records_page(
-                org_id=uuid.UUID(org_id),
-                table_id=uuid.UUID(table_id),
+                org_id=org_uuid,
+                table_id=table_uuid,
                 q=q,
                 sort_col_id=sort_col_id,
                 sort_dir=sort_dir,
@@ -113,8 +125,8 @@ class SuperadminTablesService:
 
         async with UnitOfWork() as uow:
             t_repo = TableRepository(uow.session)
-            table_uuid = uuid.UUID(table_id)
-            org_uuid = uuid.UUID(org_id)
+            table_uuid = self._parse_uuid(table_id, field_name="table_id")
+            org_uuid = self._parse_uuid(org_id, field_name="org_id")
 
             table = await t_repo.get_by_id(table_uuid, with_columns=True)
             if not table or table.org_id != org_uuid:
@@ -147,8 +159,8 @@ class SuperadminTablesService:
     async def export_table_xlsx(self, *, org_id: str, table_id: str) -> tuple[bytes, str]:
         async with UnitOfWork() as uow:
             t_repo = TableRepository(uow.session)
-            table_uuid = uuid.UUID(table_id)
-            org_uuid = uuid.UUID(org_id)
+            table_uuid = self._parse_uuid(table_id, field_name="table_id")
+            org_uuid = self._parse_uuid(org_id, field_name="org_id")
 
             table = await t_repo.get_by_id(table_uuid, with_columns=True)
             if not table or table.org_id != org_uuid:

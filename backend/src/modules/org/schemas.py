@@ -68,3 +68,33 @@ class SwitchOrgRequest(BaseModel):
 
 class OrgUpdateRequest(BaseModel):
     name: str | None = None
+
+
+class OrgAIOrgLimitsRequest(BaseModel):
+    daily_tokens_limit: int = Field(ge=0, default=0)
+    monthly_tokens_limit: int = Field(ge=0, default=0)
+
+
+class OrgAIUserLimitRequest(BaseModel):
+    daily_tokens_limit: int = Field(ge=0, default=0)
+    rpm_limit: int = Field(ge=0, default=0)
+
+
+class OrgAIUserLimitItem(BaseModel):
+    user_id: uuid.UUID
+    membership_id: uuid.UUID
+    email: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    role: UserRole
+    daily_tokens_limit: int
+    rpm_limit: int
+    usage_today_tokens: int
+    usage_month_tokens: int
+    usage_last_min_requests: int
+
+
+class OrgAILimitsResponse(BaseModel):
+    org_limits: dict
+    effective_defaults: dict
+    users: list[OrgAIUserLimitItem]

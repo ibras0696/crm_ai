@@ -4,6 +4,7 @@ const api = axios.create({
   baseURL: '/api/v1',
   withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
+  timeout: 15_000,
 })
 
 let refreshPromise: Promise<void> | null = null
@@ -29,7 +30,7 @@ api.interceptors.response.use(
       try {
         if (!refreshPromise) {
           refreshPromise = axios
-            .post('/api/v1/auth/refresh', {}, { withCredentials: true })
+            .post('/api/v1/auth/refresh', {}, { withCredentials: true, timeout: 10_000 })
             .then(() => undefined)
             .finally(() => {
               refreshPromise = null

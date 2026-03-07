@@ -42,9 +42,9 @@ export const tablesApi = {
   update: (id: string, data: { name?: string; description?: string; icon?: string; color?: string; is_archived?: boolean; folder_id?: string | null }) =>
     api.patch<ApiResponse<TableInfo>>(`/tables/${id}`, data),
   delete: (id: string) => api.delete<ApiResponse<null>>(`/tables/${id}`),
-  createColumn: (tableId: string, data: { name: string; field_type: string; is_required?: boolean; config?: Record<string, unknown> }) =>
+  createColumn: (tableId: string, data: { name: string; field_type: string; is_required?: boolean; config?: Record<string, unknown> | null }) =>
     api.post<ApiResponse<ColumnInfo>>(`/tables/${tableId}/columns`, data),
-  updateColumn: (tableId: string, columnId: string, data: { name?: string; field_type?: string; position?: number; is_required?: boolean; config?: Record<string, unknown> }) =>
+  updateColumn: (tableId: string, columnId: string, data: { name?: string; field_type?: string; position?: number; is_required?: boolean; config?: Record<string, unknown> | null }) =>
     api.patch<ApiResponse<ColumnInfo>>(`/tables/${tableId}/columns/${columnId}`, data),
   deleteColumn: (tableId: string, columnId: string) =>
     api.delete<ApiResponse<null>>(`/tables/${tableId}/columns/${columnId}`),

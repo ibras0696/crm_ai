@@ -149,10 +149,100 @@ export interface SuperadminAuditPage {
   offset: number
 }
 
+export interface SuperadminBillingPlanItem {
+  name: string
+  display_name: string
+  price_monthly: number
+  price_yearly: number
+  max_members: number
+  max_tables: number
+  max_records: number
+  max_storage_mb: number
+  has_ai: boolean
+  ai_max_tokens_per_request: number
+  ai_tokens_per_day: number
+  ai_rpm_per_user: number
+  is_active: boolean
+}
+
+export interface SuperadminTokenPackageItem {
+  code: string
+  display_name: string
+  badge_text?: string | null
+  description?: string | null
+  button_text?: string | null
+  payment_note?: string | null
+  price_caption?: string | null
+  tokens: number
+  price_rub_cents: number
+  is_active: boolean
+  sort_order: number
+}
+
+export interface SuperadminTokenPurchaseItem {
+  id: string
+  org_id: string
+  org_name: string
+  package_code: string
+  tokens_total: number
+  tokens_remaining: number
+  payment_id?: string | null
+  payment_status?: string | null
+  status: 'active' | 'inactive' | 'expired' | 'exhausted' | string
+  is_active: boolean
+  created_at?: string | null
+  expires_at?: string | null
+}
+
+export interface SuperadminYooKassaAuditItem {
+  id: string
+  created_at?: string | null
+  actor: string
+  ip_address?: string | null
+  changed_fields: string[]
+  meta?: Record<string, unknown> | null
+}
+
+export interface SuperadminYooKassaConfig {
+  shop_id: string
+  return_url: string
+  webhook_url: string
+  secret_key_configured: boolean
+  secret_key_masked: string
+  audit: SuperadminYooKassaAuditItem[]
+}
+
+export interface SuperadminBillingConfig {
+  plans: SuperadminBillingPlanItem[]
+  token_packages: SuperadminTokenPackageItem[]
+  recent_purchases: SuperadminTokenPurchaseItem[]
+  yookassa: SuperadminYooKassaConfig
+}
+
+export interface SuperadminProfileAuditItem {
+  id: string
+  created_at?: string | null
+  actor: string
+  ip_address?: string | null
+  changed_fields: string[]
+  meta?: Record<string, unknown> | null
+}
+
+export interface SuperadminProfile {
+  email: string
+  password_configured: boolean
+  runtime_email_overridden: boolean
+  runtime_password_overridden: boolean
+  audit: SuperadminProfileAuditItem[]
+}
+
 export const superadminApi = {
   login: (email: string, password: string) =>
     superadminHttp.post<ApiResponse<{ access_token: string; token_type: string }>>('/login', { email, password }),
   logout: () => superadminHttp.post<ApiResponse<null>>('/logout', {}),
+  profile: () => superadminHttp.get<ApiResponse<SuperadminProfile>>('/profile'),
+  updateProfile: (data: { email?: string; current_password: string; new_password?: string }) =>
+    superadminHttp.patch<ApiResponse<SuperadminProfile>>('/profile', data),
   overview: (org_limit = 200) => superadminHttp.get<ApiResponse<SuperadminOverview>>(`/overview?org_limit=${org_limit}`),
   orgs: (params: { q?: string; plan?: string; sub_status?: string; limit?: number; offset?: number }) => {
     const q = new URLSearchParams()
@@ -199,6 +289,53 @@ export const superadminApi = {
         model: string
         key_configured: boolean
         key_prefix: string
+        runtime: {
+          model: string
+          ai_base_url: string
+          ai_provider_mode: 'openai_compatible' | 'timeweb_native'
+          ai_bearer_token_masked: string
+          ai_bearer_token_configured: boolean
+          system_prompt: string
+          temperature: number
+          max_tokens_per_request: number
+          strict_actions: boolean
+        }
+        audit?: Array<{
+          id: string
+          created_at?: string | null
+          actor: string
+          ip_address?: string | null
+          changed_fields: string[]
+          meta?: Record<string, unknown>
+        }>
       }>
     >('/ai-config'),
+  updateAiConfig: (data: {
+    model?: string
+    ai_base_url?: string
+    ai_provider_mode?: 'openai_compatible' | 'timeweb_native'
+    ai_bearer_token?: string
+    system_prompt?: string
+    temperature?: number
+    max_tokens_per_request?: number
+    strict_actions?: boolean
+  }) => superadminHttp.patch<ApiResponse<any>>('/ai-config', data),
+  billingConfig: () => superadminHttp.get<ApiResponse<SuperadminBillingConfig>>('/billing/config'),
+  updateBillingPlan: (planName: string, data: Partial<SuperadminBillingPlanItem>) =>
+    superadminHttp.patch<ApiResponse<SuperadminBillingPlanItem>>(`/billing/plans/${planName}`, data),
+  upsertTokenPackage: (code: string, data: Partial<SuperadminTokenPackageItem>) =>
+    superadminHttp.put<ApiResponse<SuperadminTokenPackageItem>>(`/billing/token-packages/${code}`, data),
+  deleteTokenPackage: (code: string) =>
+    superadminHttp.delete<ApiResponse<SuperadminTokenPackageItem>>(`/billing/token-packages/${code}`),
+  updateYooKassaConfig: (data: {
+    yookassa_shop_id?: string
+    yookassa_secret_key?: string
+    yookassa_return_url?: string
+    yookassa_webhook_url?: string
+  }) => superadminHttp.patch<ApiResponse<SuperadminYooKassaConfig>>('/billing/yookassa', data),
+  testYooKassaConfig: () =>
+    superadminHttp.post<ApiResponse<{ connected: boolean; status_code: number; account_id: string; test: boolean }>>(
+      '/billing/yookassa/test',
+      {}
+    ),
 }

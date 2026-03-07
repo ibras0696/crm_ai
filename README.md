@@ -66,7 +66,7 @@ flowchart TB
 ### 2) Запуск
 
 ```bash
-docker compose -f docker-compose.yml -f secrets.yml up -d --build
+./scripts/compose-dev.sh up -d --build
 ```
 
 ### 3) Полезные URL
@@ -86,7 +86,7 @@ docker compose -f docker-compose.yml -f secrets.yml up -d --build
 ## 🏭 Запуск (prod)
 
 ```bash
-docker compose -f docker-compose.prod.yml -f secrets.yml up -d --build
+./scripts/compose-prod.sh up -d --build
 ```
 
 Примечание: в prod используется `nginx` и сертификаты (см. `docker-compose.prod.yml`, `nginx/`, `certbot`).
@@ -187,13 +187,13 @@ docker compose -f docker-compose.prod.yml -f secrets.yml up -d --build
 
 ```bash
 # Статус контейнеров
-docker compose -f docker-compose.yml -f secrets.yml ps
+./scripts/compose-dev.sh ps
 
 # Логи конкретного сервиса
-docker compose -f docker-compose.yml -f secrets.yml logs -f api
+./scripts/compose-dev.sh logs -f api
 
 # Пересборка и перезапуск
-docker compose -f docker-compose.yml -f secrets.yml up -d --build
+./scripts/compose-dev.sh up -d --build
 ```
 
 ## 🧪 Makefile команды

@@ -23,8 +23,10 @@ class ChatRequest(BaseModel):
     system_prompt: str | None = None
     ui_intent: str | None = None
     ui_intent_params: dict | None = None
+    language: str | None = None
     include_context: bool = True
     chat_id: str | None = None
+    request_id: str | None = None
     context_options: dict | None = None
 
 

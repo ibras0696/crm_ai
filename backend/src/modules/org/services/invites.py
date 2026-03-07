@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 from src.common.enums import AuditAction, InviteStatus, UserRole
-from src.common.exceptions import ConflictError, NotFoundError, ValidationError
+from src.common.exceptions import AppError, ConflictError, NotFoundError, ValidationError
 from src.config import settings
 from src.infrastructure.uow import UnitOfWork
 from src.modules.audit.repository import AuditRepository
@@ -17,8 +17,13 @@ from src.modules.auth.security import (
     refresh_token_expires_at,
 )
 from src.modules.notifications.tasks import send_invite_email
-from src.modules.org.models import Invite, Membership
-from src.modules.org.repository import InviteRepository, MembershipRepository, OrganizationRepository
+from src.modules.org.models import Invite, Membership, Organization
+from src.modules.org.repository import (
+    InviteRepository,
+    MembershipRepository,
+    OrganizationRepository,
+    SubscriptionRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +43,7 @@ class OrgInviteService:
         async with UnitOfWork() as uow:
             invite_repo = InviteRepository(uow.session)
             member_repo = MembershipRepository(uow.session)
+            sub_repo = SubscriptionRepository(uow.session)
             user_repo = UserRepository(uow.session)
             org_repo = OrganizationRepository(uow.session)
             audit_repo = AuditRepository(uow.session)
@@ -61,6 +67,7 @@ class OrgInviteService:
             existing_invite = await invite_repo.get_pending_by_email_and_org(email, org_id)
             if existing_invite:
                 raise ConflictError("Pending invite already exists for this email")
+            await self._enforce_member_limit(member_repo=member_repo, sub_repo=sub_repo, org_id=org_id)
 
             token = secrets.token_urlsafe(48)
             invite = Invite(
@@ -150,6 +157,7 @@ class OrgInviteService:
             invite_repo = InviteRepository(uow.session)
             user_repo = UserRepository(uow.session)
             member_repo = MembershipRepository(uow.session)
+            sub_repo = SubscriptionRepository(uow.session)
             token_repo = RefreshTokenRepository(uow.session)
             audit_repo = AuditRepository(uow.session)
 
@@ -170,6 +178,7 @@ class OrgInviteService:
                 existing_membership = await member_repo.get_membership(user.id, invite.org_id)
                 if existing_membership:
                     raise ConflictError("User is already a member of this organization")
+            await self._enforce_member_limit(member_repo=member_repo, sub_repo=sub_repo, org_id=invite.org_id)
 
             membership = Membership(user_id=user.id, org_id=invite.org_id, role=invite.role)
             await member_repo.create(membership)
@@ -205,3 +214,22 @@ class OrgInviteService:
                 "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
             }
             return user, tokens
+
+    async def _enforce_member_limit(
+        self,
+        *,
+        member_repo: MembershipRepository,
+        sub_repo: SubscriptionRepository,
+        org_id: uuid.UUID,
+    ) -> None:
+        plan = await sub_repo.get_effective_plan(org_id)
+        limit = int(getattr(plan, "max_members", 0) or 0)
+        if limit <= 0:
+            return
+        current_members = await member_repo.count_org_members(org_id)
+        if current_members >= limit:
+            raise AppError(
+                code="MEMBER_LIMIT_REACHED",
+                message="Достигнут лимит тарифа по участникам.",
+                status_code=422,
+            )

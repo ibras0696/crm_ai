@@ -4,7 +4,7 @@ import uuid
 
 from src.modules.auth.models import User
 from src.modules.auth.schemas import RegisterRequest, TokenResponse, UpdateMeRequest
-from src.modules.auth.services import AuthProfileService, AuthRegistrationService, AuthSessionService
+from src.modules.auth.services import AuthProfileService, AuthRegistrationService, AuthSessionService, AuthPasswordService
 from src.modules.org.models import Organization
 
 
@@ -17,10 +17,12 @@ class AuthService:
         registration_service: AuthRegistrationService | None = None,
         session_service: AuthSessionService | None = None,
         profile_service: AuthProfileService | None = None,
+        password_service: AuthPasswordService | None = None,
     ):
         self._registration = registration_service or AuthRegistrationService()
         self._session = session_service or AuthSessionService()
         self._profile = profile_service or AuthProfileService()
+        self._password = password_service or AuthPasswordService()
 
     async def register(self, data: RegisterRequest, ip_address: str | None = None) -> tuple[User, Organization, TokenResponse]:
         return await self._registration.register(data, ip_address=ip_address)
@@ -45,3 +47,9 @@ class AuthService:
 
     async def update_user(self, user_id: uuid.UUID, body: UpdateMeRequest) -> User | None:
         return await self._profile.update_user(user_id, body)
+
+    async def request_password_reset(self, email: str) -> None:
+        await self._password.request_password_reset(email)
+
+    async def reset_password(self, token: str, new_password: str) -> bool:
+        return await self._password.reset_password(token, new_password)

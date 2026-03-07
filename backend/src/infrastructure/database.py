@@ -12,6 +12,12 @@ engine = create_async_engine(
     max_overflow=settings.DB_MAX_OVERFLOW,
     pool_timeout=settings.DB_POOL_TIMEOUT_S,
     pool_recycle=settings.DB_POOL_RECYCLE_S,
+    connect_args={
+        "server_settings": {
+            "statement_timeout": str(settings.DB_STATEMENT_TIMEOUT_MS),
+            "idle_in_transaction_session_timeout": "60000"
+        }
+    }
 )
 
 async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

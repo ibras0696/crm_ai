@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.common.enums import PlanTier, SubscriptionStatus, UserRole
 from src.modules.ai.models import AIChatMessage, AIChatSession, AIUsageLog
 from src.modules.audit.models import AuditLog
-from src.modules.billing.models import Plan
+from src.modules.billing.models import Plan, TokenPackage
 from src.modules.files.models import File
 from src.modules.knowledge.models import KBPage
 from src.modules.notifications.models import Notification
@@ -32,6 +32,21 @@ class BillingRepository:
 
     async def get_plan_by_name(self, name: str) -> Plan | None:
         stmt = select(Plan).where(Plan.name == name, Plan.is_active.is_(True))
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def list_active_token_packages(self) -> list[TokenPackage]:
+        stmt = (
+            select(TokenPackage)
+            .where(TokenPackage.is_active.is_(True))
+            .order_by(TokenPackage.sort_order.asc(), TokenPackage.created_at.asc())
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def get_active_token_package(self, *, code: str) -> TokenPackage | None:
+        stmt = select(TokenPackage).where(
+            TokenPackage.code == code,
+            TokenPackage.is_active.is_(True),
+        )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def get_usage_counts(self, *, org_id: uuid.UUID) -> tuple[int, int, int, int, int]:
@@ -76,6 +91,18 @@ class BillingRepository:
     async def get_org(self, *, org_id: uuid.UUID) -> Organization | None:
         stmt = select(Organization).where(Organization.id == org_id)
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def list_org_ids(self) -> list[uuid.UUID]:
+        rows = (await self.session.execute(select(Organization.id))).all()
+        return [row[0] for row in rows]
+
+    async def list_orgs_by_ids(self, org_ids: list[uuid.UUID]) -> dict[uuid.UUID, Organization]:
+        if not org_ids:
+            return {}
+        rows = (
+            await self.session.execute(select(Organization).where(Organization.id.in_(org_ids)))
+        ).scalars().all()
+        return {org.id: org for org in rows}
 
     async def list_org_member_user_ids(self, *, org_id: uuid.UUID) -> list[uuid.UUID]:
         stmt = select(Membership.user_id).where(Membership.org_id == org_id)

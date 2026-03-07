@@ -35,7 +35,7 @@ def create_access_token(user_id: uuid.UUID, org_id: uuid.UUID | None = None, rol
     return jwt.encode(payload, _jwt_user_secret(), algorithm=settings.JWT_ALGORITHM)
 
 
-def create_superadmin_access_token() -> str:
+def create_superadmin_access_token(*, email: str | None = None) -> str:
     now = datetime.now(UTC)
     payload = {
         "sub": "superadmin",
@@ -46,6 +46,8 @@ def create_superadmin_access_token() -> str:
         "iat": now,
         "exp": now + timedelta(hours=12),
     }
+    if email:
+        payload["email"] = str(email).strip().lower()
     return jwt.encode(payload, _jwt_superadmin_secret(), algorithm=settings.JWT_ALGORITHM)
 
 

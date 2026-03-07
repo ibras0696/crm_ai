@@ -6,12 +6,7 @@ import re
 import uuid
 from typing import Any
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import selectinload
-
-from src.common.enums import SubscriptionStatus
-from src.modules.billing.models import Plan
-from src.modules.org.models import Organization, Subscription
+from src.modules.ai.internal.repository import AIRepository
 from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.internal.resolution import normalize_name, resolve_table_by_ref, safe_field_type
 from src.modules.tables.models import Column, FieldType, Table
@@ -38,34 +33,63 @@ def _resolve_row_key_to_column_id(row_key: Any, columns: list[Column]) -> str | 
 def _extract_rows_payload(action_payload: dict[str, Any]) -> list[dict[str, Any]]:
     """Извлечь список строк/records из payload действия."""
     source = action_payload.get("records")
-    if not isinstance(source, list):
+    if isinstance(source, dict):
+        columns_raw = source.get("columns")
+        rows_raw = source.get("rows")
+        if isinstance(columns_raw, list) and isinstance(rows_raw, list):
+            columns = [str(c).strip() for c in columns_raw if str(c).strip()]
+            out: list[dict[str, Any]] = []
+            if not columns:
+                return out
+            for row in rows_raw[:2000]:
+                if isinstance(row, list):
+                    rec: dict[str, Any] = {}
+                    for idx, val in enumerate(row[: len(columns)]):
+                        rec[columns[idx]] = val
+                    if rec:
+                        out.append(rec)
+                elif isinstance(row, dict):
+                    out.append(row)
+            return out
+
+    if source is None:
         source = action_payload.get("rows")
-    if not isinstance(source, list):
+    if source is None:
         source = action_payload.get("data_rows")
+    if source is None:
+        columns_raw = action_payload.get("records_columns")
+        rows_raw = action_payload.get("records_rows")
+        if isinstance(columns_raw, list) and isinstance(rows_raw, list):
+            source = {"columns": columns_raw, "rows": rows_raw}
+            action_payload = {**action_payload, "records": source}
+            return _extract_rows_payload(action_payload)
+        source = action_payload.get("records_compact")
+        if isinstance(source, dict):
+            action_payload = {**action_payload, "records": source}
+            return _extract_rows_payload(action_payload)
+
     if not isinstance(source, list):
         return []
+
     out: list[dict[str, Any]] = []
-    for item in source[:200]:
+    for item in source[:2000]:
         if isinstance(item, dict):
             out.append(item)
     return out
 
 
 async def _resolve_plan_limits(uow: UnitOfWork, *, org_id: uuid.UUID) -> tuple[int, int]:
-    sub = (
-        await uow.session.execute(select(Subscription).where(Subscription.org_id == org_id).limit(1))
-    ).scalar_one_or_none()
-    plan_name = None
-    if sub and sub.status in {SubscriptionStatus.ACTIVE, SubscriptionStatus.PAST_DUE}:
-        plan_name = sub.plan.value
-    if not plan_name:
-        org_plan = (
-            await uow.session.execute(select(Organization.plan).where(Organization.id == org_id).limit(1))
-        ).scalar_one_or_none()
-        plan_name = str(getattr(org_plan, "value", org_plan or "free")).lower()
-    plan = (
-        await uow.session.execute(select(Plan).where(Plan.name == plan_name, Plan.is_active.is_(True)))
-    ).scalar_one_or_none()
+    """Получить лимиты тарифа по таблицам и записям.
+
+    Args:
+        uow: UnitOfWork с активной сессией БД.
+        org_id: ID организации.
+
+    Returns:
+        Кортеж `(max_tables, max_records)`.
+    """
+    repo = AIRepository(uow.session)
+    plan = await repo.resolve_effective_plan(org_id=org_id)
     max_tables = int(getattr(plan, "max_tables", 0) or 0)
     max_records = int(getattr(plan, "max_records", 0) or 0)
     return max_tables, max_records
@@ -162,12 +186,11 @@ async def _create_records_for_table(
     if not rows_payload:
         return [], [], 0
 
+    repo = AIRepository(uow.session)
+    ignored = 0
     _, max_records = await _resolve_plan_limits(uow, org_id=org_id)
     if max_records > 0:
-        current_records = int(
-            (await uow.session.execute(select(func.count(Record.id)).where(Record.org_id == org_id))).scalar()
-            or 0
-        )
+        current_records = await repo.count_records(org_id=org_id)
         remaining = max_records - current_records
         if remaining <= 0:
             return [], [], len(rows_payload)
@@ -175,17 +198,15 @@ async def _create_records_for_table(
             ignored += len(rows_payload) - remaining
             rows_payload = rows_payload[:remaining]
 
-    await uow.session.execute(select(Table.id).where(Table.id == table_obj.id).with_for_update())
+    await repo.lock_table(table_id=table_obj.id)
 
-    max_rows = 20
-    ignored = max(0, len(rows_payload) - max_rows)
+    max_rows = 1000
+    ignored += max(0, len(rows_payload) - max_rows)
     rows_payload = rows_payload[:max_rows]
 
     col_ids = {str(c.id) for c in table_obj.columns}
     primary_col = next((c for c in table_obj.columns if c.is_primary), None)
-    max_position = (
-        await uow.session.execute(select(func.coalesce(func.max(Record.position), -1)).where(Record.table_id == table_obj.id))
-    ).scalar_one()
+    max_position = await repo.get_max_record_position(table_id=table_obj.id)
 
     created: list[Record] = []
     preview: list[dict[str, Any]] = []
@@ -224,10 +245,7 @@ async def handle_create_table_action(
         return {"action": "create_table", "ok": False, "error": "table_name_required"}
     max_tables, _ = await _resolve_plan_limits(uow, org_id=org_id)
     if max_tables > 0:
-        current_tables = int(
-            (await uow.session.execute(select(func.count(Table.id)).where(Table.org_id == org_id))).scalar()
-            or 0
-        )
+        current_tables = await AIRepository(uow.session).count_tables(org_id=org_id)
         if current_tables >= max_tables:
             return {"action": "create_table", "ok": False, "error": "table_limit_reached"}
 
@@ -325,19 +343,15 @@ async def handle_create_columns_action(
     if not columns_payload:
         return {"action": "create_columns", "ok": False, "error": "columns_required"}
 
-    tables = (
-        await uow.session.execute(select(Table).where(Table.org_id == org_id, Table.is_archived.is_(False)).options(selectinload(Table.columns)))
-    ).scalars().all()
+    tables = await AIRepository(uow.session).list_active_tables_with_columns(org_id=org_id)
     table_obj = resolve_table_by_ref(tables, table_ref)
     if table_obj is None:
         return {"action": "create_columns", "ok": False, "error": "table_not_found", "table_ref": table_ref}
 
-    await uow.session.execute(select(Table.id).where(Table.id == table_obj.id).with_for_update())
+    await AIRepository(uow.session).lock_table(table_id=table_obj.id)
 
     existing_names = {normalize_name(c.name) for c in table_obj.columns}
-    max_position = (
-        await uow.session.execute(select(func.coalesce(func.max(Column.position), -1)).where(Column.table_id == table_obj.id))
-    ).scalar_one()
+    max_position = max((int(c.position) for c in table_obj.columns), default=-1)
     created_columns: list[Column] = []
     skipped: list[dict[str, Any]] = []
     primary_exists = any(bool(c.is_primary) for c in table_obj.columns)
@@ -419,9 +433,7 @@ async def handle_create_records_action(
     table_ref = str(action_payload.get("table_id") or action_payload.get("table_name") or "").strip()
     if not table_ref:
         return {"action": "create_records", "ok": False, "error": "table_ref_required"}
-    tables = (
-        await uow.session.execute(select(Table).where(Table.org_id == org_id, Table.is_archived.is_(False)).options(selectinload(Table.columns)))
-    ).scalars().all()
+    tables = await AIRepository(uow.session).list_active_tables_with_columns(org_id=org_id)
     table_obj = resolve_table_by_ref(tables, table_ref)
     if table_obj is None:
         return {"action": "create_records", "ok": False, "error": "table_not_found", "table_ref": table_ref}
@@ -433,6 +445,13 @@ async def handle_create_records_action(
         return {"action": "create_records", "ok": False, "error": "records_required"}
 
     created_records, records_preview, ignored = await _create_records_for_table(uow, org_id, user_id, table_obj, rows_payload)
+    if not created_records and ignored > 0:
+        return {
+            "action": "create_records",
+            "ok": False,
+            "error": "record_limit_reached",
+            "message": "Достигнут лимит тарифа по записям.",
+        }
     return {
         "action": "create_records",
         "ok": True,

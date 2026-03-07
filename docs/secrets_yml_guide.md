@@ -9,7 +9,7 @@
 ```bash
 cp secrets.yml.example secrets.yml
 # заполнить secrets.yml
-docker compose -f docker-compose.prod.yml -f secrets.yml up -d --build
+./scripts/compose-prod.sh up -d --build
 ```
 
 ## 2) Полный production `secrets.yml` (все ключи)
@@ -83,6 +83,7 @@ services:
 
       # --- S3 / MinIO ---
       S3_ENDPOINT: "http://minio:9000"
+      S3_PUBLIC_ENDPOINT: "http://localhost:9000"
       S3_ACCESS_KEY: "<S3_ACCESS_KEY>"
       S3_SECRET_KEY: "<S3_SECRET_KEY>"
       S3_BUCKET: "crm-files"
@@ -160,6 +161,7 @@ services:
       RABBITMQ_PASS: "<STRONG_RABBIT_PASSWORD>"
       RABBITMQ_URL: "amqp://crm_rabbit:<STRONG_RABBIT_PASSWORD>@rabbitmq:5672/"
       S3_ENDPOINT: "http://minio:9000"
+      S3_PUBLIC_ENDPOINT: "http://localhost:9000"
       S3_ACCESS_KEY: "<S3_ACCESS_KEY>"
       S3_SECRET_KEY: "<S3_SECRET_KEY>"
       S3_BUCKET: "crm-files"
@@ -184,6 +186,7 @@ services:
       RABBITMQ_PASS: "<STRONG_RABBIT_PASSWORD>"
       RABBITMQ_URL: "amqp://crm_rabbit:<STRONG_RABBIT_PASSWORD>@rabbitmq:5672/"
       S3_ENDPOINT: "http://minio:9000"
+      S3_PUBLIC_ENDPOINT: "http://localhost:9000"
       S3_ACCESS_KEY: "<S3_ACCESS_KEY>"
       S3_SECRET_KEY: "<S3_SECRET_KEY>"
       S3_BUCKET: "crm-files"
@@ -208,6 +211,7 @@ services:
       RABBITMQ_PASS: "<STRONG_RABBIT_PASSWORD>"
       RABBITMQ_URL: "amqp://crm_rabbit:<STRONG_RABBIT_PASSWORD>@rabbitmq:5672/"
       S3_ENDPOINT: "http://minio:9000"
+      S3_PUBLIC_ENDPOINT: "http://localhost:9000"
       S3_ACCESS_KEY: "<S3_ACCESS_KEY>"
       S3_SECRET_KEY: "<S3_SECRET_KEY>"
       S3_BUCKET: "crm-files"

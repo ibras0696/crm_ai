@@ -9,6 +9,8 @@ class ErrorDetail(BaseModel):
     code: str
     message: str
     field: str | None = None
+    details: Any | None = None
+    correlation_id: str | None = None
 
 
 class ApiResponse(BaseModel, Generic[T]):

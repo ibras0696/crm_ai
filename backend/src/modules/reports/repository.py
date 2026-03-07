@@ -35,6 +35,17 @@ class ReportsRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_tables_map_by_ids(self, *, org_id: uuid.UUID, table_ids: list[uuid.UUID]) -> dict[uuid.UUID, Table]:
+        if not table_ids:
+            return {}
+        stmt = (
+            select(Table)
+            .where(Table.org_id == org_id, Table.id.in_(table_ids))
+            .options(selectinload(Table.columns))
+        )
+        rows = (await self.session.execute(stmt)).scalars().all()
+        return {table.id: table for table in rows}
+
     async def count_records_by_table_ids(self, table_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
         if not table_ids:
             return {}
@@ -54,6 +65,20 @@ class ReportsRepository:
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_records_map_by_table_ids(self, *, table_ids: list[uuid.UUID]) -> dict[uuid.UUID, list[Record]]:
+        if not table_ids:
+            return {}
+        stmt = (
+            select(Record)
+            .where(Record.table_id.in_(table_ids))
+            .order_by(Record.table_id.asc(), Record.position.asc(), Record.created_at.desc())
+        )
+        rows = (await self.session.execute(stmt)).scalars().all()
+        grouped: dict[uuid.UUID, list[Record]] = {}
+        for rec in rows:
+            grouped.setdefault(rec.table_id, []).append(rec)
+        return grouped
 
     async def records_timeline(self, org_id: uuid.UUID, cutoff: datetime) -> list[tuple[datetime, int]]:
         stmt = (

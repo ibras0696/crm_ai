@@ -107,6 +107,10 @@ jobs:
         working-directory: backend
         run: ruff check src/ --select E,W,F --ignore E501
 
+      - name: Guard broad except (modules)
+        working-directory: backend
+        run: python tools/check_broad_except.py --root src/modules --whitelist tools/broad_except_whitelist.txt
+
       - name: Run migrations
         working-directory: backend
         env:

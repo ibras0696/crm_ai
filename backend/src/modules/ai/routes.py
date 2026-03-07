@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import logging
 import uuid
 
 from fastapi import APIRouter, Depends, Query
@@ -34,7 +33,6 @@ from src.modules.ai.schemas import (
 from src.modules.auth.dependencies import CurrentUser, require_roles
 
 router = APIRouter(prefix="/ai", tags=["ai"])
-logger = logging.getLogger(__name__)
 
 
 def _parse_chat_uuid(chat_id: str) -> uuid.UUID | None:
@@ -66,11 +64,7 @@ async def ai_chat(
     Returns:
         ApiResponse[ChatResponse] с ответом модели и (опционально) результатом действия.
     """
-    try:
-        return await run_ai_chat(body, current_user)
-    except Exception as exc:
-        logger.exception("ai_chat_route_failed", exc_info=exc)
-        return ApiResponse(ok=False, data=None, error={"code": "AI_INTERNAL_ERROR", "message": "Внутренняя ошибка AI сервиса."})
+    return await run_ai_chat(body, current_user)
 
 
 @router.get("/status", response_model=ApiResponse[dict])

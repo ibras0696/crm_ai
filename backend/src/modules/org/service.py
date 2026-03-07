@@ -3,7 +3,7 @@ import uuid
 from src.common.enums import UserRole
 from src.modules.auth.models import User
 from src.modules.org.models import Invite, Membership, Organization
-from src.modules.org.services import OrgInviteService, OrgMembersService, OrgProfileService
+from src.modules.org.services import OrgAILimitsService, OrgInviteService, OrgMembersService, OrgProfileService
 from src.modules.org.schemas import OrgUpdateRequest
 
 
@@ -16,10 +16,12 @@ class OrgService:
         profile_service: OrgProfileService | None = None,
         invite_service: OrgInviteService | None = None,
         members_service: OrgMembersService | None = None,
+        ai_limits_service: OrgAILimitsService | None = None,
     ):
         self._profile = profile_service or OrgProfileService()
         self._invite = invite_service or OrgInviteService()
         self._members = members_service or OrgMembersService()
+        self._ai_limits = ai_limits_service or OrgAILimitsService()
 
     async def get_org(self, org_id: uuid.UUID) -> Organization:
         return await self._profile.get_org(org_id)
@@ -115,3 +117,42 @@ class OrgService:
 
     async def update_org(self, org_id: uuid.UUID, body: OrgUpdateRequest) -> Organization:
         return await self._profile.update_org(org_id, body)
+
+    async def get_ai_limits(self, *, org_id: uuid.UUID) -> dict:
+        return await self._ai_limits.get_limits(org_id=org_id)
+
+    async def update_ai_org_limits(
+        self,
+        *,
+        org_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        daily_tokens_limit: int,
+        monthly_tokens_limit: int,
+        ip_address: str | None = None,
+    ) -> dict:
+        return await self._ai_limits.update_org_limits(
+            org_id=org_id,
+            actor_id=actor_id,
+            daily_tokens_limit=daily_tokens_limit,
+            monthly_tokens_limit=monthly_tokens_limit,
+            ip_address=ip_address,
+        )
+
+    async def update_ai_user_limits(
+        self,
+        *,
+        org_id: uuid.UUID,
+        user_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        daily_tokens_limit: int,
+        rpm_limit: int,
+        ip_address: str | None = None,
+    ) -> dict:
+        return await self._ai_limits.upsert_user_limit(
+            org_id=org_id,
+            user_id=user_id,
+            actor_id=actor_id,
+            daily_tokens_limit=daily_tokens_limit,
+            rpm_limit=rpm_limit,
+            ip_address=ip_address,
+        )

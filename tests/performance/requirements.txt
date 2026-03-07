@@ -1,0 +1,2 @@
+# Performance testing dependencies
+locust==2.20.0

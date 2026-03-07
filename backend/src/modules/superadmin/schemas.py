@@ -1,6 +1,8 @@
 """Pydantic schemas for superadmin module."""
 
-from pydantic import BaseModel, Field
+from datetime import datetime
+
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 
 class SuperadminLoginRequest(BaseModel):
@@ -11,6 +13,35 @@ class SuperadminLoginRequest(BaseModel):
 class SuperadminTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class SuperadminProfileAuditItem(BaseModel):
+    id: str
+    created_at: str | None = None
+    actor: str
+    ip_address: str | None = None
+    changed_fields: list[str]
+    meta: dict | None = None
+
+
+class SuperadminProfileResponse(BaseModel):
+    email: str
+    password_configured: bool
+    runtime_email_overridden: bool
+    runtime_password_overridden: bool
+    audit: list[SuperadminProfileAuditItem] = Field(default_factory=list)
+
+
+class SuperadminUpdateProfileRequest(BaseModel):
+    email: EmailStr | None = None
+    current_password: str = Field(min_length=8, max_length=128)
+    new_password: str | None = Field(default=None, min_length=8, max_length=128)
+
+    @model_validator(mode="after")
+    def _validate_update(self) -> "SuperadminUpdateProfileRequest":
+        if self.email is None and self.new_password is None:
+            raise ValueError("set at least one: email or new_password")
+        return self
 
 
 class SetPlanRequest(BaseModel):
@@ -24,6 +55,26 @@ class SetOrgAIEnabledRequest(BaseModel):
 class SuperadminPlanChangeResponse(BaseModel):
     org_id: str
     plan: str
+
+
+class SetSubscriptionPeriodRequest(BaseModel):
+    plan: str = "free"
+    period_days: int | None = Field(default=None, ge=1, le=3650)
+    current_period_end: datetime | None = None
+
+    @model_validator(mode="after")
+    def _validate_period(self) -> "SetSubscriptionPeriodRequest":
+        if (self.period_days is None) == (self.current_period_end is None):
+            raise ValueError("set exactly one: period_days or current_period_end")
+        return self
+
+
+class SuperadminSubscriptionPeriodResponse(BaseModel):
+    org_id: str
+    plan: str
+    status: str
+    current_period_start: str | None = None
+    current_period_end: str | None = None
 
 
 class SuperadminOrgAIEnabledResponse(BaseModel):
@@ -265,3 +316,121 @@ class SuperadminRecordListPage(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class SuperadminBillingPlanItem(BaseModel):
+    name: str
+    display_name: str
+    price_monthly: int
+    price_yearly: int
+    max_members: int
+    max_tables: int
+    max_records: int
+    max_storage_mb: int
+    has_ai: bool
+    ai_max_tokens_per_request: int
+    ai_tokens_per_day: int
+    ai_rpm_per_user: int
+    is_active: bool
+
+
+class SuperadminTokenPackageItem(BaseModel):
+    code: str
+    display_name: str
+    badge_text: str | None = None
+    description: str | None = None
+    button_text: str | None = None
+    payment_note: str | None = None
+    price_caption: str | None = None
+    tokens: int
+    price_rub_cents: int
+    is_active: bool
+    sort_order: int
+
+
+class SuperadminTokenPurchaseItem(BaseModel):
+    id: str
+    org_id: str
+    org_name: str
+    package_code: str
+    tokens_total: int
+    tokens_remaining: int
+    payment_id: str | None = None
+    payment_status: str | None = None
+    status: str
+    is_active: bool
+    created_at: str | None = None
+    expires_at: str | None = None
+
+
+class SuperadminYooKassaAuditItem(BaseModel):
+    id: str
+    created_at: str | None = None
+    actor: str
+    ip_address: str | None = None
+    changed_fields: list[str]
+    meta: dict | None = None
+
+
+class SuperadminYooKassaConfig(BaseModel):
+    shop_id: str
+    return_url: str
+    webhook_url: str
+    secret_key_configured: bool
+    secret_key_masked: str
+    audit: list[SuperadminYooKassaAuditItem] = Field(default_factory=list)
+
+
+class SuperadminBillingConfigResponse(BaseModel):
+    plans: list[SuperadminBillingPlanItem]
+    token_packages: list[SuperadminTokenPackageItem]
+    recent_purchases: list[SuperadminTokenPurchaseItem]
+    yookassa: SuperadminYooKassaConfig
+
+
+class SuperadminUpdateBillingPlanRequest(BaseModel):
+    display_name: str | None = None
+    price_monthly: int | None = Field(default=None, ge=0)
+    price_yearly: int | None = Field(default=None, ge=0)
+    max_members: int | None = Field(default=None, ge=1)
+    max_tables: int | None = Field(default=None, ge=1)
+    max_records: int | None = Field(default=None, ge=1)
+    max_storage_mb: int | None = Field(default=None, ge=1)
+    has_ai: bool | None = None
+    ai_max_tokens_per_request: int | None = Field(default=None, ge=0)
+    ai_tokens_per_day: int | None = Field(default=None, ge=0)
+    ai_rpm_per_user: int | None = Field(default=None, ge=0)
+    is_active: bool | None = None
+
+
+class SuperadminUpsertTokenPackageRequest(BaseModel):
+    display_name: str | None = None
+    badge_text: str | None = Field(default=None, max_length=120)
+    description: str | None = Field(default=None, max_length=4000)
+    button_text: str | None = Field(default=None, max_length=120)
+    payment_note: str | None = Field(default=None, max_length=4000)
+    price_caption: str | None = Field(default=None, max_length=255)
+    tokens: int | None = Field(default=None, ge=1)
+    price_rub_cents: int | None = Field(default=None, ge=0)
+    is_active: bool | None = None
+    sort_order: int | None = Field(default=None, ge=0)
+
+
+class SuperadminUpdateYooKassaRequest(BaseModel):
+    yookassa_shop_id: str | None = Field(default=None, max_length=255)
+    # Пустая строка = удалить runtime-secret и вернуться к fallback из env.
+    yookassa_secret_key: str | None = Field(default=None, max_length=4000)
+    yookassa_return_url: str | None = Field(default=None, max_length=2000)
+    yookassa_webhook_url: str | None = Field(default=None, max_length=2000)
+
+
+class SuperadminUpdateAIConfigRequest(BaseModel):
+    model: str | None = Field(default=None, min_length=1, max_length=120)
+    ai_base_url: str | None = Field(default=None, max_length=1000)
+    ai_provider_mode: str | None = Field(default=None, pattern="^(openai_compatible|timeweb_native)$")
+    # Пустая строка = очистить runtime-token и вернуться к fallback из env.
+    ai_bearer_token: str | None = Field(default=None, max_length=4000)
+    system_prompt: str | None = Field(default=None, min_length=1, max_length=12000)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+    max_tokens_per_request: int | None = Field(default=None, ge=64, le=12000)
+    strict_actions: bool | None = None

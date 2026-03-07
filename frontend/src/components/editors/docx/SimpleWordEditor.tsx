@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { CKEditor } from '@ckeditor/ckeditor5-react'
 import ClassicEditor from '@ckeditor/ckeditor5-build-classic'
-import { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } from 'docx'
+import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx'
 import mammoth from 'mammoth'
 import { Button } from '@/components/ui/button'
 import { Save, Download, FileText, Loader2 } from 'lucide-react'
@@ -108,8 +108,7 @@ export function SimpleWordEditor({
           runs.push(new TextRun(element.textContent))
         }
 
-        let heading: HeadingLevel | undefined
-        let alignment: AlignmentType | undefined
+        let heading
 
         switch (tagName) {
           case 'h1':
@@ -135,7 +134,6 @@ export function SimpleWordEditor({
         paragraphs.push(new Paragraph({
           children: runs.length > 0 ? runs : [new TextRun(element.textContent || '')],
           heading,
-          alignment,
         }))
       }
     })
@@ -226,10 +224,10 @@ export function SimpleWordEditor({
 
       <div className="flex-1 overflow-auto p-4">
         <CKEditor
-          editor={ClassicEditor}
+          editor={ClassicEditor as any}
           data={content}
           disabled={readOnly}
-          onChange={(event, editor) => {
+          onChange={(_event, editor) => {
             const data = editor.getData()
             setContent(data)
           }}

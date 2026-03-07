@@ -9,8 +9,8 @@ class FileType(str, Enum):
     """Поддерживаемые типы файлов для модуля Docs."""
 
     TXT = "txt"
-    PDF = "pdf"
     DOCX = "docx"
+    PDF = "pdf"
 
 
 class FileStatus(str, Enum):

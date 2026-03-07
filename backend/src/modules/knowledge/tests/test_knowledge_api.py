@@ -187,3 +187,54 @@ async def test_delete_root_page_removes_full_subtree(client: AsyncClient):
     assert root_id not in ids
     assert child_id not in ids
     assert grandchild_id not in ids
+
+
+@pytest.mark.asyncio
+async def test_move_page_to_another_parent_and_prevent_cycles(client: AsyncClient):
+    email = f"kb-move-{uuid.uuid4().hex[:8]}@example.com"
+    reg = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "StrongPass123!",
+            "first_name": "KB",
+            "last_name": "Move",
+            "org_name": "Knowledge Move Org",
+            "accepted_privacy_policy": True,
+        },
+    )
+    assert reg.status_code == 201
+    token = reg.json()["data"]["access_token"]
+
+    root_a = await client.post("/api/v1/knowledge/pages", json={"title": "A"}, headers=_headers(token))
+    root_b = await client.post("/api/v1/knowledge/pages", json={"title": "B"}, headers=_headers(token))
+    assert root_a.status_code == 200 and root_b.status_code == 200
+    root_a_id = root_a.json()["data"]["id"]
+    root_b_id = root_b.json()["data"]["id"]
+
+    child = await client.post(
+        "/api/v1/knowledge/pages",
+        json={"title": "Child", "parent_id": root_a_id},
+        headers=_headers(token),
+    )
+    assert child.status_code == 200
+    child_id = child.json()["data"]["id"]
+
+    moved = await client.patch(
+        f"/api/v1/knowledge/pages/{child_id}",
+        json={"parent_id": root_b_id},
+        headers=_headers(token),
+    )
+    assert moved.status_code == 200
+    assert moved.json()["ok"] is True
+    assert moved.json()["data"]["parent_id"] == root_b_id
+
+    invalid = await client.patch(
+        f"/api/v1/knowledge/pages/{root_b_id}",
+        json={"parent_id": child_id},
+        headers=_headers(token),
+    )
+    assert invalid.status_code == 400
+    body = invalid.json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "INVALID_PARENT"

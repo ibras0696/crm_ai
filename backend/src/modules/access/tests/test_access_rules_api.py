@@ -186,8 +186,10 @@ async def test_access_rules_create_validation_errors_are_api_response(client: As
         headers=_headers(token),
     )
     assert extra_field.status_code == 422
-    # Pydantic request validation returns standard FastAPI 422 payload ("detail").
-    assert "detail" in extra_field.json()
+    body = extra_field.json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "VALIDATION_ERROR"
+    assert isinstance(body["error"].get("details"), list)
 
 
 @pytest.mark.asyncio

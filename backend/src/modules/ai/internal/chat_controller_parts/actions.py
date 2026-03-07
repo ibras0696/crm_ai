@@ -304,6 +304,46 @@ def _build_kb_fallback_action(
     }
 
 
+def _build_dashboard_fallback_action(
+    *,
+    user_message: str,
+    ui_intent: str | None,
+    ui_params: dict | None,
+    assistant_reply: str,
+) -> dict | None:
+    """Собрать fallback-action для дашборда, если модель не прислала crm_action."""
+    if (ui_intent or "").strip().lower() != "create_dashboard":
+        return None
+
+    params = ui_params if isinstance(ui_params, dict) else {}
+    table_names = params.get("table_names")
+    primary_table_name = ""
+    if isinstance(table_names, list):
+        for item in table_names:
+            candidate = str(item or "").strip()
+            if candidate:
+                primary_table_name = candidate
+                break
+    if not primary_table_name:
+        primary_table_name = str(params.get("table_name") or "").strip()
+
+    preferred_widget_type = str(params.get("widget_type") or "").strip().lower() or None
+    title = f"Аналитика: {primary_table_name}" if primary_table_name else "AI дашборд"
+    description = (assistant_reply or "").strip()[:1000] or None
+
+    payload: dict[str, Any] = {
+        "action": "create_dashboard",
+        "name": title,
+        "description": description,
+        "widgets": [],
+    }
+    if primary_table_name:
+        payload["table_name"] = primary_table_name
+    if preferred_widget_type in {"metric", "bar", "line", "area", "pie", "donut", "table"}:
+        payload["preferred_widget_type"] = preferred_widget_type
+    return payload
+
+
 async def _execute_action(
     uow: UnitOfWork,
     current_user: CurrentUser,

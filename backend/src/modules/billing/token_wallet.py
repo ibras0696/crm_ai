@@ -200,6 +200,35 @@ async def ensure_token_balances_bulk(
                 )
         else:
             balance.addon_tokens_remaining = addon_remaining
+            current_quota = int(balance.plan_tokens_monthly_quota or 0)
+            current_remaining = int(balance.plan_tokens_remaining or 0)
+            if current_quota != quota:
+                spent_in_cycle = max(0, current_quota - current_remaining)
+                new_remaining = max(0, quota - spent_in_cycle)
+                balance.plan_tokens_monthly_quota = quota
+                balance.plan_tokens_remaining = min(quota, new_remaining)
+
+                delta = int(balance.plan_tokens_remaining or 0) - current_remaining
+                if delta != 0:
+                    repo.add_ledger(
+                        TokenLedger(
+                            org_id=org_id,
+                            user_id=None,
+                            operation="plan_quota_update",
+                            delta_tokens=delta,
+                            plan_delta_tokens=delta,
+                            addon_delta_tokens=None,
+                            request_id=None,
+                            balance_plan_after=int(balance.plan_tokens_remaining or 0),
+                            balance_addon_after=addon_remaining,
+                            meta={
+                                "cycle": key,
+                                "old_quota": current_quota,
+                                "new_quota": quota,
+                                "spent_in_cycle": spent_in_cycle,
+                            },
+                        )
+                    )
 
     await repo.flush()
     return balances_by_org

@@ -1,7 +1,7 @@
 import api from '../core/client'
 import type { ApiResponse } from '../core/types'
 
-export type DocsFileType = 'txt' | 'pdf' | 'docx'
+export type DocsFileType = 'pdf' | 'docx'
 export type DocsFileStatus = 'draft' | 'uploading' | 'scanning' | 'ready' | 'blocked' | 'deleted'
 
 export interface DocsFolder {
@@ -71,13 +71,6 @@ export interface DocsFileVersion {
   created_at: string
 }
 
-export interface DocsFileText {
-  file_id: string
-  version_id: string
-  content: string
-  size_bytes: number
-  updated_at: string
-}
 
 export interface DocsPdfSignPayload {
   page: number
@@ -152,15 +145,14 @@ export const docsApi = {
   moveFile: (fileId: string, payload: { folder_id?: string | null }) =>
     api.patch<ApiResponse<DocsFile>>(`/docs/files/${fileId}`, payload),
   getFile: (fileId: string) => api.get<ApiResponse<DocsFile>>(`/docs/files/${fileId}`),
-  getFileText: (fileId: string) => api.get<ApiResponse<DocsFileText>>(`/docs/files/${fileId}/text`),
   listFileVersions: (fileId: string) => api.get<ApiResponse<DocsFileVersion[]>>(`/docs/files/${fileId}/versions`),
-  saveFileText: (fileId: string, payload: { content: string; title?: string | null }) =>
-    api.post<ApiResponse<DocsFile>>(`/docs/files/${fileId}/save-text`, payload),
   signPdf: (fileId: string, payload: DocsPdfSignPayload) =>
     api.post<ApiResponse<DocsFile>>(`/docs/files/${fileId}/pdf/sign`, payload),
   openDocx: (fileId: string) => api.post<ApiResponse<DocsOpenDocxResult>>(`/docs/files/${fileId}/open-docx`, {}),
   aiGenerate: (payload: DocsAIGeneratePayload) =>
     api.post<ApiResponse<DocsAIGenerateResult>>('/docs/files/ai/generate', payload),
+  listAIGenerationJobs: (limit = 20) =>
+    api.get<ApiResponse<DocsAIGenerationJob[]>>('/docs/files/ai/jobs', { params: { limit } }),
   getAIGenerationJob: (jobId: string) =>
     api.get<ApiResponse<DocsAIGenerationJob>>(`/docs/files/ai/jobs/${jobId}`),
   getDownload: (fileId: string) => api.get<ApiResponse<{ url: string; expires_in: number }>>(`/docs/files/${fileId}/download`),

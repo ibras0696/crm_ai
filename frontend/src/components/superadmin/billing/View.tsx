@@ -33,6 +33,11 @@ type YooKassaDraft = {
 type NewPackageDraft = {
   code: string
   display_name: string
+  badge_text: string
+  description: string
+  button_text: string
+  payment_note: string
+  price_caption: string
   tokens: number
   price_rub_cents: number
   sort_order: number
@@ -108,6 +113,28 @@ function NumberInput({
   )
 }
 
+function TextArea({
+  value,
+  onChange,
+  placeholder,
+  rows = 3,
+}: {
+  value: string
+  onChange?: (value: string) => void
+  placeholder?: string
+  rows?: number
+}) {
+  return (
+    <textarea
+      className="w-full rounded-lg border border-border/80 bg-background px-3 py-2 text-sm transition-colors outline-none focus:border-primary/60"
+      value={value}
+      onChange={(e) => onChange?.(e.target.value)}
+      placeholder={placeholder}
+      rows={rows}
+    />
+  )
+}
+
 function toLocalDateTime(v?: string | null): string {
   if (!v) return '—'
   const d = new Date(v)
@@ -146,6 +173,11 @@ export function SuperadminBillingView() {
   const [newPackageDraft, setNewPackageDraft] = useState<NewPackageDraft>({
     code: '',
     display_name: '',
+    badge_text: '',
+    description: '',
+    button_text: 'Перейти к оплате',
+    payment_note: 'После оплаты токены сразу появятся в кабинете и начнут списываться раньше тарифного лимита.',
+    price_caption: '',
     tokens: 50000,
     price_rub_cents: 99000,
     sort_order: 100,
@@ -243,6 +275,11 @@ export function SuperadminBillingView() {
     try {
       const r = await superadminApi.upsertTokenPackage(code, {
         display_name: draft.display_name,
+        badge_text: draft.badge_text || null,
+        description: draft.description || null,
+        button_text: draft.button_text || null,
+        payment_note: draft.payment_note || null,
+        price_caption: draft.price_caption || null,
         tokens: Number(draft.tokens),
         price_rub_cents: Number(draft.price_rub_cents),
         is_active: Boolean(draft.is_active),
@@ -284,6 +321,11 @@ export function SuperadminBillingView() {
     try {
       const r = await superadminApi.upsertTokenPackage(code, {
         display_name: newPackageDraft.display_name.trim() || code,
+        badge_text: newPackageDraft.badge_text.trim() || null,
+        description: newPackageDraft.description.trim() || null,
+        button_text: newPackageDraft.button_text.trim() || null,
+        payment_note: newPackageDraft.payment_note.trim() || null,
+        price_caption: newPackageDraft.price_caption.trim() || null,
         tokens: Number(newPackageDraft.tokens || 0),
         price_rub_cents: Number(newPackageDraft.price_rub_cents || 0),
         is_active: true,
@@ -294,6 +336,11 @@ export function SuperadminBillingView() {
       setNewPackageDraft({
         code: '',
         display_name: '',
+        badge_text: '',
+        description: '',
+        button_text: 'Перейти к оплате',
+        payment_note: 'После оплаты токены сразу появятся в кабинете и начнут списываться раньше тарифного лимита.',
+        price_caption: '',
         tokens: 50000,
         price_rub_cents: 99000,
         sort_order: 100,
@@ -557,6 +604,45 @@ export function SuperadminBillingView() {
                 />
               </Field>
             </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+              <Field label="Бейдж">
+                <TextInput
+                  value={newPackageDraft.badge_text}
+                  onChange={(value) => setNewPackageDraft((prev) => ({ ...prev, badge_text: value }))}
+                  placeholder="Например: На пробу"
+                />
+              </Field>
+              <Field label="Текст кнопки">
+                <TextInput
+                  value={newPackageDraft.button_text}
+                  onChange={(value) => setNewPackageDraft((prev) => ({ ...prev, button_text: value }))}
+                  placeholder="Перейти к оплате"
+                />
+              </Field>
+              <Field label="Подпись цены">
+                <TextInput
+                  value={newPackageDraft.price_caption}
+                  onChange={(value) => setNewPackageDraft((prev) => ({ ...prev, price_caption: value }))}
+                  placeholder="Например: 20 ₽ за 1 000 токенов"
+                />
+              </Field>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              <Field label="Описание под названием">
+                <TextArea
+                  value={newPackageDraft.description}
+                  onChange={(value) => setNewPackageDraft((prev) => ({ ...prev, description: value }))}
+                  placeholder="Короткое описание пакета"
+                />
+              </Field>
+              <Field label="Текст после оплаты">
+                <TextArea
+                  value={newPackageDraft.payment_note}
+                  onChange={(value) => setNewPackageDraft((prev) => ({ ...prev, payment_note: value }))}
+                  placeholder="Что показать пользователю под карточкой"
+                />
+              </Field>
+            </div>
             <div className="flex justify-end">
               <button
                 onClick={() => void createPackage()}
@@ -612,6 +698,40 @@ export function SuperadminBillingView() {
                       />
                       <span>{d.is_active ? 'Да' : 'Нет'}</span>
                     </label>
+                  </Field>
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                  <Field label="Бейдж">
+                    <TextInput
+                      value={d.badge_text || ''}
+                      onChange={(value) => updatePackageDraft(pkg.code, { badge_text: value })}
+                    />
+                  </Field>
+                  <Field label="Текст кнопки">
+                    <TextInput
+                      value={d.button_text || ''}
+                      onChange={(value) => updatePackageDraft(pkg.code, { button_text: value })}
+                    />
+                  </Field>
+                  <Field label="Подпись цены">
+                    <TextInput
+                      value={d.price_caption || ''}
+                      onChange={(value) => updatePackageDraft(pkg.code, { price_caption: value })}
+                    />
+                  </Field>
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <Field label="Описание под названием">
+                    <TextArea
+                      value={d.description || ''}
+                      onChange={(value) => updatePackageDraft(pkg.code, { description: value })}
+                    />
+                  </Field>
+                  <Field label="Текст после оплаты">
+                    <TextArea
+                      value={d.payment_note || ''}
+                      onChange={(value) => updatePackageDraft(pkg.code, { payment_note: value })}
+                    />
                   </Field>
                 </div>
                 <div className="flex flex-wrap items-center justify-between gap-3">

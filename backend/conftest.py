@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from src.config import settings
 from src.infrastructure.database import Base, get_async_session
+import src.modules.superadmin.models  # noqa: F401
 
 # Tests should not be rate-limited.
 # Important: set flags before importing `src.main`, because middleware is wired at import time.

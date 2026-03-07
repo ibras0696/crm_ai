@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 from src.common.http_headers import content_disposition_attachment
 from src.common.schemas import ApiResponse
 from src.config import settings
+from src.modules.auth.security import create_superadmin_access_token
 from src.modules.superadmin.dependencies import require_superadmin
 from src.modules.superadmin.schemas import (
     SetOrgAIEnabledRequest,
@@ -22,6 +23,7 @@ from src.modules.superadmin.schemas import (
     SuperadminOrgMembersPage,
     SuperadminOverviewResponse,
     SuperadminPlanChangeResponse,
+    SuperadminProfileResponse,
     SuperadminRecordListPage,
     SuperadminSubscriptionPeriodResponse,
     SuperadminTableDetail,
@@ -29,6 +31,7 @@ from src.modules.superadmin.schemas import (
     SuperadminTokenResponse,
     SuperadminUpdateAIConfigRequest,
     SuperadminUpdateBillingPlanRequest,
+    SuperadminUpdateProfileRequest,
     SuperadminUpdateYooKassaRequest,
     SuperadminUpsertTokenPackageRequest,
     SuperadminUserListPage,
@@ -105,6 +108,48 @@ async def superadmin_login(body: SuperadminLoginRequest, request: Request, respo
 async def superadmin_logout(response: Response):
     _clear_superadmin_cookie(response)
     return ApiResponse(data=None)
+
+
+@protected.get("/profile", response_model=ApiResponse[SuperadminProfileResponse])
+async def superadmin_profile():
+    return ApiResponse(data=SuperadminProfileResponse.model_validate(await _service.auth.get_profile()))
+
+
+@protected.patch("/profile", response_model=ApiResponse[SuperadminProfileResponse])
+async def superadmin_update_profile(
+    body: SuperadminUpdateProfileRequest,
+    request: Request,
+    response: Response,
+    superadmin_payload: dict = Depends(require_superadmin),
+):
+    ip = request.client.host if request.client else None
+    try:
+        data = await _service.auth.update_profile(
+            body.model_dump(exclude_unset=True),
+            changed_by=str(superadmin_payload.get("email") or settings.SUPERADMIN_EMAIL or "superadmin"),
+            ip_address=ip,
+        )
+    except RuntimeError:
+        return ApiResponse(
+            ok=False,
+            data=None,
+            error={
+                "code": "SUPERADMIN_NOT_CONFIGURED",
+                "message": "Суперадмин не настроен. Сначала задайте начальные учетные данные.",
+            },
+        )
+    except ValueError as exc:
+        code = str(exc)
+        if code == "INVALID_CURRENT_PASSWORD":
+            return ApiResponse(
+                ok=False,
+                data=None,
+                error={"code": code, "message": "Текущий пароль введён неверно."},
+            )
+        return ApiResponse(ok=False, data=None, error={"code": "VALIDATION_ERROR", "message": "Некорректные данные профиля"})
+
+    _set_superadmin_cookie(response, create_superadmin_access_token(email=str(data.get("email") or "")))
+    return ApiResponse(data=SuperadminProfileResponse.model_validate(data))
 
 
 @protected.get("/dashboard", response_model=ApiResponse[SuperadminDashboardResponse])

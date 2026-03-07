@@ -28,6 +28,7 @@ from src.modules.ai.internal.chat_controller_parts.action_repair import (
 )
 from src.modules.ai.internal.chat_controller_parts.actions import (
     CONFIRMABLE_ACTIONS,
+    _build_dashboard_fallback_action,
     _build_kb_fallback_action,
     _build_pending_action_result,
     _claims_action_completed,
@@ -613,6 +614,18 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
             )
             action_payload = _normalize_action_payload_for_execution(
                 kb_fallback,
+                ui_intent=body.ui_intent,
+                user_message=body.message,
+            )
+        if action_payload is None and (body.ui_intent or "").strip().lower() == "create_dashboard":
+            dashboard_fallback = _build_dashboard_fallback_action(
+                user_message=body.message,
+                ui_intent=body.ui_intent,
+                ui_params=body.ui_intent_params,
+                assistant_reply=reply or reply_raw,
+            )
+            action_payload = _normalize_action_payload_for_execution(
+                dashboard_fallback,
                 ui_intent=body.ui_intent,
                 user_message=body.message,
             )

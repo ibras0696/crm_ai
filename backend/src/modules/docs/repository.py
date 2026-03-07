@@ -103,6 +103,7 @@ class DocsRepository:
             File.id == file_id,
             File.org_id == org_id,
             File.type.in_([FileType.TXT.value, FileType.PDF.value, FileType.DOCX.value]),
+            File.status != FileStatus.DELETED.value,
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
@@ -215,6 +216,26 @@ class DocsRepository:
         """Получить AI job по id без фильтра организации."""
         stmt = select(DocsAIGenerationJob).where(DocsAIGenerationJob.id == job_id).limit(1)
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def list_ai_jobs_by_file(self, *, file_id: uuid.UUID) -> list[DocsAIGenerationJob]:
+        """Получить список AI jobs, связанных с конкретным файлом."""
+        stmt = select(DocsAIGenerationJob).where(DocsAIGenerationJob.file_id == file_id)
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def list_recent_ai_generation_jobs(
+        self,
+        *,
+        org_id: uuid.UUID,
+        limit: int = 20,
+    ) -> list[DocsAIGenerationJob]:
+        """Получить последние AI jobs генерации документов по организации."""
+        stmt = (
+            select(DocsAIGenerationJob)
+            .where(DocsAIGenerationJob.org_id == org_id)
+            .order_by(DocsAIGenerationJob.created_at.desc())
+            .limit(max(1, min(int(limit), 100)))
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
 
     async def get_ai_generation_job_for_update(self, *, job_id: uuid.UUID) -> DocsAIGenerationJob | None:
         """Получить AI job с блокировкой строки FOR UPDATE."""

@@ -39,13 +39,5 @@ def apply_ui_intent_overrides(action_payload: dict[str, Any] | None, ui_intent: 
 
         if forced in {"metric", "bar", "line", "pie", "table"}:
             action_payload["preferred_widget_type"] = forced
-            widgets = action_payload.get("widgets")
-            if isinstance(widgets, list) and widgets:
-                # User selected one chart style in UI: normalize all widgets to this type
-                # for predictable UX.
-                for w in widgets:
-                    if not isinstance(w, dict):
-                        continue
-                    w["widget_type"] = forced
 
     return action_payload

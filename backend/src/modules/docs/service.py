@@ -22,9 +22,8 @@ from src.infrastructure.metrics_custom import (
 )
 from src.modules.ai.internal.repository import AIRepository
 from src.modules.ai.limits import check_ai_limits, is_org_ai_enabled
-from src.modules.ai.service import estimate_tokens
 from src.modules.audit.repository import AuditRepository
-from src.modules.docs.ai_generator import DEFAULT_AI_DOCUMENT_GENERATOR
+from src.modules.docs.ai_generator import DEFAULT_AI_DOCUMENT_GENERATOR, estimate_generation_budget
 from src.modules.docs.doc_editor_provider import DEFAULT_DOC_EDITOR_PROVIDER, OnlyOfficeOpenDocxResult
 from src.modules.docs.document_render import render_document_bytes
 from src.modules.docs.domain import MAX_FOLDER_DEPTH, FileStatus, FileType
@@ -35,6 +34,7 @@ from src.modules.docs.errors import (
     QuotaExceededError,
 )
 from src.modules.docs.models import DocsAIGenerationJob, FileVersion, Folder, OrgStorageUsage
+from src.modules.docs.rate_limit import DEFAULT_DOCS_TEXT_SAVE_RATE_LIMITER
 from src.modules.docs.repository import DocsRepository
 from src.modules.docs.storage import DEFAULT_BUCKET, DEFAULT_STORAGE_PROVIDER, StorageProvider
 from src.modules.files.models import File
@@ -49,14 +49,6 @@ class FinishUploadResult:
 
     file: File
     version_id: uuid.UUID
-
-
-@dataclass(slots=True)
-class SaveTextResult:
-    """Результат сохранения текста TXT-файла."""
-
-    file: File
-    version: FileVersion
 
 
 @dataclass(slots=True)
@@ -90,12 +82,6 @@ def _inc_upload_metric(status: str) -> None:
     """Безопасно инкрементировать метрику docs upload pipeline."""
     with suppress(Exception):
         UPLOADS_TOTAL.labels(status=status).inc()
-
-
-def _inc_text_save_metric(status: str) -> None:
-    """Безопасно инкрементировать метрику сохранения TXT."""
-    with suppress(Exception):
-        DOCS_TEXT_SAVES_TOTAL.labels(status=status).inc()
 
 
 def _inc_version_metric(source: str) -> None:
@@ -184,6 +170,20 @@ class DocsService:
             )
         return await self.repo.update_folder(folder)
 
+    async def delete_folder(self, *, org_id: uuid.UUID, folder_id: uuid.UUID) -> None:
+        """Удалить папку, если в ней нет вложенных папок и файлов."""
+        folder = await self.repo.get_folder(folder_id=folder_id, org_id=org_id)
+        if folder is None:
+            raise DocsModuleError(code="NOT_FOUND", message="Папка не найдена", status_code=404)
+
+        child_folders = await self.repo.count_child_folders(folder_id=folder_id, org_id=org_id)
+        if child_folders > 0:
+            raise DocsModuleError(code="FOLDER_NOT_EMPTY", message="Сначала удалите вложенные папки")
+
+        file_count = await self.repo.count_files_in_folder(folder_id=folder_id, org_id=org_id)
+        if file_count > 0:
+            raise DocsModuleError(code="FOLDER_NOT_EMPTY", message="Сначала удалите файлы из папки")
+
         await self.repo.delete_folder(folder)
 
     async def delete_file(
@@ -211,6 +211,17 @@ class DocsService:
         await self.repo.update_file(file_obj)
         await self.repo.update_storage_usage(usage)
 
+        # Cleanup AI jobs
+        try:
+            ai_jobs = await self.repo.list_ai_jobs_by_file(file_id=file_id)
+            for job in ai_jobs:
+                if job.status in ("queued", "running", "scanning"):
+                    job.status = "failed"
+                    job.error_message = "Файл был удален пользователем во время генерации"
+                    await self.repo.update_ai_generation_job(job)
+        except Exception:
+            logger.exception("docs_delete_file_ai_cleanup_failed", extra={"file_id": str(file_id)})
+
         from src.modules.docs.tasks import docs_delete_file_background
         try:
             docs_delete_file_background.delay(str(file_id))
@@ -230,14 +241,8 @@ class DocsService:
         expires_in: int = 900,
     ) -> dict:
         """Инициализировать загрузку файла и зарезервировать место по квоте."""
-        file_type = self._resolve_file_type(filename=filename, content_type=content_type)
-        if file_type == FileType.PDF:
-            raise DocsModuleError(
-                code="UNSUPPORTED_TYPE",
-                message="Загрузка PDF-файлов запрещена",
-                status_code=400,
-            )
         self._validate_upload_size(size_bytes)
+        file_type = self._resolve_file_type(filename=filename, content_type=content_type)
 
         if folder_id is not None:
             folder = await self.repo.get_folder(folder_id=folder_id, org_id=org_id)
@@ -442,7 +447,7 @@ class DocsService:
         folder_id: uuid.UUID | None,
         title: str | None,
     ) -> File:
-        """Создать пустой TXT/PDF/DOCX документ как READY-файл с версией v1."""
+        """Создать пустой PDF/DOCX документ как READY-файл с версией v1."""
         normalized_type = self._resolve_generated_file_type(file_type)
         if folder_id is not None:
             folder = await self.repo.get_folder(folder_id=folder_id, org_id=org_id)
@@ -555,44 +560,6 @@ class DocsService:
             raise DocsModuleError(code="NOT_FOUND", message="Файл не найден", status_code=404)
         return file_obj
 
-    async def list_versions(self, *, org_id: uuid.UUID, file_id: uuid.UUID, limit: int = 50) -> list[FileVersion]:
-        """Получить историю версий Docs-файла (новые -> старые)."""
-        file_obj = await self.get_file(org_id=org_id, file_id=file_id)
-        return await self.repo.list_file_versions(file_id=file_obj.id, limit=limit)
-
-    async def get_text_content(self, *, org_id: uuid.UUID, file_id: uuid.UUID) -> dict[str, object]:
-        """Прочитать актуальный текст TXT-файла для встроенного редактора."""
-        file_obj = await self.get_file(org_id=org_id, file_id=file_id)
-        if file_obj.type != FileType.TXT.value:
-            raise InvalidTypeError("Текстовый редактор доступен только для TXT-файлов")
-        if file_obj.status != FileStatus.READY.value or file_obj.current_version_id is None:
-            raise DocsModuleError(code="FILE_NOT_READY", message="Файл недоступен для редактирования")
-
-        version = await self.repo.get_file_version(version_id=file_obj.current_version_id, file_id=file_obj.id)
-        if version is None:
-            raise DocsModuleError(code="FILE_VERSION_NOT_FOUND", message="Текущая версия файла не найдена")
-
-        try:
-            payload = self.storage.get_object_bytes(bucket=version.s3_bucket, key=version.s3_key)
-        except Exception as exc:
-            raise DocsModuleError(code="STORAGE_READ_ERROR", message="Не удалось прочитать файл из хранилища") from exc
-
-        try:
-            text = payload.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise DocsModuleError(
-                code="TEXT_DECODE_ERROR",
-                message="Текущая версия TXT не может быть прочитана",
-            ) from exc
-
-        return {
-            "file_id": file_obj.id,
-            "version_id": version.id,
-            "content": text,
-            "size_bytes": int(version.size_bytes),
-            "updated_at": file_obj.updated_at,
-        }
-
     async def save_text(
         self,
         *,
@@ -601,74 +568,70 @@ class DocsService:
         file_id: uuid.UUID,
         content: str,
         title: str | None,
-    ) -> SaveTextResult:
-        """Сохранить TXT как новую версию с инкрементальным учетом usage."""
+    ) -> File:
+        """Сохранить новое текстовое содержимое TXT-файла как новую версию."""
         file_obj = await self.get_file(org_id=org_id, file_id=file_id)
         if file_obj.type != FileType.TXT.value:
-            raise InvalidTypeError("Сохранение текста поддерживается только для TXT-файлов")
-        if file_obj.current_version_id is None:
-            raise DocsModuleError(code="FILE_VERSION_NOT_FOUND", message="У файла отсутствует текущая версия")
-        if file_obj.status not in {FileStatus.READY.value, FileStatus.BLOCKED.value}:
-            raise DocsModuleError(code="FILE_NOT_READY", message="Файл сейчас нельзя редактировать")
+            raise InvalidTypeError("Сохранение текста доступно только для TXT-файлов")
+        if file_obj.status != FileStatus.READY.value or file_obj.current_version_id is None:
+            raise DocsModuleError(code="FILE_NOT_READY", message="Файл недоступен для редактирования")
 
         current_version = await self.repo.get_file_version(version_id=file_obj.current_version_id, file_id=file_obj.id)
         if current_version is None:
             raise DocsModuleError(code="FILE_VERSION_NOT_FOUND", message="Текущая версия файла не найдена")
 
-        payload = str(content or "").encode("utf-8")
-        new_size = len(payload)
-        self._validate_upload_size(new_size)
-        old_size = int(file_obj.size or current_version.size_bytes or 0)
-        counted_old = old_size if file_obj.status == FileStatus.READY.value else 0
+        normalized_content = str(content or "")
+        payload = normalized_content.encode("utf-8")
+        self._validate_upload_size(len(payload))
 
-        usage = await self.repo.get_storage_usage_for_update(org_id=org_id)
-        limit_bytes = await self._resolve_storage_limit_bytes(org_id=org_id)
-        growth = max(0, int(new_size) - int(counted_old))
-        projected = int(usage.used_bytes) + int(usage.reserved_bytes) + growth
-        if limit_bytes > 0 and projected > limit_bytes:
-            _inc_text_save_metric("quota_exceeded")
-            raise QuotaExceededError("Недостаточно свободного места для сохранения TXT.")
+        await DEFAULT_DOCS_TEXT_SAVE_RATE_LIMITER.check(
+            org_id=org_id,
+            user_id=user_id,
+            rpm_limit=int(getattr(settings, "DOCS_TEXT_SAVE_RPM", 20) or 20),
+        )
 
         version_id = uuid.uuid4()
         key = self.storage.build_version_key(org_id=org_id, file_id=file_obj.id, version_id=version_id)
         try:
             self.storage.put_object_bytes(
-                bucket=DEFAULT_BUCKET,
+                bucket=current_version.s3_bucket,
                 key=key,
                 payload=payload,
-                content_type="text/plain; charset=utf-8",
+                content_type="text/plain",
             )
         except Exception as exc:
-            _inc_text_save_metric("storage_error")
             raise DocsModuleError(
                 code="STORAGE_WRITE_ERROR",
-                message="Не удалось сохранить новую версию файла",
+                message="Не удалось сохранить текстовую версию файла",
             ) from exc
 
+        replaced_ready_size = int(current_version.size_bytes or file_obj.size or 0)
         version = FileVersion(
             id=version_id,
             file_id=file_obj.id,
             s3_key=key,
-            s3_bucket=DEFAULT_BUCKET,
-            size_bytes=int(new_size),
+            s3_bucket=current_version.s3_bucket,
+            size_bytes=int(len(payload)),
             sha256=sha256(payload).hexdigest(),
             mime="text/plain",
+            meta_json={"source": "save_text", "replaced_ready_size": replaced_ready_size},
             created_by=user_id,
         )
         await self.repo.create_file_version(version)
 
-        file_obj.current_version_id = version.id
-        file_obj.s3_key = key
-        file_obj.s3_bucket = DEFAULT_BUCKET
-        file_obj.content_type = "text/plain"
-        file_obj.size = int(new_size)
-        file_obj.status = FileStatus.READY.value
+        usage = await self.repo.get_storage_usage_for_update(org_id=org_id)
+        usage.used_bytes = max(0, int(usage.used_bytes) + int(len(payload)) - replaced_ready_size)
+        await self.repo.update_storage_usage(usage)
+
         if title is not None:
             file_obj.title = title
+        file_obj.current_version_id = version.id
+        file_obj.s3_key = key
+        file_obj.s3_bucket = current_version.s3_bucket
+        file_obj.content_type = "text/plain"
+        file_obj.size = int(len(payload))
+        file_obj.status = FileStatus.READY.value
         await self.repo.update_file(file_obj)
-
-        usage.used_bytes = max(0, int(usage.used_bytes) + int(new_size) - int(counted_old))
-        await self.repo.update_storage_usage(usage)
 
         await self.audit_repo.log(
             org_id=org_id,
@@ -678,9 +641,9 @@ class DocsService:
             entity_id=str(version.id),
             meta={
                 "event": "version_created",
-                "file_id": str(file_obj.id),
-                "size_bytes": int(new_size),
                 "source": "save_text",
+                "file_id": str(file_obj.id),
+                "size_bytes": int(len(payload)),
             },
         )
         await self.audit_repo.log(
@@ -692,13 +655,41 @@ class DocsService:
             meta={
                 "event": "text_saved",
                 "version_id": str(version.id),
-                "size_bytes": int(new_size),
-                "chars_count": len(str(content or "")),
+                "size_bytes": int(len(payload)),
             },
         )
-        _inc_text_save_metric("ok")
+        with suppress(Exception):
+            DOCS_TEXT_SAVES_TOTAL.labels(status="ok").inc()
         _inc_version_metric("save_text")
-        return SaveTextResult(file=file_obj, version=version)
+        return file_obj
+
+    async def get_text_content(self, *, org_id: uuid.UUID, file_id: uuid.UUID) -> dict[str, str]:
+        """Получить текстовое содержимое текущей версии TXT-файла."""
+        file_obj = await self.get_file(org_id=org_id, file_id=file_id)
+        if file_obj.type != FileType.TXT.value:
+            raise InvalidTypeError("Чтение текста доступно только для TXT-файлов")
+        if file_obj.current_version_id is None:
+            raise DocsModuleError(code="FILE_VERSION_NOT_FOUND", message="Текущая версия файла не найдена")
+
+        version = await self.repo.get_file_version(version_id=file_obj.current_version_id, file_id=file_obj.id)
+        if version is None:
+            raise DocsModuleError(code="FILE_VERSION_NOT_FOUND", message="Текущая версия файла не найдена")
+
+        try:
+            payload = self.storage.get_object_bytes(bucket=version.s3_bucket, key=version.s3_key)
+        except Exception as exc:
+            raise DocsModuleError(code="STORAGE_READ_ERROR", message="Не удалось прочитать файл из хранилища") from exc
+
+        try:
+            content = payload.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise DocsModuleError(code="INVALID_TEXT_ENCODING", message="Файл содержит невалидный UTF-8 текст") from exc
+        return {"content": content}
+
+    async def list_versions(self, *, org_id: uuid.UUID, file_id: uuid.UUID, limit: int = 50) -> list[FileVersion]:
+        """Получить историю версий Docs-файла (новые -> старые)."""
+        file_obj = await self.get_file(org_id=org_id, file_id=file_id)
+        return await self.repo.list_file_versions(file_id=file_obj.id, limit=limit)
 
     async def request_pdf_sign(
         self,
@@ -937,8 +928,21 @@ class DocsService:
         ai_repo = AIRepository(self.session)
         runtime = await DEFAULT_AI_DOCUMENT_GENERATOR.resolve_runtime(ai_repo)
 
-        estimated_completion = self._estimate_ai_completion_tokens(normalized_type)
-        estimated_request_tokens = int(estimate_tokens(normalized_prompt) + estimated_completion + 180)
+        generation_budget = estimate_generation_budget(
+            max_tokens_per_request=runtime.max_tokens,
+            file_type=normalized_type,
+            prompt=normalized_prompt,
+            template=template,
+            title=title,
+            language=language,
+        )
+        if generation_budget.completion_tokens < 256:
+            raise DocsModuleError(
+                code="PROMPT_TOO_LARGE_FOR_REQUEST_LIMIT",
+                message="Запрос слишком длинный для текущего лимита AI на один запрос. Сократите описание или увеличьте лимит.",
+                status_code=422,
+            )
+        estimated_request_tokens = int(generation_budget.total_tokens)
         ok, err = await check_ai_limits(
             self.session,
             org_id=org_id,
@@ -1032,6 +1036,10 @@ class DocsService:
             raise DocsModuleError(code="NOT_FOUND", message="AI job не найден", status_code=404)
         return job
 
+    async def list_ai_generation_jobs(self, *, org_id: uuid.UUID, limit: int = 20) -> list[DocsAIGenerationJob]:
+        """Получить последние AI-job генерации документов по организации."""
+        return await self.repo.list_recent_ai_generation_jobs(org_id=org_id, limit=limit)
+
     async def build_download(
         self,
         *,
@@ -1106,6 +1114,15 @@ class DocsService:
 
         folders = await self.repo.list_folders(org_id=org_id)
         by_id = {item.id: item for item in folders}
+        children_by_parent: dict[uuid.UUID | None, list[Folder]] = {}
+        for item in folders:
+            children_by_parent.setdefault(item.parent_id, []).append(item)
+
+        def _subtree_extra_depth(folder_id: uuid.UUID) -> int:
+            children = children_by_parent.get(folder_id, [])
+            if not children:
+                return 0
+            return 1 + max(_subtree_extra_depth(child.id) for child in children)
 
         parent = by_id.get(parent_id)
         if parent is None:
@@ -1130,7 +1147,8 @@ class DocsService:
                 break
             cursor = next_cursor
 
-        if depth + 1 > MAX_FOLDER_DEPTH:
+        subtree_extra_depth = _subtree_extra_depth(current_folder_id) if current_folder_id is not None else 0
+        if depth + 1 + subtree_extra_depth > MAX_FOLDER_DEPTH:
             raise InvalidDepthError()
         return parent_id
 
@@ -1158,12 +1176,16 @@ class DocsService:
     @staticmethod
     def _resolve_generated_file_type(raw_type: str) -> FileType:
         """Преобразовать строковый тип документа в enum для создания пустого или AI-генерации."""
-        value = str(raw_type or "").strip().lower()
-        if value == FileType.TXT.value:
-            return FileType.TXT
-        if value == FileType.DOCX.value:
-            return FileType.DOCX
-        raise InvalidTypeError("Для создания или генерации поддерживаются только форматы TXT и DOCX")
+        normalized = str(raw_type or "").strip().lower()
+        mapping = {
+            FileType.TXT.value: FileType.TXT,
+            FileType.DOCX.value: FileType.DOCX,
+            FileType.PDF.value: FileType.PDF,
+        }
+        resolved = mapping.get(normalized)
+        if resolved is None:
+            raise InvalidTypeError()
+        return resolved
 
     async def export_pdf(self, *, org_id: uuid.UUID, file_id: uuid.UUID) -> dict[str, object]:
         """Экспортировать TXT или DOCX файл в формат PDF и вернуть ссылку на скачивание."""
@@ -1185,14 +1207,15 @@ class DocsService:
 
         pdf_bytes = b""
         if file_obj.type == FileType.TXT.value:
-            from src.modules.docs.document_render import _build_pdf_bytes
             try:
                 text = payload.decode("utf-8")
-                pdf_bytes = _build_pdf_bytes(text=text, title=file_obj.title or file_obj.original_name)
-            except Exception as exc:
-                raise DocsModuleError(
-                    code="CONVERSION_ERROR", message="Не удалось сконвертировать текстовый файл в PDF"
-                ) from exc
+            except UnicodeDecodeError as exc:
+                raise DocsModuleError(code="INVALID_TEXT_ENCODING", message="TXT файл содержит невалидный UTF-8") from exc
+            pdf_bytes, _, _ = render_document_bytes(
+                file_type=FileType.PDF,
+                text=text,
+                title=file_obj.title or file_obj.original_name,
+            )
         elif file_obj.type == FileType.DOCX.value:
             from src.modules.docs.doc_editor_provider import DEFAULT_DOC_EDITOR_PROVIDER
             DEFAULT_DOC_EDITOR_PROVIDER.ensure_configured()
@@ -1253,21 +1276,11 @@ class DocsService:
         raise InvalidTypeError()
 
     @staticmethod
-    def _estimate_ai_completion_tokens(file_type: FileType) -> int:
-        """Оценить completion-токены для проверки лимитов до запуска job."""
-        if file_type == FileType.TXT:
-            return 1200
-        if file_type == FileType.DOCX:
-            return 1800
-        return 1500
-
-    @staticmethod
     def _estimate_ai_reserved_bytes(prompt: str, file_type: FileType) -> int:
         """Оценить резерв места на период AI-генерации."""
         base = int(getattr(settings, "DOCS_AI_RESERVED_BYTES_BASE", 262144) or 262144)
         prompt_bytes = len(str(prompt or "").encode("utf-8"))
         type_factor = {
-            FileType.TXT: 4,
             FileType.DOCX: 8,
             FileType.PDF: 7,
         }.get(file_type, 5)
@@ -1318,7 +1331,7 @@ class DocsService:
         """Собрать безопасное имя файла из заголовка и расширения."""
         normalized_ext = str(extension or "").strip().lstrip(".").lower()
         if not normalized_ext:
-            normalized_ext = "txt"
+            normalized_ext = "docx"
         base = " ".join(str(title or "Новый документ").strip().split())
         safe_chars = []
         for char in base:

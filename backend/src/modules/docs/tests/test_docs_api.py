@@ -562,6 +562,14 @@ async def test_docs_create_empty_file_and_move_between_folders(
     assert created_objects
     file_id = str(create_empty.json()["data"]["id"])
 
+    async with UnitOfWork() as uow:
+        created_file = (
+            await uow.session.execute(
+                select(File).where(File.id == uuid.UUID(file_id)).limit(1),
+            )
+        ).scalar_one()
+        original_s3_key = created_file.s3_key
+
     usage = await client.get("/api/v1/docs/usage", headers=_headers(token))
     assert usage.status_code == 200
     assert usage.json()["ok"] is True
@@ -584,6 +592,17 @@ async def test_docs_create_empty_file_and_move_between_folders(
     assert move_to_root.status_code == 200
     assert move_to_root.json()["ok"] is True
     assert move_to_root.json()["data"]["folder_id"] is None
+
+    async with UnitOfWork() as uow:
+        moved_file = (
+            await uow.session.execute(
+                select(File).where(File.id == uuid.UUID(file_id)).limit(1),
+            )
+        ).scalar_one()
+        assert moved_file.folder_id is None
+        assert moved_file.s3_key == original_s3_key
+        assert moved_file.s3_key in created_objects
+        assert len(created_objects) == 1
 
     download = await client.get(f"/api/v1/docs/files/{file_id}/download", headers=_headers(token))
     assert download.status_code == 200
@@ -608,6 +627,69 @@ async def test_docs_move_file_to_unknown_folder_returns_error(
     assert moved.status_code == 200
     assert moved.json()["ok"] is False
     assert moved.json()["error"]["code"] == "FOLDER_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_docs_move_folder_between_parents_and_reject_too_deep_subtree(client: AsyncClient):
+    token = await _register_owner(client)
+
+    root_a = await client.post("/api/v1/docs/folders", json={"name": "Root A"}, headers=_headers(token))
+    assert root_a.status_code == 200
+    root_a_id = str(root_a.json()["data"]["id"])
+
+    root_b = await client.post("/api/v1/docs/folders", json={"name": "Root B"}, headers=_headers(token))
+    assert root_b.status_code == 200
+    root_b_id = str(root_b.json()["data"]["id"])
+
+    child_a = await client.post(
+        "/api/v1/docs/folders",
+        json={"name": "Child A", "parent_id": root_a_id},
+        headers=_headers(token),
+    )
+    assert child_a.status_code == 200
+    child_a_id = str(child_a.json()["data"]["id"])
+
+    grandchild_a = await client.post(
+        "/api/v1/docs/folders",
+        json={"name": "Grandchild A", "parent_id": child_a_id},
+        headers=_headers(token),
+    )
+    assert grandchild_a.status_code == 200
+
+    child_b = await client.post(
+        "/api/v1/docs/folders",
+        json={"name": "Child B", "parent_id": root_b_id},
+        headers=_headers(token),
+    )
+    assert child_b.status_code == 200
+    child_b_id = str(child_b.json()["data"]["id"])
+
+    move_to_root_b = await client.patch(
+        f"/api/v1/docs/folders/{child_a_id}",
+        json={"parent_id": root_b_id},
+        headers=_headers(token),
+    )
+    assert move_to_root_b.status_code == 200
+    assert move_to_root_b.json()["ok"] is True
+    assert move_to_root_b.json()["data"]["parent_id"] == root_b_id
+
+    move_back_to_root = await client.patch(
+        f"/api/v1/docs/folders/{child_a_id}",
+        json={"parent_id": None},
+        headers=_headers(token),
+    )
+    assert move_back_to_root.status_code == 200
+    assert move_back_to_root.json()["ok"] is True
+    assert move_back_to_root.json()["data"]["parent_id"] is None
+
+    too_deep_move = await client.patch(
+        f"/api/v1/docs/folders/{child_a_id}",
+        json={"parent_id": child_b_id},
+        headers=_headers(token),
+    )
+    assert too_deep_move.status_code == 200
+    assert too_deep_move.json()["ok"] is False
+    assert too_deep_move.json()["error"]["code"] in {"INVALID_DEPTH", "MAX_DEPTH_EXCEEDED"}
 
 
 @pytest.mark.asyncio
@@ -1393,6 +1475,11 @@ async def test_docs_ai_generate_txt_pipeline_ready(client: AsyncClient, monkeypa
     assert job_ready.json()["data"]["status"] == "ready"
     assert int(job_ready.json()["data"]["total_tokens"]) > 0
 
+    jobs_list = await client.get("/api/v1/docs/files/ai/jobs?limit=10", headers=_headers(token))
+    assert jobs_list.status_code == 200
+    assert jobs_list.json()["ok"] is True
+    assert any(str(item["id"]) == job_id for item in jobs_list.json()["data"])
+
 
 @pytest.mark.asyncio
 async def test_docs_ai_generate_rejected_by_ai_limit(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
@@ -1412,6 +1499,46 @@ async def test_docs_ai_generate_rejected_by_ai_limit(client: AsyncClient, monkey
     assert response.status_code == 200
     assert response.json()["ok"] is False
     assert response.json()["error"]["code"] == "AI_USER_RATE_LIMIT"
+
+
+@pytest.mark.asyncio
+async def test_docs_ai_generate_docx_allows_regular_prompt_with_free_request_limit(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    token = await _register_owner(client)
+
+    async def _fake_runtime(*_args, **_kwargs):
+        from src.modules.docs.ai_generator import AIGenerationRuntime
+
+        return AIGenerationRuntime(
+            base_url="https://example.local",
+            bearer_token="test-token",
+            provider_mode="openai_compatible",
+            model="gpt-test",
+            temperature=0.2,
+            max_tokens=2000,
+        )
+
+    monkeypatch.setattr("src.modules.docs.service.DEFAULT_AI_DOCUMENT_GENERATOR.resolve_runtime", _fake_runtime)
+    monkeypatch.setattr("src.modules.docs.routes.ai_generate.delay", lambda *_args, **_kwargs: None)
+
+    response = await client.post(
+        "/api/v1/docs/files/ai/generate",
+        json={
+            "type": "docx",
+            "prompt": (
+                "Подготовь понятное коммерческое предложение для внедрения CRM в отдел продаж. "
+                "Нужно кратко описать этапы запуска, сроки, ожидаемый результат и оставить "
+                "место под реквизиты и стоимость."
+            ),
+            "title": "Коммерческое предложение",
+        },
+        headers=_headers(token),
+    )
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert response.json()["data"]["estimated_request_tokens"] <= 2000
 
 
 @pytest.mark.asyncio

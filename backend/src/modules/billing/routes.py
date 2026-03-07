@@ -11,6 +11,7 @@ from src.common.schemas import ApiResponse
 from src.modules.auth.dependencies import CurrentUser, require_roles
 from src.modules.billing.schemas import (
     CreatePaymentRequest,
+    PaymentStatusOut,
     PlanOut,
     PurchaseTokensRequest,
     TokenBalanceOut,
@@ -68,6 +69,18 @@ async def get_subscription(
     return ApiResponse(data=data)
 
 
+@router.get("/payments/{payment_id}", response_model=ApiResponse[PaymentStatusOut])
+async def get_payment_status(
+    payment_id: str,
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
+):
+    try:
+        data = await _billing_service.get_payment_status(payment_id=payment_id)
+        return ApiResponse(data=PaymentStatusOut(**data))
+    except BillingOperationError as exc:
+        return ApiResponse(ok=False, data=None, error={"code": exc.code, "message": exc.message})
+
+
 @router.get("/tokens/balance", response_model=ApiResponse[TokenBalanceOut])
 async def get_token_balance(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
@@ -86,6 +99,11 @@ async def get_token_packages(
             TokenPackageOut(
                 code=item["code"],
                 display_name=item["display_name"],
+                badge_text=item.get("badge_text"),
+                description=item.get("description"),
+                button_text=item.get("button_text"),
+                payment_note=item.get("payment_note"),
+                price_caption=item.get("price_caption"),
                 tokens=item["tokens"],
                 price_rub_cents=item["price_rub_cents"],
             )

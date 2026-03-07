@@ -60,6 +60,13 @@ export interface InviteInfo {
   created_at: string
 }
 
+export interface AcceptInvitePayload {
+  token: string
+  password: string
+  first_name: string
+  last_name?: string
+}
+
 export const orgApi = {
   getCurrent: () => api.get<ApiResponse<OrgInfo>>('/orgs/current'),
   deleteCurrent: () => api.delete<ApiResponse<null>>('/orgs/current'),
@@ -68,7 +75,7 @@ export const orgApi = {
     api.get<ApiResponse<Array<{ org_id: string; org_name: string; org_slug: string; role: string }>>>('/orgs/my'),
   getMembers: () => api.get<ApiResponse<MemberInfo[]>>('/orgs/members'),
   createInvite: (data: { email: string; role: string }) => api.post<ApiResponse<InviteInfo>>('/orgs/invites', data),
-  acceptInvite: (data: { token: string }) => api.post<ApiResponse<unknown>>('/orgs/invites/accept', data),
+  acceptInvite: (data: AcceptInvitePayload) => api.post<ApiResponse<TokenResponse>>('/orgs/invites/accept', data),
   updateMemberRole: (memberId: string, role: string) =>
     api.put<ApiResponse<unknown>>(`/orgs/members/${memberId}/role`, { role }),
   removeMember: (memberId: string) => api.delete<ApiResponse<unknown>>(`/orgs/members/${memberId}`),

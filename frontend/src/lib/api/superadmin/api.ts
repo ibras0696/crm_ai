@@ -168,6 +168,11 @@ export interface SuperadminBillingPlanItem {
 export interface SuperadminTokenPackageItem {
   code: string
   display_name: string
+  badge_text?: string | null
+  description?: string | null
+  button_text?: string | null
+  payment_note?: string | null
+  price_caption?: string | null
   tokens: number
   price_rub_cents: number
   is_active: boolean
@@ -214,10 +219,30 @@ export interface SuperadminBillingConfig {
   yookassa: SuperadminYooKassaConfig
 }
 
+export interface SuperadminProfileAuditItem {
+  id: string
+  created_at?: string | null
+  actor: string
+  ip_address?: string | null
+  changed_fields: string[]
+  meta?: Record<string, unknown> | null
+}
+
+export interface SuperadminProfile {
+  email: string
+  password_configured: boolean
+  runtime_email_overridden: boolean
+  runtime_password_overridden: boolean
+  audit: SuperadminProfileAuditItem[]
+}
+
 export const superadminApi = {
   login: (email: string, password: string) =>
     superadminHttp.post<ApiResponse<{ access_token: string; token_type: string }>>('/login', { email, password }),
   logout: () => superadminHttp.post<ApiResponse<null>>('/logout', {}),
+  profile: () => superadminHttp.get<ApiResponse<SuperadminProfile>>('/profile'),
+  updateProfile: (data: { email?: string; current_password: string; new_password?: string }) =>
+    superadminHttp.patch<ApiResponse<SuperadminProfile>>('/profile', data),
   overview: (org_limit = 200) => superadminHttp.get<ApiResponse<SuperadminOverview>>(`/overview?org_limit=${org_limit}`),
   orgs: (params: { q?: string; plan?: string; sub_status?: string; limit?: number; offset?: number }) => {
     const q = new URLSearchParams()

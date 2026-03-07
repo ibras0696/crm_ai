@@ -33,7 +33,7 @@ const moduleNav = [
   { to: '/docs', icon: Folder, label: 'Документы' },
   { to: '/knowledge', icon: BookOpen, label: 'База знаний' },
   { to: '/schedule', icon: Calendar, label: 'Расписание' },
-  { to: '/reports', icon: BarChart3, label: 'Отчёты' },
+  { to: '/reports', icon: BarChart3, label: 'Аналитика' },
   { to: '/ai', icon: Brain, label: 'AI Агент' },
   { to: '/admin', icon: Wrench, label: 'Админ-панель' },
   { to: '/billing', icon: CreditCard, label: 'Биллинг' },

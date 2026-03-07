@@ -21,9 +21,10 @@ const ROLES = [
 const RESOURCE_TYPES = [
   { value: 'table', label: 'Таблицы', icon: Table2 },
   { value: 'knowledge', label: 'База знаний', icon: FileText },
+  { value: 'files', label: 'Документы', icon: FileText },
   { value: 'ai', label: 'AI', icon: Brain },
   { value: 'schedule', label: 'Расписание', icon: Calendar },
-  { value: 'reports', label: 'Отчёты', icon: BarChart3 },
+  { value: 'reports', label: 'Аналитика', icon: BarChart3 },
 ]
 
 export default function AdminPage() {
@@ -35,19 +36,33 @@ export default function AdminPage() {
   const [showInvite, setShowInvite] = useState(false)
   const [inviteForm, setInviteForm] = useState({ email: '', role: 'employee' })
   const [saving, setSaving] = useState(false)
+  const [pageError, setPageError] = useState('')
+  const [actionError, setActionError] = useState('')
+  const [actionSuccess, setActionSuccess] = useState('')
   const [inviteError, setInviteError] = useState('')
   const [inviteSuccess, setInviteSuccess] = useState('')
   const [showAddRule, setShowAddRule] = useState(false)
-  const [ruleForm, setRuleForm] = useState({ resource_type: 'table', role: 'employee', can_read: true, can_write: true, can_delete: false })
+  const [ruleForm, setRuleForm] = useState({
+    resource_type: 'table',
+    subject_type: 'role' as 'role' | 'user',
+    role: 'employee',
+    user_id: '',
+    can_read: true,
+    can_write: true,
+    can_delete: false,
+  })
   const [summary, setSummary] = useState<{ tables_count: number; records_count: number; columns_count: number } | null>(null)
   const [aiLimits, setAiLimits] = useState<OrgAILimitsInfo | null>(null)
   const [orgAiDraft, setOrgAiDraft] = useState({ daily_tokens_limit: 0, monthly_tokens_limit: 0 })
   const [savingOrgLimits, setSavingOrgLimits] = useState(false)
   const [savingUserId, setSavingUserId] = useState<string | null>(null)
+  const [savingMemberId, setSavingMemberId] = useState<string | null>(null)
+  const [savingRuleId, setSavingRuleId] = useState<string | null>(null)
   const [aiLimitsError, setAiLimitsError] = useState('')
 
   const loadAll = useCallback(async () => {
     setLoading(true)
+    setPageError('')
     try {
       const [orgR, memR, rulesR, sumR] = await Promise.all([
         orgApi.getCurrent(),
@@ -68,11 +83,42 @@ export default function AdminPage() {
           monthly_tokens_limit: Number(data.org_limits.monthly_tokens_limit || 0),
         })
       }
-    } catch { /* ignore */ }
+    } catch (e: any) {
+      setPageError(e?.response?.data?.error?.message || 'Не удалось загрузить данные админ-панели.')
+    }
     setLoading(false)
   }, [])
 
   useEffect(() => { loadAll() }, [loadAll])
+
+  const clearActionState = () => {
+    setActionError('')
+    setActionSuccess('')
+  }
+
+  const mapAccessError = (err: any): string => {
+    const code = err?.response?.data?.error?.code
+    const message = err?.response?.data?.error?.message
+    if (code === 'FORBIDDEN') return 'У вас нет прав для изменения правил доступа.'
+    if (code === 'NOT_FOUND') return 'Правило доступа не найдено.'
+    if (code === 'CONFLICT') return 'Такое правило уже существует.'
+    if (code === 'VALIDATION_ERROR') return message || 'Проверьте параметры правила доступа.'
+    return message || 'Не удалось изменить правила доступа.'
+  }
+
+  const mapMemberError = (err: any): string => {
+    const code = err?.response?.data?.error?.code
+    const message = err?.response?.data?.error?.message
+    if (code === 'FORBIDDEN') return 'У вас нет прав для управления участниками.'
+    if (code === 'NOT_FOUND') return 'Участник не найден.'
+    if (code === 'VALIDATION_ERROR') {
+      if (message === 'Cannot remove the last owner of an organization' || message === 'Cannot remove the last owner') {
+        return 'Нельзя убрать последнего владельца организации.'
+      }
+      return message || 'Проверьте данные участника.'
+    }
+    return message || 'Не удалось изменить участника.'
+  }
 
   const mapInviteError = (err: any): string => {
     const code = err?.response?.data?.error?.code
@@ -86,6 +132,7 @@ export default function AdminPage() {
   const handleInvite = async () => {
     if (!inviteForm.email.trim()) return
     setSaving(true)
+    clearActionState()
     setInviteError('')
     setInviteSuccess('')
     try {
@@ -113,45 +160,120 @@ export default function AdminPage() {
   }
 
   const handleRoleChange = async (membershipId: string, newRole: string) => {
+    clearActionState()
+    setSavingMemberId(membershipId)
     try {
-      await orgApi.updateMemberRole(membershipId, newRole)
-      loadAll()
-    } catch { /* ignore */ }
+      const resp = await orgApi.updateMemberRole(membershipId, newRole)
+      if (!resp.data.ok) {
+        setActionError(resp.data.error?.message || 'Не удалось изменить роль участника.')
+        return
+      }
+      setActionSuccess('Роль участника обновлена.')
+      await loadAll()
+    } catch (e: any) {
+      setActionError(mapMemberError(e))
+    } finally {
+      setSavingMemberId(null)
+    }
   }
 
   const handleRemoveMember = async (membershipId: string) => {
+    clearActionState()
+    setSavingMemberId(membershipId)
     try {
-      await orgApi.removeMember(membershipId)
-      loadAll()
-    } catch { /* ignore */ }
+      const resp = await orgApi.removeMember(membershipId)
+      if (!resp.data.ok) {
+        setActionError(resp.data.error?.message || 'Не удалось удалить участника.')
+        return
+      }
+      setActionSuccess('Участник удалён из организации.')
+      await loadAll()
+    } catch (e: any) {
+      setActionError(mapMemberError(e))
+    } finally {
+      setSavingMemberId(null)
+    }
   }
 
   const handleAddRule = async () => {
     setSaving(true)
+    clearActionState()
     try {
-      await accessApi.create({ resource_type: ruleForm.resource_type, role: ruleForm.role, can_read: ruleForm.can_read, can_write: ruleForm.can_write, can_delete: ruleForm.can_delete })
+      const resp = await accessApi.create({
+        resource_type: ruleForm.resource_type,
+        role: ruleForm.subject_type === 'role' ? ruleForm.role : undefined,
+        user_id: ruleForm.subject_type === 'user' ? ruleForm.user_id : undefined,
+        can_read: ruleForm.can_read,
+        can_write: ruleForm.can_write,
+        can_delete: ruleForm.can_delete,
+      })
+      if (!resp.data.ok) {
+        setActionError(resp.data.error?.message || 'Не удалось создать правило доступа.')
+        return
+      }
       setShowAddRule(false)
-      loadAll()
-    } catch { /* ignore */ }
-    setSaving(false)
+      setRuleForm({
+        resource_type: 'table',
+        subject_type: 'role',
+        role: 'employee',
+        user_id: '',
+        can_read: true,
+        can_write: true,
+        can_delete: false,
+      })
+      setActionSuccess('Правило доступа создано.')
+      await loadAll()
+    } catch (e: any) {
+      setActionError(mapAccessError(e))
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleDeleteRule = async (id: string) => {
+    clearActionState()
+    setSavingRuleId(id)
     try {
-      await accessApi.delete(id)
+      const resp = await accessApi.delete(id)
+      if (!resp.data.ok) {
+        setActionError(resp.data.error?.message || 'Не удалось удалить правило доступа.')
+        return
+      }
       setRules(prev => prev.filter(r => r.id !== id))
-    } catch { /* ignore */ }
+      setActionSuccess('Правило доступа удалено.')
+    } catch (e: any) {
+      setActionError(mapAccessError(e))
+    } finally {
+      setSavingRuleId(null)
+    }
   }
 
   const handleToggleRulePerm = async (rule: AccessRule, field: 'can_read' | 'can_write' | 'can_delete') => {
+    clearActionState()
+    setSavingRuleId(rule.id)
     try {
       const r = await accessApi.update(rule.id, { [field]: !rule[field] })
-      if (r.data.ok && r.data.data) setRules(prev => prev.map(x => x.id === rule.id ? r.data.data as AccessRule : x))
-    } catch { /* ignore */ }
+      if (r.data.ok && r.data.data) {
+        setRules(prev => prev.map(x => x.id === rule.id ? r.data.data as AccessRule : x))
+        setActionSuccess('Правило доступа обновлено.')
+      } else {
+        setActionError(r.data.error?.message || 'Не удалось обновить правило доступа.')
+      }
+    } catch (e: any) {
+      setActionError(mapAccessError(e))
+    } finally {
+      setSavingRuleId(null)
+    }
   }
 
   const roleLabel = (r: string) => ROLES.find(x => x.value === r)?.label || r
   const roleColor = (r: string) => ROLES.find(x => x.value === r)?.color || ''
+  const memberLabel = (userId: string | null | undefined) => {
+    const member = members.find((item) => item.user_id === userId)
+    if (!member) return userId || 'Пользователь'
+    const fullName = `${member.user_first_name || ''} ${member.user_last_name || ''}`.trim()
+    return fullName || member.user_email || userId || 'Пользователь'
+  }
 
   const mapAiLimitsError = (err: any): string => {
     const code = err?.response?.data?.error?.code
@@ -227,6 +349,22 @@ export default function AdminPage() {
           <p className="text-sm text-muted-foreground mt-0.5">{org?.name || '—'} · Тариф: {org?.plan || '—'}</p>
         </div>
       </div>
+
+      {pageError && (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {pageError}
+        </div>
+      )}
+      {actionError && (
+        <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+          {actionError}
+        </div>
+      )}
+      {actionSuccess && (
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-600">
+          {actionSuccess}
+        </div>
+      )}
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -351,11 +489,16 @@ export default function AdminPage() {
                   <p className="text-xs text-muted-foreground truncate">{m.user_email}</p>
                 </div>
                 <select value={m.role} onChange={e => handleRoleChange(m.id, e.target.value)}
-                  className={`text-xs font-medium px-2 py-1 rounded-md border border-border bg-background ${roleColor(m.role)}`}>
+                  disabled={savingMemberId === m.id}
+                  className={`text-xs font-medium px-2 py-1 rounded-md border border-border bg-background disabled:opacity-50 ${roleColor(m.role)}`}>
                   {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
                 </select>
                 {m.role !== 'owner' && (
-                  <button onClick={() => handleRemoveMember(m.id)} className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-all">
+                  <button
+                    onClick={() => handleRemoveMember(m.id)}
+                    disabled={savingMemberId === m.id}
+                    className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-all disabled:opacity-50"
+                  >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 )}
@@ -378,7 +521,7 @@ export default function AdminPage() {
             <div className="py-12 text-center text-muted-foreground">
               <Shield className="h-10 w-10 mx-auto mb-2 opacity-30" />
               <p>Нет правил доступа</p>
-              <p className="text-xs mt-1">По умолчанию все участники имеют полный доступ</p>
+              <p className="text-xs mt-1">Пока отдельных правил нет, доступ определяется ролью пользователя.</p>
             </div>
           ) : (
             <div className="divide-y divide-border">
@@ -393,18 +536,26 @@ export default function AdminPage() {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium">{rt?.label || rule.resource_type}</p>
                       <p className="text-xs text-muted-foreground">
-                        {rule.role ? `Роль: ${roleLabel(rule.role)}` : rule.user_id ? `Пользователь: ${rule.user_id.slice(0, 8)}...` : '—'}
+                        {rule.role ? `Роль: ${roleLabel(rule.role)}` : rule.user_id ? `Пользователь: ${memberLabel(rule.user_id)}` : '—'}
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
                       {(['can_read', 'can_write', 'can_delete'] as const).map(perm => (
-                        <button key={perm} onClick={() => handleToggleRulePerm(rule, perm)}
-                          className={`text-xs px-2 py-1 rounded-md border transition-colors ${rule[perm] ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30' : 'bg-secondary/50 text-muted-foreground border-border'}`}>
+                        <button
+                          key={perm}
+                          onClick={() => handleToggleRulePerm(rule, perm)}
+                          disabled={savingRuleId === rule.id}
+                          className={`text-xs px-2 py-1 rounded-md border transition-colors disabled:opacity-50 ${rule[perm] ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30' : 'bg-secondary/50 text-muted-foreground border-border'}`}
+                        >
                           {perm === 'can_read' ? 'Чтение' : perm === 'can_write' ? 'Запись' : 'Удаление'}
                         </button>
                       ))}
                     </div>
-                    <button onClick={() => handleDeleteRule(rule.id)} className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-all">
+                    <button
+                      onClick={() => handleDeleteRule(rule.id)}
+                      disabled={savingRuleId === rule.id}
+                      className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-all disabled:opacity-50"
+                    >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
@@ -484,11 +635,40 @@ export default function AdminPage() {
               </select>
             </div>
             <div>
-              <label className="text-xs text-muted-foreground block mb-1">Роль</label>
-              <select value={ruleForm.role} onChange={e => setRuleForm(f => ({ ...f, role: e.target.value }))} className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary">
-                {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+              <label className="text-xs text-muted-foreground block mb-1">Кому выдать</label>
+              <select
+                value={ruleForm.subject_type}
+                onChange={e => setRuleForm(f => ({ ...f, subject_type: e.target.value as 'role' | 'user' }))}
+                className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary"
+              >
+                <option value="role">По роли</option>
+                <option value="user">Конкретному пользователю</option>
               </select>
             </div>
+            {ruleForm.subject_type === 'role' ? (
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Роль</label>
+                <select value={ruleForm.role} onChange={e => setRuleForm(f => ({ ...f, role: e.target.value }))} className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary">
+                  {ROLES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+                </select>
+              </div>
+            ) : (
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Пользователь</label>
+                <select
+                  value={ruleForm.user_id}
+                  onChange={e => setRuleForm(f => ({ ...f, user_id: e.target.value }))}
+                  className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary"
+                >
+                  <option value="">Выберите участника</option>
+                  {members.map(member => (
+                    <option key={member.id} value={member.user_id}>
+                      {memberLabel(member.user_id)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="flex items-center gap-4">
               {[
                 { key: 'can_read', label: 'Чтение' },
@@ -503,7 +683,7 @@ export default function AdminPage() {
             </div>
             <div className="flex gap-3">
               <button onClick={() => setShowAddRule(false)} className="flex-1 h-10 rounded-lg border border-border text-sm hover:bg-secondary transition-colors">Отмена</button>
-              <button onClick={handleAddRule} disabled={saving} className="flex-1 h-10 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors">
+              <button onClick={handleAddRule} disabled={saving || (ruleForm.subject_type === 'user' && !ruleForm.user_id)} className="flex-1 h-10 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors">
                 {saving ? 'Создание...' : 'Создать'}
               </button>
             </div>

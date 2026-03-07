@@ -20,6 +20,14 @@ class KnowledgeRepository:
         await self.session.flush()
         return page
 
+    async def get_max_position(self, *, org_id: uuid.UUID, parent_id: uuid.UUID | None) -> int:
+        stmt = select(func.max(KBPage.position)).where(
+            KBPage.org_id == org_id,
+            KBPage.parent_id == parent_id,
+        )
+        result = await self.session.execute(stmt)
+        return int(result.scalar() or 0)
+
     async def list_by_org(self, *, org_id: uuid.UUID) -> list[KBPage]:
         """List pages for organization."""
         stmt = (

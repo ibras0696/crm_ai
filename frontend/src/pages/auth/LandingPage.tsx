@@ -1,17 +1,19 @@
 import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { motion, useScroll, useTransform, AnimatePresence, useSpring, useMotionValue } from 'framer-motion'
+import type { Variants } from 'framer-motion'
 import { useTheme } from '@/contexts/ThemeContext'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import {
   FileText, BookOpen, Calendar, BarChart3, Brain, Users,
   Shield, Zap, ArrowRight, Sun, Moon, CheckCircle,
-  Globe, Sparkles, Layout, ShieldCheck,
+  Globe, Sparkles, Layout,
   Search, Plus, MessageSquare, Send,
-  ChevronRight, LineChart, Lock, Terminal, Database, LayoutDashboard,
-  MousePointer2, Settings2, Code2
+  ChevronRight, LineChart, Database, LayoutDashboard,
+  MousePointer2
 } from 'lucide-react'
+import { footerSections } from '@/lib/publicPageContent'
 
 // --- Constants ---
 
@@ -53,14 +55,14 @@ const features = [
   },
   {
     icon: BarChart3,
-    title: 'Отчеты',
+    title: 'Аналитика',
     desc: 'Визуализация данных и выгрузка аналитики по всем модулям системы.',
     color: 'text-cyan-400',
     bg: 'bg-cyan-500/10',
   },
 ]
 
-const container = {
+const container: Variants = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
@@ -70,9 +72,9 @@ const container = {
   },
 }
 
-const item = {
+const item: Variants = {
   hidden: { opacity: 0, y: 20 },
-  show: { opacity: 1, y: 0, transition: { duration: 0.5, ease: 'easeOut' } },
+  show: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] as [number, number, number, number] } },
 }
 
 // --- Ambient Cursors (Native Cursor is Visible) ---
@@ -630,9 +632,9 @@ export default function LandingPage() {
 
           <div className="flex items-center gap-4 md:gap-8">
             <nav className="hidden lg:flex items-center gap-8 font-black text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-              <a href="#features" className="hover:text-primary transition-colors">Функции</a>
-              <a href="#demo" className="hover:text-primary transition-colors">Шоукейс</a>
-              <a href="#tech" className="hover:text-primary transition-colors">Стек</a>
+              <a href="#features" className="hover:text-primary transition-colors">Возможности</a>
+              <a href="#demo" className="hover:text-primary transition-colors">Как это выглядит</a>
+              <a href="#cta" className="hover:text-primary transition-colors">Начать</a>
             </nav>
 
             <div className="flex items-center gap-3">
@@ -882,14 +884,17 @@ export default function LandingPage() {
                 ))}
               </div>
             </div>
-            {['Продукт', 'Компания', 'Юридически'].map((title, i) => (
-              <div key={i}>
-                <h4 className="font-black text-xs uppercase tracking-[0.3em] mb-10 text-primary">{title}</h4>
+            {footerSections.map((section) => (
+              <div key={section.title}>
+                <h4 className="font-black text-xs uppercase tracking-[0.3em] mb-10 text-primary">{section.title}</h4>
                 <ul className="space-y-6 text-sm font-bold text-muted-foreground">
-                  <li className="hover:text-foreground cursor-pointer transition-colors">Функции</li>
-                  <li className="hover:text-foreground cursor-pointer transition-colors">Безопасность</li>
-                  <li className="hover:text-foreground cursor-pointer transition-colors">Цены</li>
-                  <li className="hover:text-foreground cursor-pointer transition-colors">Контакты</li>
+                  {section.items.map((item) => (
+                    <li key={item.to}>
+                      <Link to={item.to} className="hover:text-foreground cursor-pointer transition-colors">
+                        {item.label}
+                      </Link>
+                    </li>
+                  ))}
                 </ul>
               </div>
             ))}

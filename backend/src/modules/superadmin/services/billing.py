@@ -43,6 +43,11 @@ class SuperadminBillingService:
         return {
             "code": package.code,
             "display_name": package.display_name,
+            "badge_text": package.badge_text,
+            "description": package.description,
+            "button_text": package.button_text,
+            "payment_note": package.payment_note,
+            "price_caption": package.price_caption,
             "tokens": int(package.tokens),
             "price_rub_cents": int(package.price_rub_cents),
             "is_active": bool(package.is_active),
@@ -181,6 +186,11 @@ class SuperadminBillingService:
                 package = TokenPackage(
                     code=code,
                     display_name=payload.get("display_name") or code,
+                    badge_text=payload.get("badge_text"),
+                    description=payload.get("description"),
+                    button_text=payload.get("button_text"),
+                    payment_note=payload.get("payment_note"),
+                    price_caption=payload.get("price_caption"),
                     tokens=int(payload.get("tokens") or 0),
                     price_rub_cents=int(payload.get("price_rub_cents") or 0),
                     is_active=bool(payload.get("is_active", True)),
@@ -188,7 +198,18 @@ class SuperadminBillingService:
                 )
                 uow.session.add(package)
             else:
-                for field in ["display_name", "tokens", "price_rub_cents", "is_active", "sort_order"]:
+                for field in [
+                    "display_name",
+                    "badge_text",
+                    "description",
+                    "button_text",
+                    "payment_note",
+                    "price_caption",
+                    "tokens",
+                    "price_rub_cents",
+                    "is_active",
+                    "sort_order",
+                ]:
                     if field in payload and payload[field] is not None:
                         setattr(package, field, payload[field])
             await uow.commit()

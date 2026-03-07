@@ -784,6 +784,8 @@ async def test_ai_chat_prechecks_kb_limit_by_ui_intent(client: AsyncClient, monk
         settings.OPENAI_BEARER_TOKEN = old_token
 
 
+
+
 @pytest.mark.asyncio
 async def test_ai_chat_uses_request_id_idempotency_for_token_spend(client: AsyncClient, monkeypatch):
     token = await _register_owner(client)

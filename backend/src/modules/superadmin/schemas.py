@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 
 class SuperadminLoginRequest(BaseModel):
@@ -13,6 +13,35 @@ class SuperadminLoginRequest(BaseModel):
 class SuperadminTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class SuperadminProfileAuditItem(BaseModel):
+    id: str
+    created_at: str | None = None
+    actor: str
+    ip_address: str | None = None
+    changed_fields: list[str]
+    meta: dict | None = None
+
+
+class SuperadminProfileResponse(BaseModel):
+    email: str
+    password_configured: bool
+    runtime_email_overridden: bool
+    runtime_password_overridden: bool
+    audit: list[SuperadminProfileAuditItem] = Field(default_factory=list)
+
+
+class SuperadminUpdateProfileRequest(BaseModel):
+    email: EmailStr | None = None
+    current_password: str = Field(min_length=8, max_length=128)
+    new_password: str | None = Field(default=None, min_length=8, max_length=128)
+
+    @model_validator(mode="after")
+    def _validate_update(self) -> "SuperadminUpdateProfileRequest":
+        if self.email is None and self.new_password is None:
+            raise ValueError("set at least one: email or new_password")
+        return self
 
 
 class SetPlanRequest(BaseModel):
@@ -308,6 +337,11 @@ class SuperadminBillingPlanItem(BaseModel):
 class SuperadminTokenPackageItem(BaseModel):
     code: str
     display_name: str
+    badge_text: str | None = None
+    description: str | None = None
+    button_text: str | None = None
+    payment_note: str | None = None
+    price_caption: str | None = None
     tokens: int
     price_rub_cents: int
     is_active: bool
@@ -371,6 +405,11 @@ class SuperadminUpdateBillingPlanRequest(BaseModel):
 
 class SuperadminUpsertTokenPackageRequest(BaseModel):
     display_name: str | None = None
+    badge_text: str | None = Field(default=None, max_length=120)
+    description: str | None = Field(default=None, max_length=4000)
+    button_text: str | None = Field(default=None, max_length=120)
+    payment_note: str | None = Field(default=None, max_length=4000)
+    price_caption: str | None = Field(default=None, max_length=255)
     tokens: int | None = Field(default=None, ge=1)
     price_rub_cents: int | None = Field(default=None, ge=0)
     is_active: bool | None = None

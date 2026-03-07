@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import uuid  # noqa: TC003
 
-from fastapi import APIRouter, Depends, Request, HTTPException
+import jwt
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
-import jwt
-import io
 
 from src.common.enums import UserRole
 from src.common.schemas import ApiResponse
@@ -18,7 +18,6 @@ from src.infrastructure.uow import UnitOfWork
 from src.modules.access.dependencies import require_access
 from src.modules.auth.dependencies import CurrentUser, require_roles
 from src.modules.docs.errors import DocsModuleError
-from src.modules.docs.rate_limit import DEFAULT_DOCS_TEXT_SAVE_RATE_LIMITER
 from src.modules.docs.schemas import (
     AIGenerateOut,
     AIGenerateRequest,
@@ -228,7 +227,7 @@ async def create_empty_file(
     ),
     _: None = Depends(require_access(resource_type="files", permission="can_write")),
 ):
-    """Создать пустой TXT/PDF/DOCX файл в выбранной папке или в корне."""
+    """Создать пустой PDF/DOCX файл в выбранной папке или в корне."""
     async with UnitOfWork() as uow:
         service = DocsService(uow.session)
         try:
@@ -316,6 +315,34 @@ async def get_file(
     return ApiResponse(data=item)
 
 
+@router.post("/files/{file_id}/save-text", response_model=ApiResponse[FileOut])
+async def save_text(
+    file_id: uuid.UUID,
+    body: SaveTextRequest,
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE),
+    ),
+    _: None = Depends(require_access(resource_type="files", permission="can_write", resource_id_param="file_id")),
+):
+    """Сохранить новое текстовое содержимое TXT-файла."""
+    async with UnitOfWork() as uow:
+        service = DocsService(uow.session)
+        try:
+            file_obj = await service.save_text(
+                org_id=current_user.org_id,
+                user_id=current_user.user_id,
+                file_id=file_id,
+                content=body.content,
+                title=body.title,
+            )
+            await uow.session.refresh(file_obj)
+            await uow.commit()
+        except DocsModuleError as error:
+            return _error_response(error)
+        item = FileOut.model_validate(file_obj)
+    return ApiResponse(data=item)
+
+
 @router.get("/files/{file_id}/text", response_model=ApiResponse[FileTextOut])
 async def get_file_text(
     file_id: uuid.UUID,
@@ -324,7 +351,7 @@ async def get_file_text(
     ),
     _: None = Depends(require_access(resource_type="files", permission="can_read", resource_id_param="file_id")),
 ):
-    """Получить текст текущей версии TXT-файла."""
+    """Получить текстовое содержимое TXT-файла."""
     async with UnitOfWork() as uow:
         service = DocsService(uow.session)
         try:
@@ -333,6 +360,8 @@ async def get_file_text(
             return _error_response(error)
         item = FileTextOut.model_validate(payload)
     return ApiResponse(data=item)
+
+
 
 
 @router.get("/files/{file_id}/versions", response_model=ApiResponse[list[FileVersionOut]])
@@ -354,41 +383,6 @@ async def list_file_versions(
     return ApiResponse(data=payload)
 
 
-@router.post("/files/{file_id}/save-text", response_model=ApiResponse[FileOut])
-async def save_file_text(
-    file_id: uuid.UUID,
-    body: SaveTextRequest,
-    current_user: CurrentUser = Depends(
-        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE),
-    ),
-    _: None = Depends(require_access(resource_type="files", permission="can_write", resource_id_param="file_id")),
-):
-    """Сохранить новую версию TXT-файла."""
-    try:
-        await DEFAULT_DOCS_TEXT_SAVE_RATE_LIMITER.check(
-            org_id=current_user.org_id,
-            user_id=current_user.user_id,
-            rpm_limit=int(getattr(settings, "DOCS_TEXT_SAVE_RPM", 20) or 20),
-        )
-    except DocsModuleError as error:
-        return _error_response(error)
-
-    async with UnitOfWork() as uow:
-        service = DocsService(uow.session)
-        try:
-            result = await service.save_text(
-                org_id=current_user.org_id,
-                user_id=current_user.user_id,
-                file_id=file_id,
-                content=body.content,
-                title=body.title,
-            )
-        except DocsModuleError as error:
-            return _error_response(error)
-        await uow.session.refresh(result.file)
-        await uow.commit()
-        item = FileOut.model_validate(result.file)
-    return ApiResponse(data=item)
 
 
 @router.post("/files/{file_id}/pdf/sign", response_model=ApiResponse[FileOut])
@@ -546,7 +540,7 @@ async def create_file_via_ai(
     ),
     _: None = Depends(require_access(resource_type="files", permission="can_write")),
 ):
-    """Поставить AI-задачу генерации TXT/PDF/DOCX документа."""
+    """Поставить AI-задачу генерации DOCX документа."""
     async with UnitOfWork() as uow:
         service = DocsService(uow.session)
         try:
@@ -610,6 +604,22 @@ async def get_ai_generation_job(
     return ApiResponse(data=payload)
 
 
+@router.get("/files/ai/jobs", response_model=ApiResponse[list[AIGenerationJobOut]])
+async def list_ai_generation_jobs(
+    limit: int = Query(default=20, ge=1, le=100),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY),
+    ),
+    _: None = Depends(require_access(resource_type="files", permission="can_read")),
+):
+    """Получить последние AI-задачи генерации документов."""
+    async with UnitOfWork() as uow:
+        service = DocsService(uow.session)
+        jobs = await service.list_ai_generation_jobs(org_id=current_user.org_id, limit=limit)
+        payload = [AIGenerationJobOut.model_validate(item) for item in jobs]
+    return ApiResponse(data=payload)
+
+
 @router.get("/files/{file_id}/download", response_model=ApiResponse[DownloadOut])
 async def get_download_url(
     file_id: uuid.UUID,
@@ -637,7 +647,7 @@ async def get_export_pdf_url(
     ),
     _: None = Depends(require_access(resource_type="files", permission="can_read", resource_id_param="file_id")),
 ):
-    """Экспортировать TXT/DOCX в PDF и вернуть временную ссылку на скачивание."""
+    """Экспортировать DOCX в PDF и вернуть временную ссылку на скачивание."""
     async with UnitOfWork() as uow:
         service = DocsService(uow.session)
         try:

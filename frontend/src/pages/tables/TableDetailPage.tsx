@@ -11,33 +11,231 @@ const FIELD_TYPES = [
   { value: 'date', label: 'Дата', icon: Calendar },
   { value: 'datetime', label: 'Дата и время', icon: Calendar },
   { value: 'boolean', label: 'Да/Нет', icon: ToggleLeft },
-  { value: 'select', label: 'Выбор', icon: List },
-  { value: 'multi_select', label: 'Мульти-выбор', icon: List },
+  { value: 'select', label: 'Список', icon: List },
+  { value: 'multi_select', label: 'Несколько из списка', icon: List },
   { value: 'url', label: 'URL', icon: Link2 },
   { value: 'email', label: 'Email', icon: Mail },
   { value: 'phone', label: 'Телефон', icon: Phone },
   { value: 'file', label: 'Файл', icon: FileIcon },
 ]
 const ftMap = Object.fromEntries(FIELD_TYPES.map(f => [f.value, f]))
+type CellValue = string | string[]
+const DATA_COLUMN_WIDTH = 240
+
+function isOptionFieldType(fieldType: string) {
+  return fieldType === 'select' || fieldType === 'multi_select'
+}
+
+function getColumnOptions(column: ColumnInfo | null | undefined): string[] {
+  const raw = column?.config && typeof column.config === 'object'
+    ? (column.config as { options?: unknown }).options
+    : undefined
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item) => String(item ?? '').trim())
+    .filter(Boolean)
+}
+
+function optionsToMultiline(options: string[]) {
+  return options.join('\n')
+}
+
+function parseOptionsText(value: string) {
+  return Array.from(new Set(
+    value
+      .split('\n')
+      .map((item) => item.trim())
+      .filter(Boolean),
+  ))
+}
+
+function buildColumnConfig(fieldType: string, optionsText: string) {
+  if (!isOptionFieldType(fieldType)) return null
+  const options = parseOptionsText(optionsText)
+  return options.length > 0 ? { options } : null
+}
+
+function valueAsString(value: unknown) {
+  if (Array.isArray(value)) return value.join(', ')
+  if (value === null || value === undefined) return ''
+  return String(value)
+}
+
+function valueAsList(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item ?? '').trim()).filter(Boolean)
+  }
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean)
+  }
+  return []
+}
 
 function getInputType(ft: string) {
   return ft === 'number' ? 'number' : ft === 'date' ? 'date' : ft === 'datetime' ? 'datetime-local' : ft === 'email' ? 'email' : ft === 'url' ? 'url' : ft === 'phone' ? 'tel' : 'text'
 }
 
-function fmtVal(v: string, ft: string) {
-  if (!v) return ''
-  if (ft === 'boolean') return v === 'true' ? '✓ Да' : '✗ Нет'
-  if (ft === 'date') { try { return new Date(v).toLocaleDateString('ru') } catch { return v } }
-  if (ft === 'datetime') { try { return new Date(v).toLocaleString('ru') } catch { return v } }
-  return v
+function fmtVal(v: unknown, ft: string) {
+  if (v === null || v === undefined || v === '') return ''
+  if (ft === 'multi_select') {
+    const items = valueAsList(v)
+    return items.join(', ')
+  }
+  if (ft === 'boolean') return String(v) === 'true' ? '✓ Да' : '✗ Нет'
+  const value = valueAsString(v)
+  if (ft === 'date') { try { return new Date(value).toLocaleDateString('ru') } catch { return value } }
+  if (ft === 'datetime') { try { return new Date(value).toLocaleString('ru') } catch { return value } }
+  return value
 }
 
-function EditableCell({ value, fieldType, onSave }: { value: string; fieldType: string; onSave: (v: string) => void }) {
+function OptionConfigEditor({
+  value,
+  onChange,
+  optional = false,
+}: {
+  value: string
+  onChange: (value: string) => void
+  optional?: boolean
+}) {
+  const options = parseOptionsText(value)
+  const [draftOption, setDraftOption] = useState('')
+  const [bulkMode, setBulkMode] = useState(false)
+
+  const updateOptions = (nextOptions: string[]) => {
+    onChange(optionsToMultiline(nextOptions))
+  }
+
+  const addOption = () => {
+    const next = draftOption.trim()
+    if (!next) return
+    if (options.includes(next)) {
+      setDraftOption('')
+      return
+    }
+    updateOptions([...options, next])
+    setDraftOption('')
+  }
+
+  const removeOption = (optionToRemove: string) => {
+    updateOptions(options.filter((option) => option !== optionToRemove))
+  }
+
+  const updateOptionAt = (index: number, nextValue: string) => {
+    const normalized = nextValue.trim()
+    const nextOptions = [...options]
+    if (!normalized) {
+      nextOptions.splice(index, 1)
+      updateOptions(nextOptions)
+      return
+    }
+    nextOptions[index] = normalized
+    updateOptions(Array.from(new Set(nextOptions)))
+  }
+
+  return (
+    <div className="mt-2 rounded-lg border border-border/70 bg-secondary/20 p-2">
+      <div className="text-sm font-medium text-foreground">Какие варианты можно выбрать</div>
+      <div className="mt-1 text-xs text-muted-foreground">
+        Добавляйте варианты по одному. Например: Новый, В работе, Готово.{optional ? ' Можно заполнить позже.' : ''}
+      </div>
+      <div className="mt-3 flex items-center gap-2">
+        <input
+          value={draftOption}
+          onChange={(e) => setDraftOption(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              addOption()
+            }
+          }}
+          placeholder="Введите вариант"
+          className="h-9 flex-1 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary"
+        />
+        <button
+          onClick={addOption}
+          type="button"
+          className="h-9 px-3 rounded-lg bg-primary text-white text-sm hover:bg-primary/90 transition-colors"
+        >
+          Добавить
+        </button>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        {options.length > 0 ? (
+          options.map((option, index) => (
+            <div key={`${option}-${index}`} className="flex items-center gap-2">
+              <input
+                value={option}
+                onChange={(e) => updateOptionAt(index, e.target.value)}
+                className="h-9 flex-1 rounded-lg border border-input bg-background px-3 text-sm outline-none focus:border-primary"
+              />
+              <button
+                onClick={() => removeOption(option)}
+                type="button"
+                className="h-9 w-9 rounded-lg border border-border text-muted-foreground hover:text-destructive hover:border-destructive/40 hover:bg-destructive/5 transition-colors flex items-center justify-center"
+                title="Удалить вариант"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+          ))
+        ) : (
+          <div className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+            Пока нет ни одного варианта.
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3 flex justify-start">
+        <button
+          type="button"
+          onClick={() => setBulkMode((prev) => !prev)}
+          className="text-xs text-primary hover:text-primary/80 transition-colors"
+        >
+          {bulkMode ? 'Скрыть массовый ввод' : 'Вставить сразу несколько'}
+        </button>
+      </div>
+
+      {bulkMode && (
+        <div className="mt-2 rounded-lg border border-border/70 bg-background/50 p-2">
+          <div className="text-[11px] font-medium text-foreground">Массовый ввод</div>
+          <div className="mt-1 text-[11px] text-muted-foreground">Вставьте список, по одному варианту на строку.</div>
+          <textarea
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            rows={4}
+            placeholder={'Новый\nВ работе\nГотово'}
+            className="mt-2 w-full resize-none rounded-md border border-input bg-background px-2 py-1.5 text-xs outline-none focus:border-primary"
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function EditableCell({
+  value,
+  column,
+  onSave,
+}: {
+  value: unknown
+  column: ColumnInfo
+  onSave: (v: CellValue) => void
+}) {
+  const fieldType = column.field_type
+  const options = getColumnOptions(column)
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(value)
+  const [draft, setDraft] = useState(valueAsString(value))
+  const [multiDraft, setMultiDraft] = useState<string[]>(valueAsList(value))
   const ref = useRef<HTMLInputElement>(null)
   const committed = useRef(false)
-  useEffect(() => { setDraft(value) }, [value])
+  useEffect(() => {
+    setDraft(valueAsString(value))
+    setMultiDraft(valueAsList(value))
+  }, [value])
   useEffect(() => { if (editing) { committed.current = false; ref.current?.focus() } }, [editing])
   const commit = () => {
     if (committed.current) return
@@ -45,32 +243,187 @@ function EditableCell({ value, fieldType, onSave }: { value: string; fieldType: 
     setEditing(false)
     if (draft !== value) onSave(draft)
   }
+
+  const toggleMultiDraft = (option: string) => {
+    setMultiDraft((prev) => prev.includes(option) ? prev.filter((item) => item !== option) : [...prev, option])
+  }
+
+  const submitMulti = () => {
+    committed.current = true
+    setEditing(false)
+    const current = valueAsList(value)
+    if (JSON.stringify(current) !== JSON.stringify(multiDraft)) {
+      onSave(multiDraft)
+    }
+  }
+
   if (fieldType === 'boolean') {
-    const on = value === 'true'
+    const on = String(value) === 'true'
     return <button onClick={() => onSave(String(!on))} className={`h-6 w-11 rounded-full flex items-center px-0.5 transition-colors ${on ? 'bg-primary' : 'bg-secondary'}`}><span className={`h-5 w-5 rounded-full bg-white shadow transition-transform ${on ? 'translate-x-5' : 'translate-x-0'}`} /></button>
   }
-  if (!editing) return <div onClick={() => setEditing(true)} className="min-h-[28px] px-1.5 py-1 rounded cursor-text hover:bg-secondary/40 transition-colors text-sm truncate max-w-[200px]">{value ? fmtVal(value, fieldType) : <span className="text-muted-foreground/30 italic">—</span>}</div>
-  return <input ref={ref} type={getInputType(fieldType)} value={draft} onChange={e => setDraft(e.target.value)} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commit() } if (e.key === 'Escape') { setDraft(value); setEditing(false) } }} className="w-full min-w-[120px] h-7 px-1.5 text-sm rounded border border-primary/50 bg-background outline-none ring-1 ring-primary/20" />
+  if (fieldType === 'select' && options.length > 0) {
+    if (!editing) return <div onClick={() => setEditing(true)} className="min-h-[28px] w-full overflow-hidden px-1.5 py-1 rounded cursor-pointer hover:bg-secondary/40 transition-colors text-sm text-ellipsis whitespace-nowrap">{draft ? fmtVal(value, fieldType) : <span className="text-muted-foreground/30 italic">Выбрать</span>}</div>
+    return (
+      <div className="relative min-h-[28px]">
+        <div className="absolute left-0 top-0 z-20 w-[220px] rounded-lg border border-primary/50 bg-background p-2 shadow-xl ring-1 ring-primary/20">
+          <select
+            autoFocus
+            value={draft}
+            onBlur={() => setEditing(false)}
+            onChange={(e) => {
+              committed.current = true
+              setDraft(e.target.value)
+              setEditing(false)
+              if (e.target.value !== valueAsString(value)) {
+                onSave(e.target.value)
+              }
+            }}
+            className="w-full h-8 rounded border border-input bg-background px-2 text-sm outline-none"
+          >
+            <option value="">Выберите значение</option>
+            {options.map((option) => <option key={option} value={option}>{option}</option>)}
+          </select>
+        </div>
+      </div>
+    )
+  }
+  if (fieldType === 'multi_select' && options.length > 0) {
+    if (!editing) return <div onClick={() => setEditing(true)} className="min-h-[28px] w-full overflow-hidden px-1.5 py-1 rounded cursor-pointer hover:bg-secondary/40 transition-colors text-sm text-ellipsis whitespace-nowrap">{multiDraft.length > 0 ? multiDraft.join(', ') : <span className="text-muted-foreground/30 italic">Выбрать</span>}</div>
+    return (
+      <div className="relative min-h-[28px]">
+        <div className="absolute left-0 top-0 z-20 w-[260px] rounded-lg border border-primary/50 bg-background p-2 ring-1 ring-primary/20 shadow-xl">
+          <div className="max-h-40 overflow-y-auto space-y-1">
+            {options.map((option) => {
+              const checked = multiDraft.includes(option)
+              return (
+                <label key={option} className="flex items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-secondary/40 cursor-pointer">
+                  <input type="checkbox" checked={checked} onChange={() => toggleMultiDraft(option)} />
+                  <span>{option}</span>
+                </label>
+              )
+            })}
+          </div>
+          <div className="mt-2 flex justify-end gap-1">
+            <button onClick={submitMulti} className="h-7 px-2 rounded bg-primary text-white text-xs hover:bg-primary/90">Готово</button>
+            <button onClick={() => { setMultiDraft(valueAsList(value)); setEditing(false) }} className="h-7 px-2 rounded text-xs text-muted-foreground hover:bg-secondary">Отмена</button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+  if (!editing) return <div onClick={() => setEditing(true)} className="min-h-[28px] w-full overflow-hidden px-1.5 py-1 rounded cursor-text hover:bg-secondary/40 transition-colors text-sm text-ellipsis whitespace-nowrap">{value ? fmtVal(value, fieldType) : <span className="text-muted-foreground/30 italic">—</span>}</div>
+  return <input ref={ref} type={getInputType(fieldType)} value={draft} onChange={e => setDraft(e.target.value)} onBlur={commit} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commit() } if (e.key === 'Escape') { setDraft(valueAsString(value)); setEditing(false) } }} className="w-full min-w-0 h-7 px-1.5 text-sm rounded border border-primary/50 bg-background outline-none ring-1 ring-primary/20" />
 }
 
-function AddColHeader({ onAdd }: { onAdd: (name: string, type: string) => Promise<void> }) {
-  const [open, setOpen] = useState(false)
-  const [name, setName] = useState('')
-  const [type, setType] = useState('text')
-  const [saving, setSaving] = useState(false)
-  const ref = useRef<HTMLInputElement>(null)
-  useEffect(() => { if (open) ref.current?.focus() }, [open])
-  const submit = async () => { if (!name.trim()) return; setSaving(true); await onAdd(name.trim(), type); setName(''); setType('text'); setOpen(false); setSaving(false) }
-  if (!open) return <th className="px-2 py-2.5 w-10"><button onClick={() => setOpen(true)} title="Добавить поле" className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"><Plus className="h-4 w-4" /></button></th>
+function AddColHeader({ onOpen }: { onOpen: () => void }) {
   return (
-    <th className="px-2 py-1.5 min-w-[240px]">
-      <div className="flex items-center gap-1">
-        <input ref={ref} value={name} onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') setOpen(false) }} placeholder="Название поля" className="flex-1 h-7 px-2 text-sm rounded border border-primary/50 bg-background outline-none min-w-0 font-normal" />
-        <select value={type} onChange={e => setType(e.target.value)} className="h-7 rounded border border-input bg-background px-1 text-xs font-normal">{FIELD_TYPES.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}</select>
-        <button onClick={submit} disabled={saving || !name.trim()} className="h-7 w-7 rounded bg-primary text-white flex items-center justify-center hover:bg-primary/90 disabled:opacity-50">{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}</button>
-        <button onClick={() => setOpen(false)} className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:bg-secondary"><X className="h-3.5 w-3.5" /></button>
-      </div>
+    <th className="px-2 py-2.5 w-10">
+      <button onClick={onOpen} title="Добавить поле" className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">
+        <Plus className="h-4 w-4" />
+      </button>
     </th>
+  )
+}
+
+type ColumnSettingsDraft = {
+  name: string
+  type: string
+  optionsText: string
+}
+
+function ColumnSettingsModal({
+  open,
+  title,
+  submitLabel,
+  draft,
+  optionsOpen,
+  saving,
+  onDraftChange,
+  onToggleOptions,
+  onClose,
+  onSubmit,
+}: {
+  open: boolean
+  title: string
+  submitLabel: string
+  draft: ColumnSettingsDraft
+  optionsOpen: boolean
+  saving: boolean
+  onDraftChange: (patch: Partial<ColumnSettingsDraft>) => void
+  onToggleOptions: () => void
+  onClose: () => void
+  onSubmit: () => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => {
+    if (open) inputRef.current?.focus()
+  }, [open])
+
+  if (!open) return null
+
+  const optionsEnabled = isOptionFieldType(draft.type)
+  const optionsCount = parseOptionsText(draft.optionsText).length
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button className="absolute inset-0 bg-black/55 backdrop-blur-sm" onClick={onClose} aria-label="Закрыть окно настроек поля" />
+      <div className="relative w-full max-w-md rounded-2xl border border-border/80 bg-background p-5 shadow-2xl">
+        <div className="text-xl font-semibold text-foreground">{title}</div>
+        <div className="mt-1 text-sm text-muted-foreground">Изменения применятся сразу после сохранения.</div>
+        <div className="mt-5 space-y-4">
+          <label className="block">
+            <div className="mb-2 text-xs font-medium text-muted-foreground">Название поля</div>
+            <input
+              ref={inputRef}
+              value={draft.name}
+              onChange={(e) => onDraftChange({ name: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && draft.name.trim()) onSubmit()
+                if (e.key === 'Escape') onClose()
+              }}
+              placeholder="Например: Статус"
+              className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-primary"
+            />
+          </label>
+          <label className="block">
+            <div className="mb-2 text-xs font-medium text-muted-foreground">Тип поля</div>
+            <select
+              value={draft.type}
+              onChange={(e) => onDraftChange({ type: e.target.value })}
+              className="h-11 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-primary"
+            >
+              {FIELD_TYPES.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+            </select>
+          </label>
+          {optionsEnabled && (
+            <div className="rounded-xl border border-border bg-secondary/15 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-foreground">Значения списка</div>
+                  <div className="text-xs text-muted-foreground">
+                    {optionsCount > 0 ? `${optionsCount} значений` : 'Можно добавить сейчас или позже'}
+                  </div>
+                </div>
+                <button onClick={onToggleOptions} className="h-8 px-3 rounded-lg text-sm text-primary hover:bg-primary/10 transition-colors">
+                  {optionsOpen ? 'Скрыть' : 'Изменить'}
+                </button>
+              </div>
+              {optionsOpen && (
+                <OptionConfigEditor value={draft.optionsText} onChange={(value) => onDraftChange({ optionsText: value })} optional />
+              )}
+            </div>
+          )}
+        </div>
+        <div className="mt-6 flex justify-end gap-2">
+          <button onClick={onClose} className="h-10 px-4 rounded-xl border border-border text-sm text-muted-foreground hover:bg-secondary transition-colors">
+            Отмена
+          </button>
+          <button onClick={onSubmit} disabled={saving || !draft.name.trim()} className="h-10 px-5 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors">
+            {saving ? 'Сохранение...' : submitLabel}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -130,7 +483,7 @@ function TableDetailPageContent() {
   const [loadError, setLoadError] = useState(false)
   const [savingCells, setSavingCells] = useState<Set<string>>(new Set())
   const [addingRecord, setAddingRecord] = useState(false)
-  const [newRowData, setNewRowData] = useState<Record<string, string>>({})
+  const [newRowData, setNewRowData] = useState<Record<string, unknown>>({})
   const [showNewRow, setShowNewRow] = useState(false)
   // Search / filter / sort / pagination
   const [search, setSearch] = useState('')
@@ -140,9 +493,10 @@ function TableDetailPageContent() {
   const [filterVal, setFilterVal] = useState<string>('')
   const [showFilter, setShowFilter] = useState(false)
   const [page, setPage] = useState(0)
-  const [editingColumnId, setEditingColumnId] = useState<string | null>(null)
-  const [editingColumnName, setEditingColumnName] = useState('')
-  const [editingColumnType, setEditingColumnType] = useState('text')
+  const [columnDialog, setColumnDialog] = useState<{ mode: 'create' } | { mode: 'edit'; columnId: string } | null>(null)
+  const [columnDraft, setColumnDraft] = useState<ColumnSettingsDraft>({ name: '', type: 'text', optionsText: '' })
+  const [columnOptionsOpen, setColumnOptionsOpen] = useState(false)
+  const [savingColumn, setSavingColumn] = useState(false)
   const [movingRecordId, setMovingRecordId] = useState<string | null>(null)
   const [exporting, setExporting] = useState<'csv' | 'xlsx' | null>(null)
   const moveLockRef = useRef(false)
@@ -186,37 +540,61 @@ function TableDetailPageContent() {
 
   useEffect(() => { load() }, [load])
 
-  const handleAddColumn = async (name: string, fieldType: string) => {
-    if (!tableId) return
-    await tablesApi.createColumn(tableId, { name, field_type: fieldType })
-    await load()
+  const closeColumnDialog = () => {
+    setColumnDialog(null)
+    setColumnDraft({ name: '', type: 'text', optionsText: '' })
+    setColumnOptionsOpen(false)
+    setSavingColumn(false)
+  }
+
+  const openCreateColumnDialog = () => {
+    setColumnDialog({ mode: 'create' })
+    setColumnDraft({ name: '', type: 'text', optionsText: '' })
+    setColumnOptionsOpen(false)
+  }
+
+  const openEditColumnDialog = (col: ColumnInfo) => {
+    setColumnDialog({ mode: 'edit', columnId: col.id })
+    setColumnDraft({
+      name: col.name,
+      type: col.field_type,
+      optionsText: optionsToMultiline(getColumnOptions(col)),
+    })
+    setColumnOptionsOpen(false)
+  }
+
+  const updateColumnDraft = (patch: Partial<ColumnSettingsDraft>) => {
+    const nextType = patch.type ?? columnDraft.type
+    if ('type' in patch && !isOptionFieldType(nextType)) {
+      setColumnOptionsOpen(false)
+    }
+    setColumnDraft((prev) => ({ ...prev, ...patch }))
+  }
+
+  const submitColumnDialog = async () => {
+    if (!tableId || !columnDialog || !columnDraft.name.trim()) return
+    setSavingColumn(true)
+    try {
+      const payload = {
+        name: columnDraft.name.trim(),
+        field_type: columnDraft.type,
+        config: buildColumnConfig(columnDraft.type, columnDraft.optionsText),
+      }
+      if (columnDialog.mode === 'create') {
+        await tablesApi.createColumn(tableId, payload)
+      } else {
+        await tablesApi.updateColumn(tableId, columnDialog.columnId, payload)
+      }
+      closeColumnDialog()
+      await load()
+    } finally {
+      setSavingColumn(false)
+    }
   }
 
   const handleDeleteColumn = async (colId: string) => {
     if (!tableId) return
     await tablesApi.deleteColumn(tableId, colId)
-    await load()
-  }
-
-  const startEditColumn = (col: ColumnInfo) => {
-    setEditingColumnId(col.id)
-    setEditingColumnName(col.name)
-    setEditingColumnType(col.field_type)
-  }
-
-  const cancelEditColumn = () => {
-    setEditingColumnId(null)
-    setEditingColumnName('')
-    setEditingColumnType('text')
-  }
-
-  const handleSaveColumn = async () => {
-    if (!tableId || !editingColumnId || !editingColumnName.trim()) return
-    await tablesApi.updateColumn(tableId, editingColumnId, {
-      name: editingColumnName.trim(),
-      field_type: editingColumnType,
-    })
-    cancelEditColumn()
     await load()
   }
 
@@ -248,7 +626,7 @@ function TableDetailPageContent() {
     setAddingRecord(false)
   }
 
-  const handleCellSave = async (recordId: string, colId: string, value: string) => {
+  const handleCellSave = async (recordId: string, colId: string, value: CellValue) => {
     if (!tableId) return
     const key = `${recordId}-${colId}`
     // Optimistic update — immediately reflect in UI
@@ -479,7 +857,15 @@ function TableDetailPageContent() {
       )}
 
       <div className="border border-border rounded-lg overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="min-w-full table-fixed text-sm">
+          <colgroup>
+            <col className="w-10" />
+            {columns.map((col: ColumnInfo) => (
+              <col key={col.id} style={{ width: `${DATA_COLUMN_WIDTH}px` }} />
+            ))}
+            <col className="w-10" />
+            <col className="w-10" />
+          </colgroup>
           <thead>
             <tr className="border-b border-border bg-secondary/30">
               <th className="px-3 py-2.5 w-8 text-left text-xs text-muted-foreground font-medium">#</th>
@@ -488,55 +874,36 @@ function TableDetailPageContent() {
                 const Icon = info?.icon || Type
                 const isSorted = sortCol === col.id
                 const SortIcon = isSorted ? (sortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown
+                const isEditing = columnDialog?.mode === 'edit' && columnDialog.columnId === col.id
                 return (
-                  <th key={col.id} className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap group">
-                    {editingColumnId === col.id ? (
-                      <div className="flex items-center gap-1">
-                        <input
-                          value={editingColumnName}
-                          onChange={e => setEditingColumnName(e.target.value)}
-                          onKeyDown={e => { if (e.key === 'Enter') handleSaveColumn(); if (e.key === 'Escape') cancelEditColumn() }}
-                          className="h-7 w-[120px] px-2 text-xs rounded border border-primary/50 bg-background outline-none"
-                        />
-                        <select
-                          value={editingColumnType}
-                          onChange={e => setEditingColumnType(e.target.value)}
-                          className="h-7 rounded border border-input bg-background px-1 text-xs"
-                        >
-                          {FIELD_TYPES.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
-                        </select>
-                        <button onClick={handleSaveColumn} className="h-7 w-7 rounded bg-primary text-white flex items-center justify-center"><Check className="h-3.5 w-3.5" /></button>
-                        <button onClick={cancelEditColumn} className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:bg-secondary"><X className="h-3.5 w-3.5" /></button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5">
-                        <Icon className="h-3.5 w-3.5 opacity-50" />
-                        <button
-                          onClick={() => handleSort(col.id)}
-                          className={`flex items-center gap-1 hover:text-foreground transition-colors ${
-                            isSorted ? 'text-primary' : ''
-                          }`}
-                        >
-                          <span>{col.name}</span>
-                          <SortIcon className={`h-3 w-3 ${
-                            isSorted ? 'opacity-100' : 'opacity-0 group-hover:opacity-40'
-                          }`} />
+                  <th key={col.id} className="px-3 py-2.5 text-left font-medium text-muted-foreground whitespace-nowrap group overflow-hidden">
+                    <div className="flex items-center gap-1.5">
+                      <Icon className="h-3.5 w-3.5 opacity-50" />
+                      <button
+                        onClick={() => handleSort(col.id)}
+                        className={`flex items-center gap-1 hover:text-foreground transition-colors ${
+                          isSorted ? 'text-primary' : ''
+                        }`}
+                      >
+                        <span>{col.name}</span>
+                        <SortIcon className={`h-3 w-3 ${
+                          isSorted ? 'opacity-100' : 'opacity-0 group-hover:opacity-40'
+                        }`} />
+                      </button>
+                      <button onClick={() => openEditColumnDialog(col)} className={`hover:text-foreground transition-opacity ${isEditing ? 'opacity-100 text-primary' : 'opacity-0 group-hover:opacity-100'}`} title="Изменить поле">
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                      {col.is_required && <span className="text-destructive text-xs">*</span>}
+                      {!col.is_primary && (
+                        <button onClick={() => handleDeleteColumn(col.id)} className="ml-1 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity">
+                          <Trash2 className="h-3 w-3" />
                         </button>
-                        <button onClick={() => startEditColumn(col)} className="opacity-0 group-hover:opacity-100 hover:text-foreground transition-opacity" title="Изменить название и тип">
-                          <Pencil className="h-3 w-3" />
-                        </button>
-                        {col.is_required && <span className="text-destructive text-xs">*</span>}
-                        {!col.is_primary && (
-                          <button onClick={() => handleDeleteColumn(col.id)} className="ml-1 opacity-0 group-hover:opacity-100 hover:text-destructive transition-opacity">
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        )}
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </th>
                 )
               })}
-              <AddColHeader onAdd={handleAddColumn} />
+              <AddColHeader onOpen={openCreateColumnDialog} />
               <th className="w-8" />
             </tr>
           </thead>
@@ -545,11 +912,43 @@ function TableDetailPageContent() {
               <tr className="border-b border-primary/20 bg-primary/5">
                 <td className="px-3 py-1.5 text-xs text-muted-foreground">new</td>
                 {columns.map((col: ColumnInfo) => (
-                  <td key={col.id} className="px-2 py-1.5">
+                  <td key={col.id} className="px-2 py-1.5 overflow-hidden">
                     {col.field_type === 'boolean' ? (
                       <button onClick={() => setNewRowData(prev => ({ ...prev, [col.id]: String(!(prev[col.id] === 'true')) }))} className={`h-6 w-11 rounded-full flex items-center px-0.5 transition-colors ${newRowData[col.id] === 'true' ? 'bg-primary' : 'bg-secondary'}`}><span className={`h-5 w-5 rounded-full bg-white shadow transition-transform ${newRowData[col.id] === 'true' ? 'translate-x-5' : 'translate-x-0'}`} /></button>
+                    ) : col.field_type === 'select' && getColumnOptions(col).length > 0 ? (
+                      <select
+                        value={valueAsString(newRowData[col.id])}
+                        onChange={e => setNewRowData(prev => ({ ...prev, [col.id]: e.target.value }))}
+                        className="w-full h-7 px-1.5 text-sm rounded border border-input bg-background outline-none focus:border-primary/50"
+                      >
+                        <option value="">Выберите значение</option>
+                        {getColumnOptions(col).map((option) => <option key={option} value={option}>{option}</option>)}
+                      </select>
+                    ) : col.field_type === 'multi_select' && getColumnOptions(col).length > 0 ? (
+                      <div className="min-w-[190px] rounded-md border border-input bg-background px-2 py-1.5">
+                        <div className="space-y-1 max-h-24 overflow-y-auto">
+                          {getColumnOptions(col).map((option) => {
+                            const selected = valueAsList(newRowData[col.id]).includes(option)
+                            return (
+                              <label key={option} className="flex items-center gap-2 text-xs cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={selected}
+                                  onChange={() => {
+                                    const next = selected
+                                      ? valueAsList(newRowData[col.id]).filter((item) => item !== option)
+                                      : [...valueAsList(newRowData[col.id]), option]
+                                    setNewRowData(prev => ({ ...prev, [col.id]: next }))
+                                  }}
+                                />
+                                <span>{option}</span>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      </div>
                     ) : (
-                      <input type={getInputType(col.field_type)} value={newRowData[col.id] || ''} onChange={e => setNewRowData(prev => ({ ...prev, [col.id]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') handleAddRecord() }} placeholder={col.name} className="w-full h-7 px-1.5 text-sm rounded border border-input bg-background outline-none focus:border-primary/50" />
+                      <input type={getInputType(col.field_type)} value={valueAsString(newRowData[col.id])} onChange={e => setNewRowData(prev => ({ ...prev, [col.id]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') handleAddRecord() }} placeholder={col.name} className="w-full h-7 px-1.5 text-sm rounded border border-input bg-background outline-none focus:border-primary/50" />
                     )}
                   </td>
                 ))}
@@ -566,8 +965,8 @@ function TableDetailPageContent() {
               <tr key={record.id} className="border-b border-border/40 hover:bg-secondary/10 transition-colors group/row">
                 <td className="px-3 py-0.5 text-xs text-muted-foreground/50 select-none">{page * PAGE_SIZE + idx + 1}</td>
                 {columns.map((col: ColumnInfo) => (
-                  <td key={col.id} className="px-2 py-0.5">
-                    <EditableCell value={String(safeRecordData(record.data)[col.id] ?? '')} fieldType={col.field_type} onSave={v => handleCellSave(record.id, col.id, v)} />
+                  <td key={col.id} className="px-2 py-0.5 overflow-hidden">
+                    <EditableCell value={safeRecordData(record.data)[col.id]} column={col} onSave={v => handleCellSave(record.id, col.id, v)} />
                   </td>
                 ))}
                 <td />
@@ -676,6 +1075,19 @@ function TableDetailPageContent() {
       {columns.length > 0 && records.length > 0 && (
         <ColumnCalculators columns={columns} records={processedRecords} />
       )}
+
+      <ColumnSettingsModal
+        open={columnDialog !== null}
+        title={columnDialog?.mode === 'edit' ? 'Настройки поля' : 'Новое поле'}
+        submitLabel={columnDialog?.mode === 'edit' ? 'Сохранить' : 'Добавить поле'}
+        draft={columnDraft}
+        optionsOpen={columnOptionsOpen}
+        saving={savingColumn}
+        onDraftChange={updateColumnDraft}
+        onToggleOptions={() => setColumnOptionsOpen((prev) => !prev)}
+        onClose={closeColumnDialog}
+        onSubmit={submitColumnDialog}
+      />
     </div>
   )
 }

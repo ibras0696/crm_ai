@@ -7,6 +7,7 @@ import PersonalDataConsentPage from './pages/auth/PersonalDataConsentPage'
 import ForgotPasswordPage from './pages/auth/ForgotPasswordPage'
 import ResetPasswordPage from './pages/auth/ResetPasswordPage'
 import AcceptInvitePage from './pages/auth/AcceptInvitePage'
+import PublicContentPage from './pages/public/PublicContentPage'
 import DashboardPage from './pages/org/DashboardPage'
 import MembersPage from './pages/org/MembersPage'
 import SettingsPage from './pages/org/SettingsPage'
@@ -14,6 +15,7 @@ import AuditLogPage from './pages/admin/AuditLogPage'
 import AdminPage from './pages/admin/AdminPage'
 import SuperAdminPage from './pages/superadmin/SuperAdminPage'
 import BillingPage from './pages/billing/BillingPage'
+import BillingSuccessPage from './pages/billing/BillingSuccessPage'
 import PlansPage from './pages/billing/PlansPage'
 import TablesPage from './pages/tables/TablesPage'
 import TableDetailPage from './pages/tables/TableDetailPage'
@@ -42,6 +44,9 @@ export default function App() {
       <Route path="/auth/accept-invite" element={<AcceptInvitePage />} />
       <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
       <Route path="/personal-data-consent" element={<PersonalDataConsentPage />} />
+      <Route path="/product/:slug" element={<PublicContentPage />} />
+      <Route path="/company/:slug" element={<PublicContentPage />} />
+      <Route path="/legal/:slug" element={<PublicContentPage />} />
       <Route element={<AppLayout />}>
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/members" element={<MembersPage />} />
@@ -56,6 +61,7 @@ export default function App() {
         <Route path="/ai" element={<AIPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/billing" element={<BillingPage />} />
+        <Route path="/billing/success" element={<BillingSuccessPage />} />
         <Route path="/plans" element={<PlansPage />} />
       </Route>
       <Route

@@ -82,7 +82,7 @@ def test_extract_action_payload_strips_broken_raw_action_blob():
     assert cleaned == "Сейчас создам таблицу."
 
 
-def test_ui_intent_overrides_force_widget_type_and_table_hint():
+def test_ui_intent_overrides_keep_table_hint_and_widget_preference():
     from src.modules.ai.intent_overrides import apply_ui_intent_overrides
 
     payload = {
@@ -101,7 +101,25 @@ def test_ui_intent_overrides_force_widget_type_and_table_hint():
     assert isinstance(updated, dict)
     assert updated["preferred_widget_type"] == "pie"
     assert updated["table_name"] == "Продажи курсов"
-    assert all(str(w.get("widget_type")) == "pie" for w in updated["widgets"])
+    assert [str(w.get("widget_type")) for w in updated["widgets"]] == ["line", "bar"]
+
+
+def test_build_dashboard_fallback_action_uses_ui_intent_and_table_hint():
+    from src.modules.ai.internal.chat_controller_parts.actions import _build_dashboard_fallback_action
+
+    payload = _build_dashboard_fallback_action(
+        user_message="сделай аналитику по сделкам",
+        ui_intent="create_dashboard",
+        ui_params={"table_name": "Сделки", "widget_type": "line"},
+        assistant_reply="Готово. Собрал дашборд по выбранной таблице.",
+    )
+
+    assert isinstance(payload, dict)
+    assert payload["action"] == "create_dashboard"
+    assert payload["name"] == "Аналитика: Сделки"
+    assert payload["table_name"] == "Сделки"
+    assert payload["preferred_widget_type"] == "line"
+    assert payload["widgets"] == []
 
 
 @pytest.mark.asyncio
@@ -588,7 +606,7 @@ async def test_ai_dashboard_builder_normalizes_sales_widgets(client: AsyncClient
 
 
 @pytest.mark.asyncio
-async def test_ai_dashboard_builder_respects_preferred_widget_type(client: AsyncClient):
+async def test_ai_dashboard_builder_does_not_flatten_all_widgets_to_preferred_type(client: AsyncClient):
     token, email = await _register_owner(client)
     assert token
 
@@ -647,4 +665,6 @@ async def test_ai_dashboard_builder_respects_preferred_widget_type(client: Async
         await uow.commit()
 
     assert dashboard_result["items"]
-    assert all(item["widget_type"] == "pie" for item in dashboard_result["items"])
+    widget_types = {str(item["widget_type"]) for item in dashboard_result["items"]}
+    assert "pie" in widget_types
+    assert "metric" in widget_types or "bar" in widget_types

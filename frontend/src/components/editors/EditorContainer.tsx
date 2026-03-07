@@ -26,7 +26,7 @@ export function EditorContainer({
   file,
   fileUrl,
   onSave,
-  onClose,
+  onClose: _onClose,
   readOnly = false,
 }: EditorContainerProps) {
   const editorType: EditorType = selectEditor(file)
@@ -44,13 +44,6 @@ export function EditorContainer({
       type: 'docx',
       docxBlob,
       htmlContent,
-    })
-  }
-
-  const handleTextSave = async (textContent: string) => {
-    await onSave({
-      type: 'txt',
-      textContent,
     })
   }
 

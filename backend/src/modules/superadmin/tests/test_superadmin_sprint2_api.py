@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
 
 from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.models import AIUsageLog
@@ -280,10 +281,18 @@ async def test_superadmin_can_manage_billing_config_plans_and_token_packages(cli
     owner_token, owner_org_id = await _register_owner(client, org_name="Billing Org")
 
     from src.modules.billing.seed import upsert_default_plans, upsert_default_token_packages
+    from src.modules.billing.models import TokenPackage
 
     async with UnitOfWork() as uow:
         await upsert_default_plans(uow.session)
         await upsert_default_token_packages(uow.session)
+        pkg = (
+            await uow.session.execute(
+                select(TokenPackage).where(TokenPackage.code == "pack_50k")
+            )
+        ).scalars().first()
+        assert pkg is not None
+        pkg.price_rub_cents = 0
         await uow.commit()
 
     # Seed one purchase to validate superadmin purchases table.
@@ -301,6 +310,7 @@ async def test_superadmin_can_manage_billing_config_plans_and_token_packages(cli
     data = cfg.json()["data"]
     assert any(p["name"] == "free" for p in data["plans"])
     assert any(p["code"] == "pack_50k" for p in data["token_packages"])
+    assert any(p["code"] == "pack_50k" and p["button_text"] == "Перейти к оплате" for p in data["token_packages"])
     assert "yookassa" in data
     assert "recent_purchases" in data
     assert any(p["org_id"] == owner_org_id for p in data["recent_purchases"])
@@ -318,13 +328,25 @@ async def test_superadmin_can_manage_billing_config_plans_and_token_packages(cli
 
     upd_pkg = await client.put(
         "/api/v1/superadmin/billing/token-packages/pack_100k",
-        json={"display_name": "Пакет 100k PRO", "tokens": 120000, "price_rub_cents": 199000, "sort_order": 22},
+        json={
+            "display_name": "Пакет 100k PRO",
+            "badge_text": "Хит",
+            "description": "Подходит для активной команды.",
+            "button_text": "Оплатить пакет",
+            "payment_note": "Токены поступят сразу после оплаты.",
+            "price_caption": "17 ₽ за 1 000 токенов",
+            "tokens": 120000,
+            "price_rub_cents": 199000,
+            "sort_order": 22,
+        },
         headers=_h(sa),
     )
     assert upd_pkg.status_code == 200
     assert upd_pkg.json()["ok"] is True
     assert upd_pkg.json()["data"]["tokens"] == 120000
     assert upd_pkg.json()["data"]["price_rub_cents"] == 199000
+    assert upd_pkg.json()["data"]["badge_text"] == "Хит"
+    assert upd_pkg.json()["data"]["button_text"] == "Оплатить пакет"
 
     del_pkg = await client.delete("/api/v1/superadmin/billing/token-packages/pack_100k", headers=_h(sa))
     assert del_pkg.status_code == 200

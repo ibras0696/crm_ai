@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
-import Editor from '@monaco-editor/react'
 import {
   docsApi,
   type DocsAIGenerationJob,
   type DocsAIGenerationJobStatus,
   type DocsFile,
   type DocsFileType,
-  type DocsFileVersion,
   type DocsFolder,
   type DocsUsageInfo,
 } from '@/lib/api'
@@ -28,7 +26,6 @@ import {
   Loader2,
   PenLine,
   Pencil,
-  Save,
   Sparkles,
   Maximize2,
   Minimize2,
@@ -46,6 +43,14 @@ const STATUS_POLL_INTERVAL_MS = 2000
 const STATUS_POLL_TIMEOUT_MS = 120000
 const AI_JOB_POLL_INTERVAL_MS = 2000
 const AI_JOB_POLL_TIMEOUT_MS = 180000
+const AI_JOB_HISTORY_LIMIT = 30
+
+type DocsVisualStatus =
+  | DocsFile['status']
+  | 'ai_queued'
+  | 'ai_running'
+  | 'ai_scanning'
+  | 'ai_failed'
 
 function formatBytes(value: number): string {
   if (value <= 0) return '0 B'
@@ -53,12 +58,6 @@ function formatBytes(value: number): string {
   const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
   const scaled = value / 1024 ** index
   return `${scaled.toFixed(index === 0 ? 0 : 1)} ${units[index]}`
-}
-
-function formatDate(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString('ru-RU')
 }
 
 function depthOf(folderId: string, map: Map<string, DocsFolder>): number {
@@ -69,6 +68,21 @@ function depthOf(folderId: string, map: Map<string, DocsFolder>): number {
     cursor = map.get(cursor.parent_id)
   }
   return depth
+}
+
+function isFolderInOwnBranch(
+  folderId: string,
+  candidateParentId: string | null,
+  map: Map<string, DocsFolder>,
+): boolean {
+  if (!candidateParentId) return false
+  if (folderId === candidateParentId) return true
+  let cursor = map.get(candidateParentId)
+  while (cursor?.parent_id) {
+    if (cursor.parent_id === folderId) return true
+    cursor = map.get(cursor.parent_id)
+  }
+  return false
 }
 
 function fileTypeLabel(file: DocsFile): string {
@@ -84,10 +98,12 @@ function statusLabel(status: DocsFile['status']): string {
   return status || 'unknown'
 }
 
-function statusClass(status: DocsFile['status']): string {
+function statusClass(status: DocsVisualStatus): string {
   if (status === 'ready') return 'text-emerald-600'
-  if (status === 'scanning' || status === 'uploading' || status === 'draft') return 'text-amber-600'
-  if (status === 'blocked') return 'text-destructive'
+  if (status === 'scanning' || status === 'uploading' || status === 'draft' || status === 'ai_queued' || status === 'ai_running' || status === 'ai_scanning') {
+    return 'text-amber-600'
+  }
+  if (status === 'blocked' || status === 'ai_failed') return 'text-destructive'
   return 'text-muted-foreground'
 }
 
@@ -107,11 +123,93 @@ function aiJobStatusClass(status: DocsAIGenerationJobStatus): string {
   return 'text-destructive'
 }
 
+function visualStatusLabel(status: DocsVisualStatus): string {
+  if (status === 'ai_queued') return 'В очереди'
+  if (status === 'ai_running') return 'Генерация'
+  if (status === 'ai_scanning') return 'Проверка AV'
+  if (status === 'ai_failed') return 'Ошибка генерации'
+  return statusLabel(status)
+}
+
+function deriveFileVisualState(file: DocsFile, job: DocsAIGenerationJob | null): {
+  status: DocsVisualStatus
+  helperText: string | null
+} {
+  if (!job || job.file_id !== file.id) {
+    if (file.status === 'scanning') {
+      return {
+        status: 'scanning',
+        helperText: 'Файл на проверке. Скачивание будет доступно после сканирования.',
+      }
+    }
+    if (file.status === 'blocked') {
+      return {
+        status: 'blocked',
+        helperText: 'Заблокирован. Обратитесь к администратору.',
+      }
+    }
+    return { status: file.status, helperText: null }
+  }
+
+  if (job.status === 'failed') {
+    return {
+      status: 'ai_failed',
+      helperText: job.error_message?.trim() || 'AI-генерация завершилась ошибкой.',
+    }
+  }
+  if (job.status === 'queued') {
+    return {
+      status: 'ai_queued',
+      helperText: 'Документ принят в очередь на генерацию.',
+    }
+  }
+  if (job.status === 'running') {
+    return {
+      status: 'ai_running',
+      helperText: 'AI сейчас готовит содержимое документа.',
+    }
+  }
+  if (job.status === 'scanning') {
+    return {
+      status: 'ai_scanning',
+      helperText: 'Документ сгенерирован и проходит антивирусную проверку.',
+    }
+  }
+  if (job.status === 'blocked') {
+    return {
+      status: 'blocked',
+      helperText: 'Сгенерированный документ заблокирован после проверки.',
+    }
+  }
+  if (file.status === 'ready') {
+    return { status: 'ready', helperText: null }
+  }
+  return { status: file.status, helperText: null }
+}
+
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 export default function DocsPage() {
+  const [folderDialog, setFolderDialog] = useState<{
+    mode: 'create' | 'rename'
+    folderId: string | null
+    parentId: string | null
+    initialName: string
+  } | null>(null)
+  const [folderNameDraft, setFolderNameDraft] = useState('')
+  const [folderDialogSubmitting, setFolderDialogSubmitting] = useState(false)
+  const [fileDialog, setFileDialog] = useState<{
+    folderId: string | null
+  } | null>(null)
+  const [fileDialogSubmitting, setFileDialogSubmitting] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<{
+    kind: 'file' | 'folder'
+    id: string
+    title: string
+  } | null>(null)
+  const [deletingTargetId, setDeletingTargetId] = useState<string | null>(null)
   const [folders, setFolders] = useState<DocsFolder[]>([])
   const [files, setFiles] = useState<DocsFile[]>([])
   const [usage, setUsage] = useState<DocsUsageInfo | null>(null)
@@ -121,34 +219,28 @@ export default function DocsPage() {
   const [errorText, setErrorText] = useState('')
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({})
 
-  const [editorFile, setEditorFile] = useState<DocsFile | null>(null)
-  const [editorContent, setEditorContent] = useState('')
-  const [editorInitialContent, setEditorInitialContent] = useState('')
-  const [editorLoading, setEditorLoading] = useState(false)
-  const [saveLoading, setSaveLoading] = useState(false)
-  const [versions, setVersions] = useState<DocsFileVersion[]>([])
-  const [versionsLoading, setVersionsLoading] = useState(false)
-  const [pdfSignerFile, setPdfSignerFile] = useState<DocsFile | null>(null)
   const [docxEditorFile, setDocxEditorFile] = useState<DocsFile | null>(null)
+  const [pdfSignerFile, setPdfSignerFile] = useState<DocsFile | null>(null)
   const [docxLoading, setDocxLoading] = useState(false)
   const [isEditorFullscreen, setIsEditorFullscreen] = useState(false)
   const [docxConfig, setDocxConfig] = useState<Record<string, unknown> | null>(null)
   const [docxServerUrl, setDocxServerUrl] = useState('')
-  const [aiType, setAiType] = useState<DocsFileType>('txt')
+  const [aiType, setAiType] = useState<DocsFileType>('docx')
   const [aiPrompt, setAiPrompt] = useState('')
   const [aiTemplate, setAiTemplate] = useState('')
   const [aiTitle, setAiTitle] = useState('')
   const [aiGenerating, setAiGenerating] = useState(false)
   const [aiJobs, setAiJobs] = useState<DocsAIGenerationJob[]>([])
-  const [emptyType, setEmptyType] = useState<DocsFileType>('txt')
+  const [emptyType, setEmptyType] = useState<DocsFileType>('docx')
   const [emptyTitle, setEmptyTitle] = useState('')
   const [creatingEmpty, setCreatingEmpty] = useState(false)
+  const [uploadTargetFolderId, setUploadTargetFolderId] = useState<string | null>(null)
   const [draggedFileId, setDraggedFileId] = useState<string | null>(null)
+  const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null)
   const [dropTargetFolderId, setDropTargetFolderId] = useState<string | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
-  const hasUnsavedChanges = Boolean(editorFile && editorContent !== editorInitialContent)
 
   const folderMap = useMemo(() => {
     const map = new Map<string, DocsFolder>()
@@ -179,6 +271,35 @@ export default function DocsPage() {
     [files, selectedFolderId],
   )
 
+  const latestAiJobByFileId = useMemo(() => {
+    const map = new Map<string, DocsAIGenerationJob>()
+    for (const job of aiJobs) {
+      if (!job.file_id) continue
+      const current = map.get(job.file_id)
+      if (!current || current.updated_at < job.updated_at) {
+        map.set(job.file_id, job)
+      }
+    }
+    return map
+  }, [aiJobs])
+
+  const filesByFolder = useMemo(() => {
+    const acc: Record<string, DocsFile[]> = {}
+    for (const file of files) {
+      const key = file.folder_id ?? 'root'
+      acc[key] = acc[key] ?? []
+      acc[key].push(file)
+    }
+    for (const key of Object.keys(acc)) {
+      acc[key]?.sort((a, b) => {
+        const left = (a.title || a.original_name).toLowerCase()
+        const right = (b.title || b.original_name).toLowerCase()
+        return left.localeCompare(right, 'ru')
+      })
+    }
+    return acc
+  }, [files])
+
   const extractError = (error: unknown, fallback: string): string => {
     if (!isAxiosError(error)) return fallback
     const message = error.response?.data?.error?.message
@@ -186,10 +307,6 @@ export default function DocsPage() {
     return fallback
   }
 
-  const confirmDiscardUnsaved = useCallback((): boolean => {
-    if (!hasUnsavedChanges) return true
-    return window.confirm('Есть несохраненные изменения в TXT. Перейти без сохранения?')
-  }, [hasUnsavedChanges])
 
   const loadTree = useCallback(async () => {
     const response = await docsApi.getTree()
@@ -208,133 +325,34 @@ export default function DocsPage() {
     setUsage(response.data.data)
   }, [])
 
+  const loadAiJobs = useCallback(async () => {
+    const response = await docsApi.listAIGenerationJobs(AI_JOB_HISTORY_LIMIT)
+    if (!response.data.ok || !response.data.data) {
+      throw new Error(response.data.error?.message || 'Не удалось загрузить AI-задачи документов')
+    }
+    setAiJobs(response.data.data)
+  }, [])
+
   const reload = useCallback(async () => {
     setLoading(true)
     setErrorText('')
     try {
-      await Promise.all([loadTree(), loadUsage()])
+      await Promise.all([loadTree(), loadUsage(), loadAiJobs()])
     } catch (error) {
       setErrorText(extractError(error, 'Не удалось загрузить раздел документов'))
     } finally {
       setLoading(false)
     }
-  }, [loadTree, loadUsage])
+  }, [loadAiJobs, loadTree, loadUsage])
 
   useEffect(() => {
     void reload()
   }, [reload])
 
-  useEffect(() => {
-    if (!hasUnsavedChanges) return
-    const handler = (event: BeforeUnloadEvent) => {
-      event.preventDefault()
-      event.returnValue = ''
-    }
-    window.addEventListener('beforeunload', handler)
-    return () => window.removeEventListener('beforeunload', handler)
-  }, [hasUnsavedChanges])
 
-  const loadEditorData = useCallback(
-    async (file: DocsFile) => {
-      setEditorLoading(true)
-      setVersionsLoading(true)
-      try {
-        const [textResponse, versionsResponse] = await Promise.all([
-          docsApi.getFileText(file.id),
-          docsApi.listFileVersions(file.id),
-        ])
 
-        if (!textResponse.data.ok || !textResponse.data.data) {
-          setErrorText(textResponse.data.error?.message || 'Не удалось открыть TXT-файл')
-          return
-        }
-        if (!versionsResponse.data.ok || !versionsResponse.data.data) {
-          setErrorText(versionsResponse.data.error?.message || 'Не удалось загрузить историю версий')
-          return
-        }
-
-        setEditorFile(file)
-        setEditorContent(textResponse.data.data.content)
-        setEditorInitialContent(textResponse.data.data.content)
-        setVersions(versionsResponse.data.data)
-      } catch (error) {
-        setErrorText(extractError(error, 'Не удалось открыть TXT-редактор'))
-      } finally {
-        setEditorLoading(false)
-        setVersionsLoading(false)
-      }
-    },
-    [],
-  )
-
-  const closeEditor = useCallback(() => {
-    if (!confirmDiscardUnsaved()) return
-    setEditorFile(null)
-    setEditorContent('')
-    setEditorInitialContent('')
-    setVersions([])
-  }, [confirmDiscardUnsaved])
-
-  const openEditor = async (file: DocsFile) => {
-    if (file.type !== 'txt') return
-    if (file.status !== 'ready') {
-      setErrorText('Редактирование TXT доступно только для файлов в статусе READY')
-      return
-    }
-    if (editorFile?.id !== file.id && !confirmDiscardUnsaved()) return
-
-    setErrorText('')
-    await loadEditorData(file)
-  }
-
-  const saveText = async () => {
-    if (!editorFile) return
-
-    setErrorText('')
-    setSaveLoading(true)
-    try {
-      const response = await docsApi.saveFileText(editorFile.id, {
-        content: editorContent,
-        title: editorFile.title || editorFile.original_name,
-      })
-      if (!response.data.ok || !response.data.data) {
-        setErrorText(response.data.error?.message || 'Не удалось сохранить TXT')
-        return
-      }
-
-      const updatedFile = response.data.data
-      setFiles((prev) => prev.map((item) => (item.id === updatedFile.id ? updatedFile : item)))
-      setEditorFile(updatedFile)
-
-      const [textResponse, versionsResponse] = await Promise.all([
-        docsApi.getFileText(updatedFile.id),
-        docsApi.listFileVersions(updatedFile.id),
-        loadUsage(),
-      ])
-
-      if (!textResponse.data.ok || !textResponse.data.data) {
-        setErrorText(textResponse.data.error?.message || 'Сохранено, но не удалось обновить текст')
-        return
-      }
-      if (!versionsResponse.data.ok || !versionsResponse.data.data) {
-        setErrorText(versionsResponse.data.error?.message || 'Сохранено, но не удалось обновить историю версий')
-        return
-      }
-
-      setEditorContent(textResponse.data.data.content)
-      setEditorInitialContent(textResponse.data.data.content)
-      setVersions(versionsResponse.data.data)
-    } catch (error) {
-      setErrorText(extractError(error, 'Не удалось сохранить TXT'))
-    } finally {
-      setSaveLoading(false)
-    }
-  }
 
   const createFolder = async (parentId: string | null) => {
-    const name = window.prompt('Название папки')?.trim()
-    if (!name) return
-
     if (parentId) {
       const depth = depthOf(parentId, folderMap)
       if (depth + 1 > MAX_DEPTH) {
@@ -343,72 +361,121 @@ export default function DocsPage() {
       }
     }
 
+    setFolderDialog({ mode: 'create', folderId: null, parentId, initialName: '' })
+    setFolderNameDraft('')
     setErrorText('')
-    try {
-      const response = await docsApi.createFolder({ name, parent_id: parentId })
-      if (!response.data.ok || !response.data.data) {
-        setErrorText(response.data.error?.message || 'Не удалось создать папку')
-        return
-      }
-      setFolders((prev) => [...prev, response.data.data!])
-      if (parentId) {
-        setOpenFolders((prev) => ({ ...prev, [parentId]: true }))
-      }
-    } catch (error) {
-      setErrorText(extractError(error, 'Не удалось создать папку'))
-    }
   }
 
   const renameFolder = async (folder: DocsFolder) => {
-    const name = window.prompt('Новое название папки', folder.name)?.trim()
-    if (!name || name === folder.name) return
+    setFolderDialog({
+      mode: 'rename',
+      folderId: folder.id,
+      parentId: folder.parent_id,
+      initialName: folder.name,
+    })
+    setFolderNameDraft(folder.name)
+    setErrorText('')
+  }
+
+  const closeFolderDialog = () => {
+    if (folderDialogSubmitting) return
+    setFolderDialog(null)
+    setFolderNameDraft('')
+  }
+
+  const submitFolderDialog = async () => {
+    if (!folderDialog) return
+    const name = folderNameDraft.trim()
+    if (!name) {
+      setErrorText(folderDialog.mode === 'create' ? 'Введите название папки' : 'Введите новое название папки')
+      return
+    }
+    if (folderDialog.mode === 'rename' && name === folderDialog.initialName) {
+      setFolderDialog(null)
+      setFolderNameDraft('')
+      return
+    }
 
     setErrorText('')
+    setFolderDialogSubmitting(true)
     try {
-      const response = await docsApi.updateFolder(folder.id, { name })
-      if (!response.data.ok || !response.data.data) {
-        setErrorText(response.data.error?.message || 'Не удалось переименовать папку')
-        return
+      if (folderDialog.mode === 'create') {
+        const response = await docsApi.createFolder({ name, parent_id: folderDialog.parentId })
+        if (!response.data.ok || !response.data.data) {
+          setErrorText(response.data.error?.message || 'Не удалось создать папку')
+          return
+        }
+        setFolders((prev) => [...prev, response.data.data!])
+        if (folderDialog.parentId) {
+          setOpenFolders((prev) => ({ ...prev, [folderDialog.parentId!]: true }))
+        }
+      } else if (folderDialog.folderId) {
+        const response = await docsApi.updateFolder(folderDialog.folderId, { name })
+        if (!response.data.ok || !response.data.data) {
+          setErrorText(response.data.error?.message || 'Не удалось переименовать папку')
+          return
+        }
+        setFolders((prev) => prev.map((item) => (item.id === folderDialog.folderId ? response.data.data! : item)))
       }
-      setFolders((prev) => prev.map((item) => (item.id === folder.id ? response.data.data! : item)))
+      setFolderDialog(null)
+      setFolderNameDraft('')
     } catch (error) {
-      setErrorText(extractError(error, 'Не удалось переименовать папку'))
+      setErrorText(
+        extractError(
+          error,
+          folderDialog.mode === 'create' ? 'Не удалось создать папку' : 'Не удалось переименовать папку',
+        ),
+      )
+    } finally {
+      setFolderDialogSubmitting(false)
     }
   }
 
-  const deleteFolder = async (folder: DocsFolder) => {
-    if (!window.confirm(`Удалить папку «${folder.name}»?`)) return
+  const requestDeleteFolder = (folder: DocsFolder) => {
+    setPendingDelete({ kind: 'folder', id: folder.id, title: folder.name })
+  }
+
+  const requestDeleteFile = (file: DocsFile) => {
+    setPendingDelete({ kind: 'file', id: file.id, title: file.title || file.original_name })
+  }
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return
     setErrorText('')
+    setDeletingTargetId(pendingDelete.id)
     try {
-      const response = await docsApi.deleteFolder(folder.id)
-      if (!response.data.ok) {
-        setErrorText(response.data.error?.message || 'Не удалось удалить папку')
-        return
+      if (pendingDelete.kind === 'folder') {
+        const response = await docsApi.deleteFolder(pendingDelete.id)
+        if (!response.data.ok) {
+          setErrorText(response.data.error?.message || 'Не удалось удалить папку')
+          return
+        }
+        setFolders((prev) => prev.filter((item) => item.id !== pendingDelete.id))
+        if (selectedFolderId === pendingDelete.id) setSelectedFolderId(null)
+      } else {
+        const response = await docsApi.deleteFile(pendingDelete.id)
+        if (!response.data.ok) {
+          setErrorText(response.data.error?.message || 'Не удалось удалить файл')
+          return
+        }
+        setFiles((prev) => prev.filter((item) => item.id !== pendingDelete.id))
+        setAiJobs((prev) => prev.filter((item) => item.file_id !== pendingDelete.id))
+        await loadUsage()
       }
-      setFolders((prev) => prev.filter((item) => item.id !== folder.id))
-      if (selectedFolderId === folder.id) setSelectedFolderId(null)
+      setPendingDelete(null)
     } catch (error) {
-      setErrorText(extractError(error, 'Не удалось удалить папку'))
+      setErrorText(
+        extractError(
+          error,
+          pendingDelete.kind === 'folder' ? 'Не удалось удалить папку' : 'Не удалось удалить файл',
+        ),
+      )
+    } finally {
+      setDeletingTargetId(null)
     }
   }
 
-  const deleteFile = async (file: DocsFile) => {
-    if (!window.confirm(`Удалить файл «${file.title || file.original_name}»?`)) return
-    setErrorText('')
-    try {
-      const response = await docsApi.deleteFile(file.id)
-      if (!response.data.ok) {
-        setErrorText(response.data.error?.message || 'Не удалось удалить файл')
-        return
-      }
-      setFiles((prev) => prev.filter((item) => item.id !== file.id))
-      await loadUsage()
-    } catch (error) {
-      setErrorText(extractError(error, 'Не удалось удалить файл'))
-    }
-  }
-
-  const uploadFiles = async (list: FileList | null) => {
+  const uploadFiles = async (list: FileList | null, targetFolderId: string | null = selectedFolderId) => {
     if (!list || list.length === 0) return
     setErrorText('')
     setUploading(true)
@@ -421,7 +488,7 @@ export default function DocsPage() {
             filename: file.name,
             size_bytes: file.size,
             content_type: file.type || 'application/octet-stream',
-            folder_id: selectedFolderId,
+            folder_id: targetFolderId,
           })
           if (!init.data.ok || !init.data.data) {
             throw new Error(init.data.error?.message || `Не удалось инициализировать загрузку ${file.name}`)
@@ -466,18 +533,35 @@ export default function DocsPage() {
       setErrorText(extractError(error, 'Не удалось загрузить файл'))
     } finally {
       setUploading(false)
+      setUploadTargetFolderId(null)
       if (fileInputRef.current) fileInputRef.current.value = ''
     }
   }
 
+  const openCreateFileDialog = (folderId: string | null) => {
+    setFileDialog({ folderId })
+    setEmptyType('docx')
+    setEmptyTitle('')
+    setErrorText('')
+  }
+
+  const closeFileDialog = () => {
+    if (fileDialogSubmitting || creatingEmpty) return
+    setFileDialog(null)
+    setEmptyTitle('')
+    setEmptyType('docx')
+  }
+
   const createEmptyFile = async () => {
+    if (!fileDialog) return
     setCreatingEmpty(true)
+    setFileDialogSubmitting(true)
     setErrorText('')
     try {
       const response = await docsApi.createEmptyFile({
         type: emptyType,
         title: emptyTitle.trim() || null,
-        folder_id: selectedFolderId,
+        folder_id: fileDialog.folderId,
       })
       if (!response.data.ok || !response.data.data) {
         setErrorText(response.data.error?.message || 'Не удалось создать пустой файл')
@@ -488,11 +572,18 @@ export default function DocsPage() {
         return [response.data.data!, ...next]
       })
       await loadUsage()
+      if (fileDialog.folderId) {
+        setOpenFolders((prev) => ({ ...prev, [fileDialog.folderId!]: true }))
+      }
+      setSelectedFolderId(fileDialog.folderId)
+      setFileDialog(null)
       setEmptyTitle('')
+      setEmptyType('docx')
     } catch (error) {
       setErrorText(extractError(error, 'Не удалось создать пустой файл'))
     } finally {
       setCreatingEmpty(false)
+      setFileDialogSubmitting(false)
     }
   }
 
@@ -514,7 +605,33 @@ export default function DocsPage() {
     [files],
   )
 
+  const moveFolderToParent = useCallback(
+    async (folderId: string, parentId: string | null) => {
+      const currentFolder = folders.find((item) => item.id === folderId)
+      if (!currentFolder || currentFolder.parent_id === parentId) return
+      if (isFolderInOwnBranch(folderId, parentId, folderMap)) {
+        setErrorText('Нельзя вложить папку в саму себя или в свою дочернюю папку')
+        return
+      }
+      try {
+        const response = await docsApi.updateFolder(folderId, { parent_id: parentId })
+        if (!response.data.ok || !response.data.data) {
+          setErrorText(response.data.error?.message || 'Не удалось переместить папку')
+          return
+        }
+        setFolders((prev) => prev.map((item) => (item.id === folderId ? response.data.data! : item)))
+        if (parentId) {
+          setOpenFolders((prev) => ({ ...prev, [parentId]: true }))
+        }
+      } catch (error) {
+        setErrorText(extractError(error, 'Не удалось переместить папку'))
+      }
+    },
+    [folderMap, folders],
+  )
+
   const handleDragStartFile = (fileId: string) => {
+    setDraggedFolderId(null)
     setDraggedFileId(fileId)
   }
 
@@ -523,10 +640,26 @@ export default function DocsPage() {
     setDropTargetFolderId(null)
   }
 
-  const handleDropToFolder = async (folderId: string | null) => {
-    if (!draggedFileId) return
-    await moveFileToFolder(draggedFileId, folderId)
+  const handleDragStartFolder = (folderId: string) => {
     setDraggedFileId(null)
+    setDraggedFolderId(folderId)
+  }
+
+  const handleDragEndFolder = () => {
+    setDraggedFolderId(null)
+    setDropTargetFolderId(null)
+  }
+
+  const handleDropToFolder = async (folderId: string | null) => {
+    if (draggedFileId) {
+      await moveFileToFolder(draggedFileId, folderId)
+    } else if (draggedFolderId) {
+      await moveFolderToParent(draggedFolderId, folderId)
+    } else {
+      return
+    }
+    setDraggedFileId(null)
+    setDraggedFolderId(null)
     setDropTargetFolderId(null)
   }
 
@@ -601,16 +734,16 @@ export default function DocsPage() {
           upsertAiJob(job)
           if (job.status === 'failed') {
             setErrorText(job.error_message || 'AI-генерация завершилась ошибкой')
-            await Promise.all([loadTree(), loadUsage()])
+            await Promise.all([loadTree(), loadUsage(), loadAiJobs()])
             return
           }
           if (job.status === 'blocked') {
             setErrorText('Сгенерированный документ заблокирован после проверки')
-            await Promise.all([loadTree(), loadUsage()])
+            await Promise.all([loadTree(), loadUsage(), loadAiJobs()])
             return
           }
           if (job.status === 'ready') {
-            await Promise.all([loadTree(), loadUsage()])
+            await Promise.all([loadTree(), loadUsage(), loadAiJobs()])
             return
           }
           if (job.status === 'scanning') {
@@ -619,7 +752,7 @@ export default function DocsPage() {
             if (finalJob.data.ok && finalJob.data.data) {
               upsertAiJob(finalJob.data.data)
             }
-            await Promise.all([loadTree(), loadUsage()])
+            await Promise.all([loadTree(), loadUsage(), loadAiJobs()])
             return
           }
         } catch {
@@ -628,7 +761,7 @@ export default function DocsPage() {
       }
       setErrorText('AI-генерация заняла слишком много времени. Обновите раздел позже.')
     },
-    [loadTree, loadUsage, pollFilesStatus, upsertAiJob],
+    [loadAiJobs, loadTree, loadUsage, pollFilesStatus, upsertAiJob],
   )
 
   const createAIDocument = async () => {
@@ -753,29 +886,71 @@ export default function DocsPage() {
   }
 
   const onSelectFolder = (folderId: string | null) => {
-    if (!confirmDiscardUnsaved()) return
     setSelectedFolderId(folderId)
+  }
+
+  const triggerUploadToFolder = (folderId: string | null) => {
+    if (uploading) return
+    setUploadTargetFolderId(folderId)
+    fileInputRef.current?.click()
+  }
+
+  const renderTreeFile = (file: DocsFile, depth: number) => {
+    const latestAiJob = latestAiJobByFileId.get(file.id) ?? null
+    const visualState = deriveFileVisualState(file, latestAiJob)
+    return (
+      <div
+        key={file.id}
+        className={`group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
+          draggedFileId === file.id ? 'opacity-50' : 'hover:bg-secondary/60'
+        }`}
+        style={{ paddingLeft: `${28 + depth * 16}px` }}
+        draggable
+        onDragStart={() => handleDragStartFile(file.id)}
+        onDragEnd={handleDragEndFile}
+      >
+        <button
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          onClick={() => onSelectFolder(file.folder_id ?? null)}
+          title={file.title || file.original_name}
+        >
+          <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="truncate">{file.title || file.original_name}</span>
+        </button>
+        <span className={`shrink-0 text-[11px] font-medium ${statusClass(visualState.status)}`}>
+          {visualStatusLabel(visualState.status)}
+        </span>
+      </div>
+    )
   }
 
   const renderFolder = (folder: DocsFolder, depth = 0) => {
     const isOpen = openFolders[folder.id] ?? true
     const children = childrenMap[folder.id] ?? []
+    const folderFiles = filesByFolder[folder.id] ?? []
     const isSelected = folder.id === selectedFolderId
     const canCreateSubFolder = depth < MAX_DEPTH
-    const isDropActive = dropTargetFolderId === folder.id
+    const isFolderDropInvalid = draggedFolderId !== null && isFolderInOwnBranch(draggedFolderId, folder.id, folderMap)
+    const isDropActive = dropTargetFolderId === folder.id && !isFolderDropInvalid
 
     return (
       <div key={folder.id}>
         <div
           className={`group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${isDropActive
             ? 'bg-primary/10 text-primary ring-1 ring-primary/40'
+            : dropTargetFolderId === folder.id && isFolderDropInvalid
+              ? 'bg-destructive/10 text-destructive ring-1 ring-destructive/30'
             : isSelected
               ? 'bg-primary/10 text-primary'
               : 'hover:bg-secondary/60'
             }`}
           style={{ paddingLeft: `${8 + depth * 16}px` }}
+          draggable
+          onDragStart={() => handleDragStartFolder(folder.id)}
+          onDragEnd={handleDragEndFolder}
           onDragOver={(event) => {
-            if (!draggedFileId) return
+            if (!draggedFileId && !draggedFolderId) return
+            if (draggedFolderId && isFolderInOwnBranch(draggedFolderId, folder.id, folderMap)) return
             event.preventDefault()
             setDropTargetFolderId(folder.id)
           }}
@@ -783,7 +958,8 @@ export default function DocsPage() {
             if (dropTargetFolderId === folder.id) setDropTargetFolderId(null)
           }}
           onDrop={(event) => {
-            if (!draggedFileId) return
+            if (!draggedFileId && !draggedFolderId) return
+            if (draggedFolderId && isFolderInOwnBranch(draggedFolderId, folder.id, folderMap)) return
             event.preventDefault()
             void handleDropToFolder(folder.id)
           }}
@@ -799,20 +975,42 @@ export default function DocsPage() {
             <span className="truncate">{folder.name}</span>
           </button>
           <div className="ml-auto hidden items-center gap-1 group-hover:flex">
+            <button
+              className="text-muted-foreground hover:text-foreground"
+              onClick={() => openCreateFileDialog(folder.id)}
+              title="Создать файл"
+              disabled={uploading || creatingEmpty || fileDialogSubmitting}
+            >
+              <FilePlus2 className="h-4 w-4" />
+            </button>
+            <button
+              className="text-muted-foreground hover:text-foreground"
+              onClick={() => triggerUploadToFolder(folder.id)}
+              title="Загрузить файл"
+              disabled={uploading}
+            >
+              <Upload className="h-4 w-4" />
+            </button>
             {canCreateSubFolder && (
-              <button className="text-muted-foreground hover:text-foreground" onClick={() => void createFolder(folder.id)} title="Создать вложенную папку">
+              <button
+                className="text-muted-foreground hover:text-foreground"
+                onClick={() => void createFolder(folder.id)}
+                title="Создать вложенную папку"
+                disabled={uploading || creatingEmpty || fileDialogSubmitting}
+              >
                 <FolderPlus className="h-4 w-4" />
               </button>
             )}
             <button className="text-muted-foreground hover:text-foreground" onClick={() => void renameFolder(folder)} title="Переименовать">
               <Pencil className="h-4 w-4" />
             </button>
-            <button className="text-muted-foreground hover:text-destructive" onClick={() => void deleteFolder(folder)} title="Удалить">
-              <Trash2 className="h-4 w-4" />
-            </button>
+              <button className="text-muted-foreground hover:text-destructive" onClick={() => requestDeleteFolder(folder)} title="Удалить">
+                <Trash2 className="h-4 w-4" />
+              </button>
           </div>
         </div>
         {isOpen && children.map((child) => renderFolder(child, depth + 1))}
+        {isOpen && folderFiles.map((file) => renderTreeFile(file, depth + 1))}
       </div>
     )
   }
@@ -830,40 +1028,20 @@ export default function DocsPage() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-2xl font-bold">Документы</h1>
-          <p className="text-sm text-muted-foreground">TXT/PDF/DOCX с загрузкой в S3 и версионированием.</p>
+          <p className="text-sm text-muted-foreground">PDF/DOCX с загрузкой в S3 и версионированием.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={() => void reload()}>
             Обновить
           </Button>
-          <select
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-            value={emptyType}
-            onChange={(event) => setEmptyType(event.target.value as DocsFileType)}
-            disabled={creatingEmpty || uploading}
-          >
-            <option value="txt">TXT</option>
-            <option value="docx">DOCX</option>
-          </select>
-          <input
-            className="h-10 w-56 rounded-md border border-input bg-background px-3 text-sm"
-            placeholder="Название пустого файла"
-            value={emptyTitle}
-            onChange={(event) => setEmptyTitle(event.target.value)}
-            maxLength={200}
-            disabled={creatingEmpty || uploading}
-          />
-          <Button variant="outline" onClick={() => void createEmptyFile()} disabled={creatingEmpty || uploading}>
-            {creatingEmpty ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FilePlus2 className="mr-2 h-4 w-4" />}
-            Создать файл
-          </Button>
-          <Button onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-            {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
-            Загрузить файл
-          </Button>
-          <input ref={fileInputRef} type="file" className="hidden" onChange={(event) => void uploadFiles(event.target.files)} />
         </div>
       </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        onChange={(event) => void uploadFiles(event.target.files, uploadTargetFolderId ?? selectedFolderId)}
+      />
 
       {usage && (
         <Card>
@@ -897,7 +1075,6 @@ export default function DocsPage() {
               onChange={(event) => setAiType(event.target.value as DocsFileType)}
               disabled={aiGenerating}
             >
-              <option value="txt">TXT</option>
               <option value="docx">DOCX</option>
             </select>
             <input
@@ -956,38 +1133,49 @@ export default function DocsPage() {
         <Card className="lg:col-span-1">
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center justify-between">
-              <span>Папки</span>
-              <Button variant="ghost" size="sm" onClick={() => void createFolder(null)}>
-                <FolderPlus className="mr-1 h-4 w-4" /> Создать
-              </Button>
+              <span>Структура</span>
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="sm" onClick={() => openCreateFileDialog(selectedFolderId)} title="Создать файл">
+                  <FilePlus2 className="mr-1 h-4 w-4" /> Файл
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => triggerUploadToFolder(selectedFolderId)} title="Загрузить файл" disabled={uploading}>
+                  <Upload className="mr-1 h-4 w-4" /> Загрузить
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => void createFolder(selectedFolderId)} disabled={creatingEmpty || fileDialogSubmitting}>
+                  <FolderPlus className="mr-1 h-4 w-4" /> Папка
+                </Button>
+              </div>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-1">
-            <button
-              className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${dropTargetFolderId === 'root'
-                ? 'bg-primary/10 text-primary ring-1 ring-primary/40'
-                : selectedFolderId === null
-                  ? 'bg-primary/10 text-primary'
-                  : 'hover:bg-secondary/60'
-                }`}
-              onClick={() => onSelectFolder(null)}
-              onDragOver={(event) => {
-                if (!draggedFileId) return
-                event.preventDefault()
-                setDropTargetFolderId('root')
-              }}
-              onDragLeave={() => {
-                if (dropTargetFolderId === 'root') setDropTargetFolderId(null)
-              }}
-              onDrop={(event) => {
-                if (!draggedFileId) return
-                event.preventDefault()
-                void handleDropToFolder(null)
-              }}
-            >
-              <Folder className="h-4 w-4 text-amber-500" />
-              <span>Корень</span>
-            </button>
+            <div className="group">
+              <button
+                className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${dropTargetFolderId === 'root'
+                  ? 'bg-primary/10 text-primary ring-1 ring-primary/40'
+                  : selectedFolderId === null
+                    ? 'bg-primary/10 text-primary'
+                    : 'hover:bg-secondary/60'
+                  }`}
+                onClick={() => onSelectFolder(null)}
+                onDragOver={(event) => {
+                  if (!draggedFileId && !draggedFolderId) return
+                  event.preventDefault()
+                  setDropTargetFolderId('root')
+                }}
+                onDragLeave={() => {
+                  if (dropTargetFolderId === 'root') setDropTargetFolderId(null)
+                }}
+                onDrop={(event) => {
+                  if (!draggedFileId && !draggedFolderId) return
+                  event.preventDefault()
+                  void handleDropToFolder(null)
+                }}
+              >
+                <Folder className="h-4 w-4 text-amber-500" />
+                <span>Корень</span>
+              </button>
+              {(filesByFolder.root ?? []).map((file) => renderTreeFile(file, 1))}
+            </div>
             {(childrenMap.root ?? []).map((folder) => renderFolder(folder, 0))}
           </CardContent>
         </Card>
@@ -1006,157 +1194,63 @@ export default function DocsPage() {
               </div>
             ) : (
               <div className="space-y-2">
-                {visibleFiles.map((file) => (
-                  <div
-                    key={file.id}
-                    className={`flex items-center gap-3 rounded-lg border border-border px-3 py-2 ${draggedFileId === file.id ? 'opacity-50' : ''}`}
-                    draggable
-                    onDragStart={() => handleDragStartFile(file.id)}
-                    onDragEnd={handleDragEndFile}
-                  >
-                    <div className="rounded-md bg-secondary p-2">
-                      <FileText className="h-4 w-4" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{file.title || file.original_name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {fileTypeLabel(file)} · {formatBytes(file.size)} · статус: {statusLabel(file.status).toLowerCase()}
-                      </p>
-                      {file.status === 'scanning' && (
-                        <p className="text-xs text-amber-600">Файл на проверке. Скачивание будет доступно после сканирования.</p>
+                {visibleFiles.map((file) => {
+                  const latestAiJob = latestAiJobByFileId.get(file.id) ?? null
+                  const visualState = deriveFileVisualState(file, latestAiJob)
+                  return (
+                    <div
+                      key={file.id}
+                      className={`flex items-center gap-3 rounded-lg border border-border px-3 py-2 ${draggedFileId === file.id ? 'opacity-50' : ''}`}
+                      draggable
+                      onDragStart={() => handleDragStartFile(file.id)}
+                      onDragEnd={handleDragEndFile}
+                    >
+                      <div className="rounded-md bg-secondary p-2">
+                        <FileText className="h-4 w-4" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{file.title || file.original_name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {fileTypeLabel(file)} · {formatBytes(file.size)} · статус: {visualStatusLabel(visualState.status).toLowerCase()}
+                        </p>
+                        {visualState.helperText && (
+                          <p className={`text-xs ${statusClass(visualState.status)}`}>{visualState.helperText}</p>
+                        )}
+                      </div>
+                      {file.type === 'pdf' && (
+                        <Button variant="outline" size="sm" onClick={() => onPdfSignOpen(file)} disabled={file.status !== 'ready'}>
+                          <PenLine className="mr-1 h-4 w-4" /> Подписать PDF
+                        </Button>
                       )}
-                      {file.status === 'blocked' && (
-                        <p className="text-xs text-destructive">Заблокирован (обратитесь к администратору).</p>
+                      {file.type === 'docx' && (
+                        <Button variant="outline" size="sm" onClick={() => void onDocxOpen(file)} disabled={file.status !== 'ready' || docxLoading || docxEditorFile?.id === file.id}>
+                          <Pencil className="mr-1 h-4 w-4" /> Открыть в редакторе
+                        </Button>
                       )}
+                      {file.status === 'uploading' && (
+                        <Button variant="outline" size="sm" onClick={() => void abortUploadingFile(file)}>
+                          <X className="mr-1 h-4 w-4" /> Отменить
+                        </Button>
+                      )}
+                      <Button variant="outline" size="sm" onClick={() => void downloadFile(file)} disabled={file.status !== 'ready'}>
+                        <Download className="mr-1 h-4 w-4" /> Скачать
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
+                        onClick={() => requestDeleteFile(file)}
+                        disabled={docxEditorFile?.id === file.id || pdfSignerFile?.id === file.id || deletingTargetId === file.id}
+                      >
+                        <Trash2 className="mr-1 h-4 w-4" /> Удалить
+                      </Button>
+                      <span className={`text-xs font-medium ${statusClass(visualState.status)}`}>{visualStatusLabel(visualState.status)}</span>
                     </div>
-                    {file.type === 'txt' && (
-                      <Button variant="outline" size="sm" onClick={() => void openEditor(file)} disabled={file.status !== 'ready'}>
-                        <Pencil className="mr-1 h-4 w-4" /> Редактировать
-                      </Button>
-                    )}
-                    {file.type === 'pdf' && (
-                      <Button variant="outline" size="sm" onClick={() => onPdfSignOpen(file)} disabled={file.status !== 'ready'}>
-                        <PenLine className="mr-1 h-4 w-4" /> Подписать PDF
-                      </Button>
-                    )}
-                    {file.type === 'docx' && (
-                      <Button variant="outline" size="sm" onClick={() => void onDocxOpen(file)} disabled={file.status !== 'ready' || docxLoading || docxEditorFile?.id === file.id}>
-                        <Pencil className="mr-1 h-4 w-4" /> Открыть в редакторе
-                      </Button>
-                    )}
-                    {file.status === 'uploading' && (
-                      <Button variant="outline" size="sm" onClick={() => void abortUploadingFile(file)}>
-                        <X className="mr-1 h-4 w-4" /> Отменить
-                      </Button>
-                    )}
-                    <Button variant="outline" size="sm" onClick={() => void downloadFile(file)} disabled={file.status !== 'ready'}>
-                      <Download className="mr-1 h-4 w-4" /> Скачать
-                    </Button>
-                    <Button variant="outline" size="sm" className="text-destructive hover:bg-destructive hover:text-destructive-foreground" onClick={() => void deleteFile(file)} disabled={file.status !== 'ready' || docxEditorFile?.id === file.id || editorFile?.id === file.id || pdfSignerFile?.id === file.id}>
-                      <Trash2 className="mr-1 h-4 w-4" /> Удалить
-                    </Button>
-                    <span className={`text-xs font-medium ${statusClass(file.status)}`}>{statusLabel(file.status)}</span>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
 
-            {editorFile && (
-              <div className="fixed inset-0 z-[100] flex flex-col bg-background/95 backdrop-blur-sm animate-in fade-in zoom-in duration-200">
-                <div className="flex items-center justify-between border-b border-border bg-background px-4 py-3 shadow-md">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100/80 text-violet-600 shadow-sm dark:bg-violet-900/40 dark:text-violet-400">
-                      <FileText className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <h2 className="text-base font-semibold leading-tight">{editorFile.title || editorFile.original_name}</h2>
-                      <p className="text-xs text-muted-foreground mt-0.5 font-medium flex items-center gap-1.5">
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                        </span>
-                        Текстовый редактор
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <p className={`text-xs font-medium mr-2 ${hasUnsavedChanges ? 'text-amber-600' : 'text-muted-foreground'}`}>
-                      {hasUnsavedChanges ? 'Есть несохраненные изменения' : 'Все изменения сохранены'}
-                    </p>
-                    <Button size="sm" onClick={() => void saveText()} disabled={saveLoading || editorLoading || !hasUnsavedChanges} className="h-9 gap-2 px-4 shadow-sm">
-                      {saveLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-                      Сохранить
-                    </Button>
-                    <div className="w-px h-6 bg-border mx-1"></div>
-                    <Button variant="outline" size="sm" onClick={() => void closeEditor()} className="h-9 gap-2 shadow-sm border-border hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all">
-                      <X className="h-4 w-4" />
-                      Закрыть
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="flex flex-1 overflow-hidden bg-background">
-                  <div className="flex-1 p-4 lg:p-6 lg:border-r border-border overflow-hidden flex flex-col">
-                    {editorLoading ? (
-                      <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-border bg-secondary/20">
-                        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-                      </div>
-                    ) : (
-                      <div className="flex-1 overflow-hidden rounded-xl border border-input shadow-sm relative">
-                        {/* Adding a custom monaco editor styling context */}
-                        <Editor
-                          height="100%"
-                          defaultLanguage="plaintext"
-                          value={editorContent}
-                          onChange={(value) => setEditorContent(value ?? '')}
-                          options={{
-                            minimap: { enabled: false },
-                            fontSize: 14,
-                            wordWrap: 'on',
-                            lineNumbers: 'on',
-                            scrollBeyondLastLine: false,
-                            automaticLayout: true,
-                            fontFamily: "system-ui, -apple-system, sans-serif",
-                            padding: { top: 16, bottom: 16 },
-                          }}
-                          className="bg-transparent"
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="w-80 flex-shrink-0 bg-secondary/10 p-4 border-l border-border hidden lg:flex lg:flex-col overflow-hidden">
-                    <h3 className="text-sm font-semibold mb-4 flex items-center gap-2">
-                      <HardDrive className="h-4 w-4" /> Иcтория версий
-                    </h3>
-                    <div className="flex-1 overflow-auto pr-2 space-y-3 custom-scrollbar">
-                      {versionsLoading ? (
-                        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground py-10">
-                          <Loader2 className="h-5 w-5 animate-spin" />
-                        </div>
-                      ) : versions.length === 0 ? (
-                        <div className="text-center py-10 border border-dashed rounded-lg">
-                          <p className="text-sm text-muted-foreground">Версий пока нет</p>
-                        </div>
-                      ) : (
-                        versions.map((version) => (
-                          <div key={version.id} className="rounded-lg border border-border bg-background p-3 shadow-sm hover:border-primary/50 transition-colors">
-                            <div className="flex items-center justify-between mb-1">
-                              <p className="text-xs font-bold text-foreground font-mono">v: {version.id.slice(0, 8)}</p>
-                              {version.id === editorFile.current_version_id && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 font-semibold uppercase">Current</span>
-                              )}
-                            </div>
-                            <p className="text-xs text-muted-foreground mb-1">{formatDate(version.created_at)}</p>
-                            <p className="text-xs font-medium bg-secondary text-secondary-foreground inline-flex px-1.5 py-0.5 rounded uppercase">{formatBytes(version.size_bytes)} · {version.mime.split('/').pop()}</p>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
           </CardContent>
         </Card>
         {pdfSignerFile && (
@@ -1197,8 +1291,14 @@ export default function DocsPage() {
         )}
 
         {docxEditorFile && docxConfig && docxServerUrl && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-0 lg:p-4 bg-background/50 backdrop-blur-sm animate-in fade-in zoom-in duration-200">
-            <div className={`flex flex-col bg-background shadow-2xl border border-border border-t-0 lg:border-t overflow-hidden transition-all duration-300 ${isEditorFullscreen ? 'fixed inset-0 w-full h-full rounded-none lg:rounded-none' : 'w-full lg:w-[95vw] h-full lg:h-[90vh] lg:rounded-xl shadow-2xl'}`}>
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 lg:p-6 bg-background/50 backdrop-blur-sm animate-in fade-in zoom-in duration-200">
+            <div
+              className={`flex flex-col bg-background shadow-2xl border border-border overflow-hidden transition-all duration-300 ${
+                isEditorFullscreen
+                  ? 'fixed inset-0 h-full w-full rounded-none border-0'
+                  : 'h-[min(820px,calc(100vh-32px))] w-[min(1180px,calc(100vw-24px))] rounded-2xl'
+              }`}
+            >
               <div className="flex items-center justify-between border-b border-border bg-background px-4 py-3 shadow-md flex-shrink-0">
                 <div className="flex items-center gap-3">
                   <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100/80 text-blue-600 shadow-sm dark:bg-blue-900/40 dark:text-blue-400">
@@ -1216,7 +1316,13 @@ export default function DocsPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button variant="ghost" size="sm" onClick={() => setIsEditorFullscreen(!isEditorFullscreen)} className="h-9 w-9 p-0 hover:bg-secondary hidden lg:flex">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setIsEditorFullscreen(!isEditorFullscreen)}
+                    className="h-9 w-9 p-0 hover:bg-secondary"
+                    title={isEditorFullscreen ? 'Свернуть окно' : 'Развернуть на весь экран'}
+                  >
                     {isEditorFullscreen ? <Minimize2 className="h-4 w-4 opacity-70" /> : <Maximize2 className="h-4 w-4 opacity-70" />}
                   </Button>
                   <Button variant="outline" size="sm" onClick={() => {
@@ -1230,7 +1336,7 @@ export default function DocsPage() {
                   </Button>
                 </div>
               </div>
-              <div className="flex-1 overflow-hidden bg-[#f4f4f4] dark:bg-neutral-900 shadow-inner flex flex-col pt-3 min-h-0">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#f4f4f4] dark:bg-neutral-900 shadow-inner pt-3">
                 <DocxEditorPanel
                   file={docxEditorFile}
                   documentServerUrl={docxServerUrl}
@@ -1239,6 +1345,173 @@ export default function DocsPage() {
                   onError={setErrorText}
                   onFileUpdated={onFileUpdated}
                 />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {pendingDelete && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-background/60 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-2xl border border-border bg-background shadow-2xl">
+              <div className="border-b border-border px-5 py-4">
+                <h3 className="text-lg font-semibold">
+                  {pendingDelete.kind === 'folder' ? 'Удалить папку' : 'Удалить файл'}
+                </h3>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {pendingDelete.kind === 'folder'
+                    ? `Папка «${pendingDelete.title}» будет удалена. Если внутри есть файлы или вложенные папки, backend не даст удалить её, пока вы не очистите содержимое.`
+                    : `Файл «${pendingDelete.title}» будет удалён из документов. Это действие нельзя отменить.`}
+                </p>
+              </div>
+              <div className="flex items-center justify-end gap-2 px-5 py-4">
+                <Button
+                  variant="outline"
+                  onClick={() => setPendingDelete(null)}
+                  disabled={deletingTargetId === pendingDelete.id}
+                >
+                  Отмена
+                </Button>
+                <Button
+                  onClick={() => void confirmDelete()}
+                  disabled={deletingTargetId === pendingDelete.id}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  {deletingTargetId === pendingDelete.id ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Удаляем
+                    </>
+                  ) : (
+                    'Удалить'
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {folderDialog && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-background/60 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-2xl border border-border bg-background shadow-2xl">
+              <div className="border-b border-border px-5 py-4">
+                <h3 className="text-lg font-semibold">
+                  {folderDialog.mode === 'create' ? 'Создать папку' : 'Переименовать папку'}
+                </h3>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {folderDialog.mode === 'create'
+                    ? 'Укажите название новой папки.'
+                    : `Измените название папки «${folderDialog.initialName}».`}
+                </p>
+              </div>
+              <div className="px-5 py-4">
+                <input
+                  autoFocus
+                  value={folderNameDraft}
+                  onChange={(event) => setFolderNameDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      void submitFolderDialog()
+                    }
+                    if (event.key === 'Escape') {
+                      event.preventDefault()
+                      closeFolderDialog()
+                    }
+                  }}
+                  disabled={folderDialogSubmitting}
+                  placeholder="Название папки"
+                  className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </div>
+              <div className="flex items-center justify-end gap-2 px-5 py-4">
+                <Button
+                  variant="outline"
+                  onClick={closeFolderDialog}
+                  disabled={folderDialogSubmitting}
+                >
+                  Отмена
+                </Button>
+                <Button
+                  onClick={() => void submitFolderDialog()}
+                  disabled={folderDialogSubmitting}
+                >
+                  {folderDialogSubmitting ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      {folderDialog.mode === 'create' ? 'Создаём' : 'Сохраняем'}
+                    </>
+                  ) : (
+                    folderDialog.mode === 'create' ? 'Создать' : 'Сохранить'
+                  )}
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {fileDialog && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-background/60 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-2xl border border-border bg-background shadow-2xl">
+              <div className="border-b border-border px-5 py-4">
+                <h3 className="text-lg font-semibold">Создать файл</h3>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {fileDialog.folderId
+                    ? `Файл будет создан в папке «${folderMap.get(fileDialog.folderId)?.name ?? 'Без названия'}».`
+                    : 'Файл будет создан в корне документов.'}
+                </p>
+              </div>
+              <div className="space-y-3 px-5 py-4">
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-foreground">Тип файла</label>
+                  <select
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={emptyType}
+                    onChange={(event) => setEmptyType(event.target.value as DocsFileType)}
+                    disabled={fileDialogSubmitting || creatingEmpty}
+                  >
+                    <option value="docx">DOCX</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-foreground">Название файла</label>
+                  <input
+                    autoFocus
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    placeholder="Например, Договор или КП"
+                    value={emptyTitle}
+                    onChange={(event) => setEmptyTitle(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        void createEmptyFile()
+                      }
+                      if (event.key === 'Escape') {
+                        event.preventDefault()
+                        closeFileDialog()
+                      }
+                    }}
+                    maxLength={200}
+                    disabled={fileDialogSubmitting || creatingEmpty}
+                  />
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2 px-5 py-4">
+                <Button variant="outline" onClick={closeFileDialog} disabled={fileDialogSubmitting || creatingEmpty}>
+                  Отмена
+                </Button>
+                <Button onClick={() => void createEmptyFile()} disabled={fileDialogSubmitting || creatingEmpty}>
+                  {fileDialogSubmitting || creatingEmpty ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Создаём
+                    </>
+                  ) : (
+                    <>
+                      <FilePlus2 className="mr-2 h-4 w-4" />
+                      Создать
+                    </>
+                  )}
+                </Button>
               </div>
             </div>
           </div>

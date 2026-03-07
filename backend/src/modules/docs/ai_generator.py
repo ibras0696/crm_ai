@@ -43,6 +43,15 @@ class AIGeneratedDocument:
     provider_mode: str
 
 
+@dataclass(slots=True)
+class AIGenerationBudget:
+    """Оценка budget для docs AI-запроса."""
+
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+
+
 class AiDocumentGenerator:
     """Инфраструктурный адаптер генерации документа через AI-провайдер."""
 
@@ -107,6 +116,14 @@ class AiDocumentGenerator:
             template=template,
             title=title,
         )
+        budget = estimate_generation_budget(
+            max_tokens_per_request=runtime.max_tokens,
+            file_type=file_type,
+            prompt=prompt,
+            template=template,
+            title=title,
+            language=language,
+        )
 
         if runtime.provider_mode == "timeweb_native" and resolve_timeweb_agent_id(runtime.base_url) is not None:
             provider_message = f"SYSTEM:\n{system_prompt}\n\nUSER:\n{user_prompt}"
@@ -125,7 +142,7 @@ class AiDocumentGenerator:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                max_tokens=max(600, min(int(runtime.max_tokens), 3200)),
+                max_tokens=budget.completion_tokens,
                 temperature=float(max(0.0, min(1.0, runtime.temperature))),
             )
 
@@ -218,3 +235,36 @@ def _clip_output_by_type(*, file_type: FileType, text: str) -> str:
 
 
 DEFAULT_AI_DOCUMENT_GENERATOR = AiDocumentGenerator()
+
+
+def estimate_generation_budget(
+    *,
+    max_tokens_per_request: int,
+    file_type: FileType,
+    prompt: str,
+    template: str | None,
+    title: str | None,
+    language: str | None,
+) -> AIGenerationBudget:
+    """Оценить budget docs-генерации так же, как он будет использован у провайдера."""
+    system_prompt = _build_generation_system_prompt(file_type=file_type, language=language)
+    user_prompt = _build_generation_user_prompt(
+        file_type=file_type,
+        prompt=prompt,
+        template=template,
+        title=title,
+    )
+    prompt_tokens = int(estimate_tokens(system_prompt) + estimate_tokens(user_prompt) + 12)
+    limit = max(256, int(max_tokens_per_request or 2000))
+    preferred_completion = {
+        FileType.TXT: 900,
+        FileType.PDF: 1100,
+        FileType.DOCX: 1400,
+    }.get(file_type, 900)
+    available_completion = max(1, limit - prompt_tokens)
+    completion_tokens = max(1, min(available_completion, preferred_completion, 3200))
+    return AIGenerationBudget(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=int(prompt_tokens + completion_tokens),
+    )

@@ -162,9 +162,9 @@ class DownloadOut(BaseModel):
 
 
 class SaveTextRequest(BaseModel):
-    """Запрос сохранения текста TXT-файла."""
+    """Запрос на сохранение текстового содержимого TXT-файла."""
 
-    content: str = Field(default="", max_length=2_000_000)
+    content: str = Field(default="")
     title: str | None = Field(default=None, max_length=500)
 
     @field_validator("title", mode="before")
@@ -177,13 +177,11 @@ class SaveTextRequest(BaseModel):
 
 
 class FileTextOut(BaseModel):
-    """Текущий текст TXT-файла для встроенного редактора."""
+    """Текстовое содержимое текущей версии файла."""
 
-    file_id: uuid.UUID
-    version_id: uuid.UUID
     content: str
-    size_bytes: int
-    updated_at: datetime
+
+
 
 
 class FileVersionOut(BaseModel):

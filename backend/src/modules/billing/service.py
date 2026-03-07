@@ -79,6 +79,29 @@ class BillingService:
         except (httpx.RequestError, httpx.TimeoutException) as exc:
             raise BillingOperationError("PAYMENT_ERROR", "Платежный шлюз недоступен") from exc
 
+    async def _get_yookassa_payment(
+        self,
+        *,
+        shop_id: str,
+        secret_key: str,
+        payment_id: str,
+    ) -> dict:
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.get(
+                    f"https://api.yookassa.ru/v3/payments/{payment_id}",
+                    auth=(shop_id, secret_key),
+                )
+                resp.raise_for_status()
+                return resp.json()
+        except httpx.HTTPStatusError as exc:
+            raise BillingOperationError(
+                "PAYMENT_ERROR",
+                f"Не удалось получить статус платежа: {exc.response.status_code}",
+            ) from exc
+        except (httpx.RequestError, httpx.TimeoutException) as exc:
+            raise BillingOperationError("PAYMENT_ERROR", "Платежный шлюз недоступен") from exc
+
     async def list_plans(self):
         async with UnitOfWork() as uow:
             repo = BillingRepository(uow.session)
@@ -109,6 +132,11 @@ class BillingService:
             {
                 "code": row.code,
                 "display_name": row.display_name,
+                "badge_text": row.badge_text,
+                "description": row.description,
+                "button_text": row.button_text,
+                "payment_note": row.payment_note,
+                "price_caption": row.price_caption,
                 "tokens": int(row.tokens),
                 "price_rub_cents": int(row.price_rub_cents or 0),
             }
@@ -166,46 +194,10 @@ class BillingService:
             }
 
         if not yk.shop_id or not yk.secret_key:
-            # Для dev/test окружений допускаем оффлайн-начисление, чтобы не блокировать
-            # покупку токенов и автотесты отсутствием внешнего платежного шлюза.
-            is_prod = str(settings.ENVIRONMENT).lower() in {"prod", "production"}
-            if is_prod:
-                raise BillingOperationError(
-                    "BILLING_NOT_CONFIGURED",
-                    "Платежный шлюз не настроен. Укажите YooKassa shop_id и secret_key.",
-                )
-            async with UnitOfWork() as uow:
-                try:
-                    data = await purchase_addon_tokens(
-                        uow.session,
-                        org_id=org_id,
-                        user_id=user_id,
-                        package_code=package_code,
-                        months_valid=12,
-                        payment_id=f"dev-token-pack-{uuid.uuid4().hex[:12]}",
-                        purchase_meta={
-                            "purchase_kind": "token_package",
-                            "payment_status": "succeeded",
-                            "source": "dev_fallback_without_yookassa",
-                        },
-                    )
-                except ValueError as exc:
-                    if str(exc) == "UNKNOWN_PACKAGE":
-                        raise BillingOperationError("UNKNOWN_PACKAGE", "Неизвестный пакет токенов") from exc
-                    raise BillingOperationError("INVALID_PACKAGE", "Некорректный пакет токенов") from exc
-                await uow.commit()
-            return {
-                "purchase_applied": True,
-                "requires_payment": False,
-                "confirmation_url": "",
-                "payment_id": data.get("payment_id"),
-                "status": "succeeded",
-                "amount": amount,
-                "package_code": package.code,
-                "package_display_name": package.display_name,
-                "package_tokens": int(package.tokens or 0),
-                **data,
-            }
+            raise BillingOperationError(
+                "BILLING_NOT_CONFIGURED",
+                "Платежный шлюз не настроен. Укажите YooKassa shop_id и secret_key.",
+            )
         data = await self._create_yookassa_payment(
             shop_id=yk.shop_id,
             secret_key=yk.secret_key,
@@ -278,6 +270,37 @@ class BillingService:
             "confirmation_url": data.get("confirmation", {}).get("confirmation_url", ""),
             "amount": amount,
             "plan": plan.display_name,
+        }
+
+    async def get_payment_status(
+        self,
+        *,
+        payment_id: str,
+    ) -> dict:
+        async with UnitOfWork() as uow:
+            yk = await resolve_yookassa_runtime_config(uow.session)
+        if not yk.shop_id or not yk.secret_key:
+            raise BillingOperationError(
+                "BILLING_NOT_CONFIGURED",
+                "Платежный шлюз не настроен. Укажите YooKassa shop_id и secret_key.",
+            )
+
+        data = await self._get_yookassa_payment(
+            shop_id=yk.shop_id,
+            secret_key=yk.secret_key,
+            payment_id=payment_id,
+        )
+        amount = data.get("amount") or {}
+        return {
+            "payment_id": str(data.get("id") or payment_id),
+            "status": str(data.get("status") or "unknown"),
+            "paid": bool(data.get("paid")),
+            "amount_value": amount.get("value"),
+            "amount_currency": amount.get("currency"),
+            "description": data.get("description"),
+            "confirmation_url": (data.get("confirmation") or {}).get("confirmation_url"),
+            "created_at": data.get("created_at"),
+            "metadata": data.get("metadata") or {},
         }
 
     async def get_subscription(self, *, org_id: uuid.UUID) -> dict:

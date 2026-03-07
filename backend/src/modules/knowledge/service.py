@@ -19,14 +19,17 @@ class KnowledgeService:
     async def create_page(self, *, org_id: uuid.UUID, user_id: uuid.UUID, body: CreatePageRequest) -> KBPage:
         """Create knowledge page for organization."""
         await self._enforce_knowledge_limit(org_id=org_id)
+        parent_id = await self._validate_parent(org_id=org_id, current_page_id=None, parent_id=body.parent_id)
+        position = await self.repo.get_max_position(org_id=org_id, parent_id=parent_id) + 1
         page = KBPage(
             org_id=org_id,
             created_by=user_id,
             title=body.title,
             slug=_build_slug(body.title),
             content=body.content,
-            parent_id=body.parent_id,
+            parent_id=parent_id,
             icon=body.icon,
+            position=position,
         )
         return await self.repo.create(page)
 
@@ -44,8 +47,17 @@ class KnowledgeService:
         if page is None:
             return None
         updates = body.model_dump(exclude_unset=True)
+        parent_changed = "parent_id" in updates
+        if parent_changed:
+            updates["parent_id"] = await self._validate_parent(
+                org_id=org_id,
+                current_page_id=page.id,
+                parent_id=updates["parent_id"],
+            )
         for field, value in updates.items():
             setattr(page, field, value)
+        if parent_changed and "position" not in updates:
+            page.position = await self.repo.get_max_position(org_id=org_id, parent_id=page.parent_id) + 1
         if body.title:
             page.slug = _build_slug(body.title)
         await self.session.flush()
@@ -64,6 +76,42 @@ class KnowledgeService:
         current = await self.repo.count_by_org(org_id=org_id)
         if current >= limit:
             raise KnowledgeModuleError.limit_reached()
+
+    async def _validate_parent(
+        self,
+        *,
+        org_id: uuid.UUID,
+        current_page_id: uuid.UUID | None,
+        parent_id: uuid.UUID | None,
+    ) -> uuid.UUID | None:
+        if parent_id is None:
+            return None
+
+        parent_page = await self.repo.get_by_id_for_org(page_id=parent_id, org_id=org_id)
+        if parent_page is None:
+            raise KnowledgeModuleError(code="NOT_FOUND", message="Родительская страница не найдена", status_code=404)
+
+        if current_page_id is None:
+            return parent_id
+
+        if parent_id == current_page_id:
+            raise KnowledgeModuleError(code="INVALID_PARENT", message="Нельзя сделать страницу родителем самой себя")
+
+        pages = await self.repo.list_by_org(org_id=org_id)
+        by_id = {page.id: page for page in pages}
+        cursor = parent_page
+        while cursor.parent_id is not None:
+            if cursor.parent_id == current_page_id:
+                raise KnowledgeModuleError(
+                    code="INVALID_PARENT",
+                    message="Нельзя переместить страницу внутрь своей дочерней ветки",
+                )
+            next_cursor = by_id.get(cursor.parent_id)
+            if next_cursor is None:
+                break
+            cursor = next_cursor
+
+        return parent_id
 
 
 def _build_slug(title: str) -> str:

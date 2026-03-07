@@ -52,6 +52,7 @@ async def handle_create_dashboard_action(
     normalized_message = normalize_name(user_message or "")
     preferred_widget_type = str(action_payload.get("preferred_widget_type") or "").strip().lower() or None
     global_table_ref = str(action_payload.get("table_id") or action_payload.get("table_name") or "").strip()
+    should_force_widget_type = bool(preferred_widget_type) and len(widgets_payload) <= 1
     if should_use_inferred_widgets(widgets_payload):
         inferred_table: Table | None = None
         if global_table_ref:
@@ -100,7 +101,7 @@ async def handle_create_dashboard_action(
         widget_type = coerce_widget_type_by_semantics(
             current_type=str(raw.get("widget_type") or "metric"),
             semantic_text=semantic_title,
-            forced_type=preferred_widget_type,
+            forced_type=preferred_widget_type if should_force_widget_type else None,
         )
         agg_name = normalize_aggregation(raw.get("aggregation"))
 

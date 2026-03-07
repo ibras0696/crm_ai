@@ -63,9 +63,14 @@ def _can_send_invite_email(*, to_email: str, invite_token: str) -> tuple[bool, s
     return True, "ok"
 
 
-@celery.task(name="send_email_notification", bind=True, max_retries=3, default_retry_delay=60)
-def send_email_notification(self, to_email: str, subject: str, body: str, kind: str = "generic") -> dict:
-    """Send email notification via SMTP."""
+def _send_email_notification_impl(
+    task,
+    *,
+    to_email: str,
+    subject: str,
+    body: str,
+    kind: str,
+) -> dict:
     logger = logging.getLogger("notifications")
     if not settings.ENABLE_EMAIL:
         _inc_email_send_metric(kind=kind, status="disabled")
@@ -91,11 +96,23 @@ def send_email_notification(self, to_email: str, subject: str, body: str, kind: 
         logger.exception("Email send failed: %s", exc)
         _inc_email_send_metric(kind=kind, status="failed")
         try:
-            self.retry(exc=exc)
-        except self.MaxRetriesExceededError:
+            task.retry(exc=exc)
+        except task.MaxRetriesExceededError:
             logger.error("Max retries exceeded for email to %s", to_email)
             return {"status": "failed", "to": to_email, "error": str(exc)}
         return {"status": "retrying", "to": to_email}
+
+
+@celery.task(name="send_email_notification", bind=True, max_retries=3, default_retry_delay=60)
+def send_email_notification(self, to_email: str, subject: str, body: str, kind: str = "generic") -> dict:
+    """Send email notification via SMTP."""
+    return _send_email_notification_impl(
+        self,
+        to_email=to_email,
+        subject=subject,
+        body=body,
+        kind=kind,
+    )
 
 
 @celery.task(name="send_invite_email", bind=True, max_retries=3, default_retry_delay=60)
@@ -115,7 +132,13 @@ def send_invite_email(self, to_email: str, org_name: str, invite_token: str, inv
         f"Ссылка для принятия приглашения:\n{url}\n\n"
         "Если вы не ожидали это письмо, просто проигнорируйте его.\n"
     )
-    return send_email_notification.delay(to_email=to_email, subject=subject, body=body, kind="invite")
+    return _send_email_notification_impl(
+        self,
+        to_email=to_email,
+        subject=subject,
+        body=body,
+        kind="invite",
+    )
 
 
 @celery.task(name="send_password_reset_email", bind=True, max_retries=3, default_retry_delay=60)
@@ -128,4 +151,10 @@ def send_password_reset_email(self, to_email: str, reset_token: str, reset_url: 
         f"Перейдите по ссылке для создания нового пароля:\n{url}\n\n"
         "Если вы этого не делали, просто проигнорируйте письмо.\n"
     )
-    return send_email_notification.delay(to_email=to_email, subject=subject, body=body, kind="password_reset")
+    return _send_email_notification_impl(
+        self,
+        to_email=to_email,
+        subject=subject,
+        body=body,
+        kind="password_reset",
+    )

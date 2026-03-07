@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 import uuid
 from collections.abc import Iterable
 from contextlib import suppress
@@ -40,6 +41,8 @@ from src.modules.docs.pdf_stamper import PdfStampInput, stamp_pdf_with_signature
 from src.modules.docs.repository import DocsRepository
 from src.modules.docs.storage import DEFAULT_STORAGE_PROVIDER
 from src.modules.files.models import File
+
+logger = logging.getLogger(__name__)
 
 
 @celery.task(name="scan_version")
@@ -651,10 +654,12 @@ async def _mark_ai_job_failed_unexpected(*, job_id: str, reason: str) -> None:
     job_uuid = _safe_uuid(job_id)
     if job_uuid is None:
         return
+    logger.error("docs_ai_generate_unexpected_failure", extra={"job_id": job_id, "reason": reason})
     async with UnitOfWork() as uow:
         repo = DocsRepository(uow.session)
         job = await repo.get_ai_generation_job_for_update(job_id=job_uuid)
         if job is None:
+            logger.warning("docs_ai_generate_unexpected_failure_job_not_found", extra={"job_id": job_id})
             return
         if job.status in {"ready", "blocked", "failed"}:
             return
@@ -798,20 +803,26 @@ async def _mark_ai_job_failed(
             await repo.update_file(file_obj)
 
     job.status = "failed"
-    job.error_message = reason[:500]
+    job.error_message = reason[:1000]
     job.finished_at = datetime.now(UTC)
     await repo.update_ai_generation_job(job)
-    uow.session.add(
-        AuditLog(
-            org_id=job.org_id,
-            actor_id=job.user_id,
-            action=AuditAction.UPDATE,
-            entity_type="docs_ai_generation_job",
-            entity_id=str(job.id),
-            meta={"event": "ai_generate_failed", "reason": reason[:300], "code": code},
+
+    try:
+        uow.session.add(
+            AuditLog(
+                org_id=job.org_id,
+                actor_id=job.user_id,
+                action=AuditAction.UPDATE,
+                entity_type="docs_ai_generation_job",
+                entity_id=str(job.id),
+                meta={"event": "ai_generate_failed", "reason": reason[:300], "code": code},
+            )
         )
-    )
+    except Exception:
+        logger.exception("docs_ai_generate_audit_log_failed", extra={"job_id": str(job.id)})
+
     await uow.commit()
+    logger.info("docs_ai_job_marked_failed", extra={"job_id": str(job.id), "code": code})
     file_type = str(job.file_type or "unknown")
     _inc_ai_generate_metric("failed", file_type)
     _inc_ai_generate_error_metric(code)

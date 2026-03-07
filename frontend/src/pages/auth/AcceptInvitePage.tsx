@@ -5,12 +5,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { orgApi } from '@/lib/api/org/org'
 import { useAuth } from '@/contexts/AuthContext'
+import { isAxiosError } from 'axios'
 import { Loader2, ArrowRight } from 'lucide-react'
 
 export default function AcceptInvitePage() {
     const [searchParams] = useSearchParams()
     const navigate = useNavigate()
-    const { setToken } = useAuth()
+    const { refresh } = useAuth()
 
     const token = searchParams.get('token')
     const [firstName, setFirstName] = useState('')
@@ -47,15 +48,19 @@ export default function AcceptInvitePage() {
                 last_name: lastName,
             })
 
-            const data = resp.data.data as any
-            if (data && data.access_token) {
-                setToken(data.access_token, data.refresh_token)
+            if (resp.data.ok && resp.data.data?.access_token) {
+                await refresh()
                 navigate('/dashboard')
             } else {
                 setError('Не удалось получить токен авторизации после принятия приглашения.')
             }
-        } catch (err: any) {
-            setError(err?.message || 'Не удалось принять приглашение. Токен устарел или уже использован.')
+        } catch (err: unknown) {
+            if (isAxiosError(err)) {
+                const message = err.response?.data?.error?.message
+                setError(typeof message === 'string' && message.trim() ? message : 'Не удалось принять приглашение. Токен устарел или уже использован.')
+            } else {
+                setError('Не удалось принять приглашение. Токен устарел или уже использован.')
+            }
         } finally {
             setLoading(false)
         }

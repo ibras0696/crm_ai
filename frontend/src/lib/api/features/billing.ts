@@ -38,6 +38,11 @@ export interface TokenBalanceInfo {
 export interface TokenPackageInfo {
   code: string
   display_name: string
+  badge_text?: string | null
+  description?: string | null
+  button_text?: string | null
+  payment_note?: string | null
+  price_caption?: string | null
   tokens: number
   price_rub_cents: number
 }
@@ -59,10 +64,23 @@ export interface TokenPurchaseResponse {
   total_tokens_remaining?: number
 }
 
+export interface BillingPaymentStatusInfo {
+  payment_id: string
+  status: string
+  paid: boolean
+  amount_value?: string | null
+  amount_currency?: string | null
+  description?: string | null
+  confirmation_url?: string | null
+  created_at?: string | null
+  metadata?: Record<string, string> | null
+}
+
 export const billingApi = {
   plans: () => api.get<ApiResponse<PlanInfo[]>>('/billing/plans'),
   usage: () => api.get<ApiResponse<UsageInfo>>('/billing/usage'),
   subscription: () => api.get<ApiResponse<{ plan: string; status: string; current_period_start: string | null; current_period_end: string | null; grace_period_end?: string | null; data_purge_at?: string | null; external_id?: string }>>('/billing/subscription'),
+  paymentStatus: (payment_id: string) => api.get<ApiResponse<BillingPaymentStatusInfo>>(`/billing/payments/${payment_id}`),
   tokenBalance: () => api.get<ApiResponse<TokenBalanceInfo>>('/billing/tokens/balance'),
   tokenPackages: () => api.get<ApiResponse<TokenPackageInfo[]>>('/billing/tokens/packages'),
   purchaseTokens: (package_code: string) => api.post<ApiResponse<TokenPurchaseResponse>>('/billing/tokens/purchase', { package_code }),

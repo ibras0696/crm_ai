@@ -110,7 +110,7 @@ export function SuperadminTablesView({ selectedOrgId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedOrgId, selectedTableId, debouncedRecordsQ, sortColId, sortDir, rLimit])
 
-  const tables = tablesPage?.items || []
+  const tables = useMemo(() => tablesPage?.items ?? [], [tablesPage?.items])
   const tTotal = tablesPage?.total || 0
   const tCanPrev = offset > 0
   const tCanNext = offset + limit < tTotal

@@ -1,17 +1,17 @@
 import uuid
-import jwt
-from typing import Dict, Set
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Cookie
+
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from src.config import settings
 from src.modules.auth.security import decode_user_access_token
 
 router = APIRouter(prefix="/ws", tags=["websockets"])
 
+
 class ConnectionManager:
     def __init__(self):
         # user_id -> set of active WebSockets
-        self.active_connections: Dict[uuid.UUID, Set[WebSocket]] = {}
+        self.active_connections: dict[uuid.UUID, set[WebSocket]] = {}
 
     async def connect(self, websocket: WebSocket, user_id: uuid.UUID):
         await websocket.accept()
@@ -47,7 +47,9 @@ class ConnectionManager:
             for connection in to_remove:
                 self.disconnect(connection, user_id)
 
+
 manager = ConnectionManager()
+
 
 def extract_user_id(token: str | None) -> uuid.UUID | None:
     if not token:
@@ -58,6 +60,7 @@ def extract_user_id(token: str | None) -> uuid.UUID | None:
     except Exception:
         return None
 
+
 @router.websocket("/notifications")
 async def websocket_endpoint(
     websocket: WebSocket,
@@ -67,9 +70,9 @@ async def websocket_endpoint(
     actual_token = token
     if not actual_token:
         actual_token = websocket.cookies.get(settings.AUTH_ACCESS_COOKIE_NAME)
-        
+
     user_id = extract_user_id(actual_token)
-    
+
     if not user_id:
         await websocket.close(code=1008)
         return

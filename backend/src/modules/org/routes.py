@@ -9,12 +9,12 @@ from src.modules.org.schemas import (
     AcceptInviteRequest,
     InviteCreateRequest,
     InviteResponse,
-    OrgAIOrgLimitsRequest,
-    OrgAILimitsResponse,
-    OrgAIUserLimitRequest,
     MemberResponse,
-    OrgUpdateRequest,
+    OrgAILimitsResponse,
+    OrgAIOrgLimitsRequest,
+    OrgAIUserLimitRequest,
     OrgResponse,
+    OrgUpdateRequest,
     SwitchOrgRequest,
     UpdateMemberRoleRequest,
 )
@@ -63,16 +63,18 @@ async def list_members(current_user: CurrentUser = Depends(require_org)):
     memberships = await _org_service.get_members(current_user.org_id)
     result = []
     for m in memberships:
-        result.append(MemberResponse(
-            id=m.id,
-            user_id=m.user_id,
-            org_id=m.org_id,
-            role=m.role,
-            user_email=m.user.email if m.user else None,
-            user_first_name=m.user.first_name if m.user else None,
-            user_last_name=m.user.last_name if m.user else None,
-            created_at=m.created_at,
-        ))
+        result.append(
+            MemberResponse(
+                id=m.id,
+                user_id=m.user_id,
+                org_id=m.org_id,
+                role=m.role,
+                user_email=m.user.email if m.user else None,
+                user_first_name=m.user.first_name if m.user else None,
+                user_last_name=m.user.last_name if m.user else None,
+                created_at=m.created_at,
+            )
+        )
     return ApiResponse(data=result)
 
 
@@ -104,6 +106,7 @@ async def accept_invite(body: AcceptInviteRequest, request: Request):
         ip_address=ip,
     )
     return ApiResponse(data=tokens)
+
 
 @router.post("/invites/{invite_id}/resend", response_model=ApiResponse[InviteResponse])
 async def resend_invite(

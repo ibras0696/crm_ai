@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC
 from types import SimpleNamespace
 
 import pytest
@@ -106,7 +107,9 @@ async def test_ai_status_uses_active_subscription_plan_over_org_plan(client: Asy
     async with UnitOfWork() as uow:
         user = (await uow.session.execute(select(User).where(User.email == email_owner))).scalars().first()
         assert user is not None
-        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        membership = (
+            (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        )
         assert membership is not None
         org_id = membership.org_id
 
@@ -180,7 +183,9 @@ async def test_check_ai_limits_rejects_projected_monthly_wallet_overflow(client:
     async with UnitOfWork() as uow:
         user = (await uow.session.execute(select(User).where(User.email == email_owner))).scalars().first()
         assert user is not None
-        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        membership = (
+            (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        )
         assert membership is not None
         org_id = membership.org_id
 
@@ -236,7 +241,7 @@ async def test_check_ai_limits_rejects_org_daily_override(client: AsyncClient):
     )
     assert reg.status_code == 201
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from src.infrastructure.uow import UnitOfWork
     from src.modules.ai.limits import check_ai_limits
@@ -247,7 +252,9 @@ async def test_check_ai_limits_rejects_org_daily_override(client: AsyncClient):
     async with UnitOfWork() as uow:
         user = (await uow.session.execute(select(User).where(User.email == email_owner))).scalars().first()
         assert user is not None
-        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        membership = (
+            (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        )
         assert membership is not None
         org_id = membership.org_id
 
@@ -261,7 +268,7 @@ async def test_check_ai_limits_rejects_org_daily_override(client: AsyncClient):
                 completion_tokens=20,
                 total_tokens=90,
                 message_preview="x",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         await uow.commit()
@@ -294,7 +301,7 @@ async def test_check_ai_limits_rejects_user_rpm_override(client: AsyncClient):
     )
     assert reg.status_code == 201
 
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from src.infrastructure.uow import UnitOfWork
     from src.modules.ai.limits import check_ai_limits
@@ -305,7 +312,9 @@ async def test_check_ai_limits_rejects_user_rpm_override(client: AsyncClient):
     async with UnitOfWork() as uow:
         user = (await uow.session.execute(select(User).where(User.email == email_owner))).scalars().first()
         assert user is not None
-        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        membership = (
+            (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        )
         assert membership is not None
         org_id = membership.org_id
 
@@ -319,7 +328,7 @@ async def test_check_ai_limits_rejects_user_rpm_override(client: AsyncClient):
                 completion_tokens=1,
                 total_tokens=2,
                 message_preview="rpm",
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
             )
         )
         await uow.commit()

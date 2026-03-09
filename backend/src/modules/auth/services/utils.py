@@ -21,4 +21,3 @@ def build_token_response(*, access_token: str, refresh_token: str) -> TokenRespo
         refresh_token=refresh_token,
         expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
-

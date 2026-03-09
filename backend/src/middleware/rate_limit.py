@@ -1,4 +1,5 @@
 """Redis-backed shared rate limiter middleware."""
+
 import time
 from collections import defaultdict
 
@@ -36,8 +37,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             if current > self.rpm:
                 return JSONResponse(
                     status_code=429,
-                    content={"ok": False, "error": {"code": "RATE_LIMITED", "message": "Слишком много запросов. Попробуйте позже."}},
-                    headers={"Retry-After": str(retry_after), "X-RateLimit-Limit": str(self.rpm), "X-RateLimit-Remaining": "0"},
+                    content={
+                        "ok": False,
+                        "error": {"code": "RATE_LIMITED", "message": "Слишком много запросов. Попробуйте позже."},
+                    },
+                    headers={
+                        "Retry-After": str(retry_after),
+                        "X-RateLimit-Limit": str(self.rpm),
+                        "X-RateLimit-Remaining": "0",
+                    },
                 )
             remaining = max(0, self.rpm - current)
             response = await call_next(request)
@@ -52,7 +60,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             if len(self.buckets[client_ip]) >= self.rpm:
                 return JSONResponse(
                     status_code=429,
-                    content={"ok": False, "error": {"code": "RATE_LIMITED", "message": "Слишком много запросов. Попробуйте позже."}},
+                    content={
+                        "ok": False,
+                        "error": {"code": "RATE_LIMITED", "message": "Слишком много запросов. Попробуйте позже."},
+                    },
                     headers={"Retry-After": "60"},
                 )
             self.buckets[client_ip].append(now_f)

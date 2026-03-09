@@ -2,7 +2,17 @@
 
 import uuid
 
-from sqlalchemy import Boolean, CheckConstraint, Float, ForeignKey, ForeignKeyConstraint, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Float,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -42,9 +52,7 @@ class AIChatSession(BaseDBModel):
     """Сессия чата AI для конкретного пользователя в рамках организации."""
 
     __tablename__ = "ai_chat_sessions"
-    __table_args__ = (
-        UniqueConstraint("id", "org_id", "user_id", name="uq_ai_chat_sessions_id_org_user"),
-    )
+    __table_args__ = (UniqueConstraint("id", "org_id", "user_id", name="uq_ai_chat_sessions_id_org_user"),)
 
     org_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True

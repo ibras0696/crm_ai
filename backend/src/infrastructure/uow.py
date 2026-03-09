@@ -17,7 +17,7 @@ class UnitOfWork:
         self._session_factory = session_factory
         self.session: AsyncSession | None = None
 
-    async def __aenter__(self) -> "UnitOfWork":
+    async def __aenter__(self) -> UnitOfWork:
         self.session = self._session_factory()
         return self
 
@@ -31,4 +31,3 @@ class UnitOfWork:
 
     async def rollback(self):
         await self.session.rollback()
-

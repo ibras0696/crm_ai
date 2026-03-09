@@ -4,7 +4,6 @@ import re
 import unicodedata
 from urllib.parse import quote
 
-
 _FILENAME_SAFE_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -43,4 +42,4 @@ def content_disposition_attachment(filename: str) -> str:
     original = (filename or "download").strip() or "download"
     fallback = _ascii_filename_fallback(original)
     encoded = quote(original, safe="")
-    return f'attachment; filename="{fallback}"; filename*=UTF-8\'\'{encoded}'
+    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"

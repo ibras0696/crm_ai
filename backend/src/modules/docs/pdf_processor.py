@@ -9,9 +9,7 @@ from typing import Any
 
 from PIL import Image
 from pypdf import PdfReader, PdfWriter
-from reportlab.lib.colors import Color, HexColor
-from reportlab.lib.pagesizes import letter
-from reportlab.lib.units import inch
+from reportlab.lib.colors import HexColor
 from reportlab.pdfgen import canvas as pdf_canvas
 
 
@@ -113,11 +111,11 @@ class PDFProcessor:
     ) -> None:
         """Draw text annotation."""
         y_coord = page_height - annotation.y - annotation.height
-        
+
         if annotation.color:
             color = HexColor(annotation.color)
             canvas.setFillColor(color)
-        
+
         canvas.setFont("Helvetica", 12)
         canvas.drawString(annotation.x, y_coord, annotation.content or "")
 
@@ -232,10 +230,10 @@ class PDFProcessor:
 
         canvas.setFillColor(HexColor("#FF0000"))
         canvas.setFont("Helvetica-Bold", 14)
-        
+
         text_x = annotation.x + annotation.width / 2
         text_y = y_coord + annotation.height / 2
-        
+
         canvas.drawCentredString(text_x, text_y, annotation.content or "STAMP")
 
     def _draw_placeholder(
@@ -377,7 +375,7 @@ class PDFProcessor:
     def extract_metadata(self, pdf_bytes: bytes) -> dict[str, Any]:
         """Extract PDF metadata."""
         reader = PdfReader(io.BytesIO(pdf_bytes))
-        
+
         metadata = {
             "pages": len(reader.pages),
             "info": {},

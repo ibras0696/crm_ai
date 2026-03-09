@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
 
-from src.config import settings
 from src.common.enums import PlanTier, SubscriptionStatus
+from src.config import settings
 from src.modules.ai.models import AIOrgLimit, AIUsageLog, AIUserLimit
 from src.modules.billing.models import Plan
 from src.modules.billing.token_wallet import get_token_balance_view
@@ -100,13 +100,19 @@ async def resolve_org_plan(session, *, org_id) -> PlanTier:
     # 1) Active subscription.
     try:
         sub_plan = (
-            await session.execute(
-                select(Subscription.plan).where(
-                    Subscription.org_id == org_id,
-                    Subscription.status == SubscriptionStatus.ACTIVE,
-                ).order_by(Subscription.updated_at.desc())
+            (
+                await session.execute(
+                    select(Subscription.plan)
+                    .where(
+                        Subscription.org_id == org_id,
+                        Subscription.status == SubscriptionStatus.ACTIVE,
+                    )
+                    .order_by(Subscription.updated_at.desc())
+                )
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
         tier = _as_plan_tier(sub_plan)
         if tier is not None:
             return tier
@@ -115,7 +121,9 @@ async def resolve_org_plan(session, *, org_id) -> PlanTier:
 
     # 2) Org.plan (legacy).
     try:
-        plan_row = (await session.execute(select(Organization.plan).where(Organization.id == org_id))).scalar_one_or_none()
+        plan_row = (
+            await session.execute(select(Organization.plan).where(Organization.id == org_id))
+        ).scalar_one_or_none()
         tier = _as_plan_tier(plan_row)
         if tier is not None:
             return tier
@@ -137,9 +145,7 @@ async def is_org_ai_enabled(session, *, org_id) -> bool:
     """
     try:
         ai_enabled = (
-            await session.execute(
-                select(Organization.ai_enabled).where(Organization.id == org_id)
-            )
+            await session.execute(select(Organization.ai_enabled).where(Organization.id == org_id))
         ).scalar_one_or_none()
         # Для старых данных/временных миграционных состояний по умолчанию считаем включенным.
         if ai_enabled is None:
@@ -175,8 +181,10 @@ async def check_ai_limits(session, *, org_id, user_id, estimated_request_tokens:
     plan_db = None
     try:
         plan_db = (
-            await session.execute(select(Plan).where(Plan.name == plan.value, Plan.is_active.is_(True)))
-        ).scalars().first()
+            (await session.execute(select(Plan).where(Plan.name == plan.value, Plan.is_active.is_(True))))
+            .scalars()
+            .first()
+        )
     except Exception as exc:
         logger.exception("ai_limits_plan_db_lookup_failed", exc_info=exc)
 
@@ -185,11 +193,17 @@ async def check_ai_limits(session, *, org_id, user_id, estimated_request_tokens:
     rpm_limit = int(limits["rpm_per_user"])
 
     org_custom = (
-        await session.execute(select(AIOrgLimit).where(AIOrgLimit.org_id == org_id).limit(1))
-    ).scalars().first()
+        (await session.execute(select(AIOrgLimit).where(AIOrgLimit.org_id == org_id).limit(1))).scalars().first()
+    )
     user_custom = (
-        await session.execute(select(AIUserLimit).where(AIUserLimit.org_id == org_id, AIUserLimit.user_id == user_id).limit(1))
-    ).scalars().first()
+        (
+            await session.execute(
+                select(AIUserLimit).where(AIUserLimit.org_id == org_id, AIUserLimit.user_id == user_id).limit(1)
+            )
+        )
+        .scalars()
+        .first()
+    )
 
     org_daily_override = int(org_custom.daily_tokens_limit if org_custom else 0)
     org_monthly_override = int(org_custom.monthly_tokens_limit if org_custom else 0)
@@ -199,10 +213,10 @@ async def check_ai_limits(session, *, org_id, user_id, estimated_request_tokens:
     effective_rpm_limit = user_rpm_override if user_rpm_override > 0 else rpm_limit
 
     # RPM per user
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     window_start = now - timedelta(seconds=60)
-    day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
-    month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+    day_start = datetime(now.year, now.month, now.day, tzinfo=UTC)
+    month_start = datetime(now.year, now.month, 1, tzinfo=UTC)
 
     # Важно: текущая реализация лимитов — soft-limit.
     # При высокой параллельности возможны небольшие "проскоки", т.к. check и запись

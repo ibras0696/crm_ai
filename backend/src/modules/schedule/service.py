@@ -20,6 +20,7 @@ class ScheduleServiceError(ScheduleModuleError):
 
 class ScheduleService:
     """Application service for schedule module."""
+
     MAX_EVENTS_PER_DAY = 10
     ALLOWED_REMINDER_OFFSETS_MINUTES = (60, 120, 1440)
 
@@ -142,7 +143,9 @@ class ScheduleService:
         if target_now.tzinfo is None:
             target_now = target_now.replace(tzinfo=UTC)
 
-        events = await self.repo.list_due_for_reminders(now=target_now, horizon_minutes=max(self.ALLOWED_REMINDER_OFFSETS_MINUTES))
+        events = await self.repo.list_due_for_reminders(
+            now=target_now, horizon_minutes=max(self.ALLOWED_REMINDER_OFFSETS_MINUTES)
+        )
         created_notifications = 0
 
         for event in events:
@@ -164,19 +167,21 @@ class ScheduleService:
                 reminder_at = event.start_at - timedelta(minutes=offset)
                 if reminder_at <= target_now <= event.start_at:
                     for user_id in participants:
-                        self.session.add(Notification(
-                            org_id=event.org_id,
-                            user_id=user_id,
-                            type=NotificationType.IN_APP,
-                            status=NotificationStatus.PENDING,
-                            title=f"Скоро событие: {event.title}",
-                            body=self._build_reminder_text(offset),
-                            meta={
-                                "event_id": str(event.id),
-                                "start_at": event.start_at.isoformat(),
-                                "offset_minutes": offset,
-                            },
-                        ))
+                        self.session.add(
+                            Notification(
+                                org_id=event.org_id,
+                                user_id=user_id,
+                                type=NotificationType.IN_APP,
+                                status=NotificationStatus.PENDING,
+                                title=f"Скоро событие: {event.title}",
+                                body=self._build_reminder_text(offset),
+                                meta={
+                                    "event_id": str(event.id),
+                                    "start_at": event.start_at.isoformat(),
+                                    "offset_minutes": offset,
+                                },
+                            )
+                        )
                         created_notifications += 1
                     sent_offsets.add(offset)
                     event.set_meta_fields(reminder_sent_offsets_minutes=sorted(sent_offsets))

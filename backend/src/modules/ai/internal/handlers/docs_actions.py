@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """AI actions for Docs module."""
+
+from __future__ import annotations
 
 import uuid
 from typing import Any
@@ -85,11 +85,13 @@ async def handle_create_document_action(
             "status_code": error.status_code,
         }
 
+    should_enqueue_task = bool(getattr(result, "should_enqueue_task", True))
+
     return {
         "action": "create_document",
         "ok": True,
         "message": "Документ поставлен в очередь на генерацию.",
-        **({"_post_commit_docs_ai_job_id": str(result.job.id)} if result.should_enqueue_task else {}),
+        **({"_post_commit_docs_ai_job_id": str(result.job.id)} if should_enqueue_task else {}),
         "file": {
             "id": str(result.file.id),
             "title": result.file.title,

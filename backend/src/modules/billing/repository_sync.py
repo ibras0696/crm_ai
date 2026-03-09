@@ -36,9 +36,7 @@ class BillingSyncRepository:
     def list_organizations_by_ids(self, org_ids: list[uuid.UUID]) -> dict[uuid.UUID, Organization]:
         if not org_ids:
             return {}
-        rows = list(
-            self.session.execute(select(Organization).where(Organization.id.in_(org_ids))).scalars().all()
-        )
+        rows = list(self.session.execute(select(Organization).where(Organization.id.in_(org_ids))).scalars().all())
         return {org.id: org for org in rows}
 
     def list_all_org_ids(self) -> list[uuid.UUID]:
@@ -55,7 +53,9 @@ class BillingSyncRepository:
                     TokenPurchase.expires_at.is_not(None),
                     TokenPurchase.expires_at <= now_utc,
                 )
-            ).scalars().all()
+            )
+            .scalars()
+            .all()
         )
 
     def sum_active_addon_tokens_by_org(self, *, org_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
@@ -93,24 +93,16 @@ class BillingSyncRepository:
         rows = self.session.execute(
             select(Organization.id, Organization.plan).where(Organization.id.in_(org_ids))
         ).all()
-        return {
-            org_id: (plan.value if hasattr(plan, "value") else str(plan or "free"))
-            for org_id, plan in rows
-        }
+        return {org_id: (plan.value if hasattr(plan, "value") else str(plan or "free")) for org_id, plan in rows}
 
     def list_active_plan_ai_quota_by_name(self) -> dict[str, int]:
         plans = self.session.execute(select(Plan).where(Plan.is_active.is_(True))).scalars().all()
-        return {
-            str(plan.name).lower(): int(getattr(plan, "ai_tokens_per_day", 0) or 0)
-            for plan in plans
-        }
+        return {str(plan.name).lower(): int(getattr(plan, "ai_tokens_per_day", 0) or 0) for plan in plans}
 
     def list_token_balances_by_org(self, *, org_ids: list[uuid.UUID]) -> dict[uuid.UUID, TokenBalance]:
         if not org_ids:
             return {}
-        balances = self.session.execute(
-            select(TokenBalance).where(TokenBalance.org_id.in_(org_ids))
-        ).scalars().all()
+        balances = self.session.execute(select(TokenBalance).where(TokenBalance.org_id.in_(org_ids))).scalars().all()
         return {b.org_id: b for b in balances}
 
     def add_token_balance(self, *, org_id: uuid.UUID, cycle: str, quota: int, addon_total: int) -> None:
@@ -137,10 +129,7 @@ class BillingSyncRepository:
         if recipients:
             return recipients
         return [
-            row[0]
-            for row in self.session.execute(
-                select(Membership.user_id).where(Membership.org_id == org_id)
-            ).all()
+            row[0] for row in self.session.execute(select(Membership.user_id).where(Membership.org_id == org_id)).all()
         ]
 
     def add_in_app_notification(

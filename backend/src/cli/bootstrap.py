@@ -5,14 +5,12 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import text
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 from src.config import settings
 from src.infrastructure.bootstrap_lock import advisory_lock
 from src.infrastructure.database import async_session_factory
 from src.modules.billing.seed import upsert_default_plans, upsert_default_token_packages
-
 
 BOOTSTRAP_LOCK_KEY = 914_270_001  # stable int for pg_advisory_lock
 

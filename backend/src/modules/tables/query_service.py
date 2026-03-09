@@ -9,6 +9,7 @@ import csv
 import io
 import time
 import uuid
+from contextlib import suppress
 from io import BytesIO
 
 from openpyxl import Workbook
@@ -53,15 +54,18 @@ class TableQueryService:
                 new_filtered = []
                 for rec in filtered:
                     cell = str(rec.data.get(col_id, "")).lower()
-                    if op == "eq" and cell == val_str:
-                        new_filtered.append(rec)
-                    elif op == "contains" and val_str in cell:
-                        new_filtered.append(rec)
-                    elif op == "gt" and cell > val_str:
-                        new_filtered.append(rec)
-                    elif op == "lt" and cell < val_str:
-                        new_filtered.append(rec)
-                    elif op == "neq" and cell != val_str:
+                    if (
+                        op == "eq"
+                        and cell == val_str
+                        or op == "contains"
+                        and val_str in cell
+                        or op == "gt"
+                        and cell > val_str
+                        or op == "lt"
+                        and cell < val_str
+                        or op == "neq"
+                        and cell != val_str
+                    ):
                         new_filtered.append(rec)
                 filtered = new_filtered
 
@@ -105,10 +109,8 @@ class TableQueryService:
             writer.writerow([str(rec.data.get(str(c.id), "")) for c in columns])
 
         payload = output.getvalue().encode("utf-8-sig")
-        try:
+        with suppress(Exception):
             EXPORTS_TOTAL.labels(format="csv").inc()
-        except Exception:
-            pass
 
         return payload, "text/csv; charset=utf-8", f"{table.name}.csv"
 
@@ -146,10 +148,8 @@ class TableQueryService:
         wb.save(output)
         payload = output.getvalue()
 
-        try:
+        with suppress(Exception):
             EXPORTS_TOTAL.labels(format="xlsx").inc()
-        except Exception:
-            pass
 
         return payload, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", f"{table.name}.xlsx"
 
@@ -231,10 +231,8 @@ class TableQueryService:
             await self._ensure_record_capacity(org_id=org_id, incoming_count=len(to_create))
             await self.r_repo.bulk_create(to_create)
 
-        try:
-            IMPORTS_TOTAL.labels(format="csv").inc()
-        except Exception:
-            pass
+            with suppress(Exception):
+                IMPORTS_TOTAL.labels(format="csv").inc()
 
         return {"created": created}
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 
@@ -10,31 +10,35 @@ from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.limits import resolve_org_plan, resolve_plan_limits
 from src.modules.ai.models import AIOrgLimit, AIUsageLog, AIUserLimit
 from src.modules.audit.repository import AuditRepository
+from src.modules.auth.models import User
 from src.modules.billing.models import Plan
 from src.modules.org.models import Membership
-from src.modules.auth.models import User
 
 
 class OrgAILimitsService:
     """Use-cases управления AI-лимитами в org-admin."""
 
     async def get_limits(self, *, org_id: uuid.UUID) -> dict:
-        now = datetime.now(timezone.utc)
-        day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
-        month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+        now = datetime.now(UTC)
+        day_start = datetime(now.year, now.month, now.day, tzinfo=UTC)
+        month_start = datetime(now.year, now.month, 1, tzinfo=UTC)
         minute_start = now - timedelta(seconds=60)
 
         async with UnitOfWork() as uow:
             plan_tier = await resolve_org_plan(uow.session, org_id=org_id)
             plan_db = (
-                await uow.session.execute(select(Plan).where(Plan.name == plan_tier.value, Plan.is_active.is_(True)))
-            ).scalars().first()
+                (await uow.session.execute(select(Plan).where(Plan.name == plan_tier.value, Plan.is_active.is_(True))))
+                .scalars()
+                .first()
+            )
             effective_defaults = resolve_plan_limits(plan_tier, plan_db)
 
-            org_limit = (await uow.session.execute(select(AIOrgLimit).where(AIOrgLimit.org_id == org_id))).scalars().first()
+            org_limit = (
+                (await uow.session.execute(select(AIOrgLimit).where(AIOrgLimit.org_id == org_id))).scalars().first()
+            )
             user_limits = (
-                await uow.session.execute(select(AIUserLimit).where(AIUserLimit.org_id == org_id))
-            ).scalars().all()
+                (await uow.session.execute(select(AIUserLimit).where(AIUserLimit.org_id == org_id))).scalars().all()
+            )
             user_limit_map: dict[uuid.UUID, AIUserLimit] = {item.user_id: item for item in user_limits}
 
             members = (
@@ -157,16 +161,26 @@ class OrgAILimitsService:
     ) -> dict:
         async with UnitOfWork() as uow:
             membership = (
-                await uow.session.execute(
-                    select(Membership).where(Membership.org_id == org_id, Membership.user_id == user_id).limit(1)
+                (
+                    await uow.session.execute(
+                        select(Membership).where(Membership.org_id == org_id, Membership.user_id == user_id).limit(1)
+                    )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             if membership is None:
                 raise LookupError("MEMBER_NOT_FOUND")
 
             row = (
-                await uow.session.execute(select(AIUserLimit).where(AIUserLimit.org_id == org_id, AIUserLimit.user_id == user_id))
-            ).scalars().first()
+                (
+                    await uow.session.execute(
+                        select(AIUserLimit).where(AIUserLimit.org_id == org_id, AIUserLimit.user_id == user_id)
+                    )
+                )
+                .scalars()
+                .first()
+            )
             if row is None:
                 row = AIUserLimit(org_id=org_id, user_id=user_id)
                 uow.session.add(row)

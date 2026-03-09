@@ -174,9 +174,8 @@ export function SchedulePreview({ result }: { result: Record<string, unknown> })
 }
 
 export function DocumentPreview({ result }: { result: Record<string, unknown> }) {
-  if (result.ok !== true) return null
-  if (asString(result.action) !== 'create_document') return null
   const file = (result.file || {}) as Record<string, unknown>
+  const isRelevant = result.ok === true && asString(result.action) === 'create_document'
   const initialJob = useMemo(
     () => ({ ...(result.job || {}) } as Record<string, unknown>),
     [result.job],
@@ -191,6 +190,7 @@ export function DocumentPreview({ result }: { result: Record<string, unknown> })
   }, [initialJob])
 
   useEffect(() => {
+    if (!isRelevant) return
     if (!jobId) return
     if (status === 'ready' || status === 'failed' || status === 'blocked') return
 
@@ -216,8 +216,9 @@ export function DocumentPreview({ result }: { result: Record<string, unknown> })
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [jobId, status])
+  }, [isRelevant, jobId, status])
 
+  if (!isRelevant) return null
   if (!title) return null
 
   const statusText = docsJobStatusLabel(status)

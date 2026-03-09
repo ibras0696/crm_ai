@@ -9,4 +9,3 @@ ACCESS_ROLES: list[str] = ["owner", "admin", "manager", "employee", "readonly"]
 
 # Allowed permission fields used in check_access.
 PERMISSION_FIELDS: set[str] = {"can_read", "can_write", "can_delete"}
-

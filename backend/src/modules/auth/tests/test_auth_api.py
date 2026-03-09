@@ -50,7 +50,7 @@ async def test_register_duplicate_email(client: AsyncClient):
         "first_name": "Test",
         "last_name": "User",
         "org_name": "Dup Org",
-            "accepted_privacy_policy": True,
+        "accepted_privacy_policy": True,
     }
     resp1 = await client.post("/api/v1/auth/register", json=payload)
     assert resp1.status_code == 201

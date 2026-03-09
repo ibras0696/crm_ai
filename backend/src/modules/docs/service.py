@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import TYPE_CHECKING
 
@@ -43,6 +44,9 @@ from src.modules.files.models import File
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -226,10 +230,9 @@ class DocsService:
             logger.exception("docs_delete_file_ai_cleanup_failed", extra={"file_id": str(file_id)})
 
         from src.modules.docs.tasks import docs_delete_file_background
-        try:
+
+        with suppress(Exception):
             docs_delete_file_background.delay(str(file_id))
-        except Exception:
-            pass
 
     async def init_upload(
         self,
@@ -760,7 +763,7 @@ class DocsService:
         token_payload = {
             "sub": str(version.id),
             "action": "internal_download",
-            "exp": datetime.now(timezone.utc) + timedelta(hours=2)
+            "exp": datetime.now(UTC) + timedelta(hours=2),
         }
         internal_token = jwt.encode(token_payload, settings.SECRET_KEY, algorithm="HS256")
         download_url = f"http://api:8000/api/v1/docs/files/internal-download/{version.id}?token={internal_token}"
@@ -934,8 +937,8 @@ class DocsService:
             raise DocsModuleError(code="PROMPT_TOO_LARGE", message="Слишком длинный prompt для генерации документа")
 
         normalized_type = self._resolve_generated_file_type(file_type)
-        normalized_template = (str(template).strip() if template else None)
-        normalized_language = (str(language).strip() if language else "ru")
+        normalized_template = str(template).strip() if template else None
+        normalized_language = str(language).strip() if language else "ru"
         doc_title = (str(title or "").strip() or f"AI {normalized_type.value.upper()} документ")[:500]
         if folder_id is not None:
             folder = await self.repo.get_folder(folder_id=folder_id, org_id=org_id)
@@ -969,7 +972,10 @@ class DocsService:
         if generation_budget.completion_tokens < 256:
             raise DocsModuleError(
                 code="PROMPT_TOO_LARGE_FOR_REQUEST_LIMIT",
-                message="Запрос слишком длинный для текущего лимита AI на один запрос. Сократите описание или увеличьте лимит.",
+                message=(
+                    "Запрос слишком длинный для текущего лимита AI на один запрос. "
+                    "Сократите описание или увеличьте лимит."
+                ),
                 status_code=422,
             )
         estimated_request_tokens = int(generation_budget.total_tokens)
@@ -1366,7 +1372,7 @@ class DocsService:
         if file_obj.type == FileType.PDF.value:
             # Уже PDF, просто вернуть ссылку на скачивание оригинального файла
             return await self.build_download(org_id=org_id, file_id=file_id)
-            
+
         version = await self.repo.get_file_version(version_id=file_obj.current_version_id, file_id=file_obj.id)
         if version is None:
             raise DocsModuleError(code="FILE_VERSION_NOT_FOUND", message="Текущая версия файла не найдена")
@@ -1381,7 +1387,9 @@ class DocsService:
             try:
                 text = payload.decode("utf-8")
             except UnicodeDecodeError as exc:
-                raise DocsModuleError(code="INVALID_TEXT_ENCODING", message="TXT файл содержит невалидный UTF-8") from exc
+                raise DocsModuleError(
+                    code="INVALID_TEXT_ENCODING", message="TXT файл содержит невалидный UTF-8"
+                ) from exc
             pdf_bytes, _, _ = render_document_bytes(
                 file_type=FileType.PDF,
                 text=text,
@@ -1389,14 +1397,14 @@ class DocsService:
             )
         elif file_obj.type == FileType.DOCX.value:
             from src.modules.docs.doc_editor_provider import DEFAULT_DOC_EDITOR_PROVIDER
+
             DEFAULT_DOC_EDITOR_PROVIDER.ensure_configured()
-            
+
             # Нам нужно передать URL скачивания в сервис конвертации
             download_url_info = await self.build_download(org_id=org_id, file_id=file_id)
             try:
                 pdf_bytes = await DEFAULT_DOC_EDITOR_PROVIDER.convert_to_pdf(
-                    file_url=str(download_url_info["url"]),
-                    file_type="docx"
+                    file_url=str(download_url_info["url"]), file_type="docx"
                 )
             except DocsModuleError:
                 raise
@@ -1406,7 +1414,7 @@ class DocsService:
                 ) from exc
         else:
             raise DocsModuleError(code="UNSUPPORTED_TYPE", message="Данный тип файла не поддерживает экспорт в PDF")
-            
+
         # Загружаем экспортированный PDF обратно во временное/постоянное хранилище
         export_key = f"exports/{org_id}/{file_id}/{uuid.uuid4()}.pdf"
         try:
@@ -1420,13 +1428,10 @@ class DocsService:
             raise DocsModuleError(
                 code="STORAGE_WRITE_ERROR", message="Не удалось сохранить экспортированный PDF"
             ) from exc
-            
+
         try:
             url = self.storage.generate_presigned_get_url(
-                bucket=DEFAULT_BUCKET,
-                key=export_key,
-                expires_in=3600,
-                filename=f"{file_obj.title or 'Документ'}.pdf"
+                bucket=DEFAULT_BUCKET, key=export_key, expires_in=3600, filename=f"{file_obj.title or 'Документ'}.pdf"
             )
         except Exception as exc:
             raise DocsModuleError(
@@ -1462,24 +1467,28 @@ class DocsService:
     async def _download_onlyoffice_file(self, file_url: str) -> bytes:
         """Скачать сохраненный OnlyOffice файл по callback URL."""
         from urllib.parse import urlparse, urlunparse
-        
+
         # Если backend и OnlyOffice оба в Docker, а клиент снаружи по localhost,
         # URL из коллбека может быть недоступен (например, localhost:8080).
         # Подменяем хост на внутренний (DOCS_ONLYOFFICE_DOCUMENT_SERVER_INTERNAL_URL).
-        internal_url_base = str(getattr(settings, "DOCS_ONLYOFFICE_DOCUMENT_SERVER_INTERNAL_URL", "http://onlyoffice:80")).rstrip("/")
+        internal_url_base = str(
+            getattr(settings, "DOCS_ONLYOFFICE_DOCUMENT_SERVER_INTERNAL_URL", "http://onlyoffice:80")
+        ).rstrip("/")
         if internal_url_base:
             parsed_internal = urlparse(internal_url_base)
             parsed_file = urlparse(file_url)
-            
+
             # Подменяем схему и хост (netloc) на внутренние из настроек.
-            file_url_internal = urlunparse((
-                parsed_internal.scheme,
-                parsed_internal.netloc,
-                parsed_file.path,
-                parsed_file.params,
-                parsed_file.query,
-                parsed_file.fragment
-            ))
+            file_url_internal = urlunparse(
+                (
+                    parsed_internal.scheme,
+                    parsed_internal.netloc,
+                    parsed_file.path,
+                    parsed_file.params,
+                    parsed_file.query,
+                    parsed_file.fragment,
+                )
+            )
         else:
             file_url_internal = file_url
 

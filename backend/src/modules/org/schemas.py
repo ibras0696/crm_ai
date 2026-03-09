@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
-from src.common.enums import InviteStatus, PlanTier, SubscriptionStatus, UserRole
+from src.common.enums import InviteStatus, PlanTier, UserRole
 
 
 class OrgResponse(BaseModel):

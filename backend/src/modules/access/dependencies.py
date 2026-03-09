@@ -8,9 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.common.enums import AuditAction
 from src.common.exceptions import ForbiddenError
 from src.infrastructure.database import get_async_session
+from src.modules.access.service import check_access
 from src.modules.audit.repository import AuditRepository
 from src.modules.auth.dependencies import CurrentUser, require_org
-from src.modules.access.service import check_access
 
 
 def require_access(

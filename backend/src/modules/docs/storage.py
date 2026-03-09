@@ -35,7 +35,9 @@ class StorageProvider:
         )
         return url, {"Content-Type": content_type}
 
-    def generate_presigned_get_url(self, *, bucket: str, key: str, expires_in: int = 900, filename: str | None = None) -> str:
+    def generate_presigned_get_url(
+        self, *, bucket: str, key: str, expires_in: int = 900, filename: str | None = None
+    ) -> str:
         """Сформировать URL для скачивания объекта из S3."""
         ensure_bucket()
         s3 = get_s3_presign_client()
@@ -43,7 +45,7 @@ class StorageProvider:
         if filename:
             safe_filename = quote(filename.encode("utf-8"))
             params["ResponseContentDisposition"] = f"attachment; filename*=UTF-8''{safe_filename}"
-            
+
         return s3.generate_presigned_url(
             "get_object",
             Params=params,

@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from src.common.enums import UserRole
 
+
 def _headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
@@ -32,13 +33,13 @@ async def _register_owner(client: AsyncClient, *, org_name: str | None = None) -
 async def test_extract_action_payload_from_codeblock_and_plain_json():
     from src.modules.ai.service import extract_action_payload
 
-    reply = "Hello\n```crm_action\n{\"action\":\"create_table\",\"name\":\"T\",\"columns\":[]}\n```"
+    reply = 'Hello\n```crm_action\n{"action":"create_table","name":"T","columns":[]}\n```'
     payload, cleaned = extract_action_payload(reply)
     assert isinstance(payload, dict)
     assert payload["action"] == "create_table"
     assert "crm_action" not in cleaned
 
-    reply2 = "Some text {\"action\":\"create_dashboard\",\"name\":\"D\",\"widgets\":[]} end"
+    reply2 = 'Some text {"action":"create_dashboard","name":"D","widgets":[]} end'
     payload2, cleaned2 = extract_action_payload(reply2)
     assert isinstance(payload2, dict)
     assert payload2["action"] == "create_dashboard"
@@ -47,8 +48,8 @@ async def test_extract_action_payload_from_codeblock_and_plain_json():
     reply3 = (
         "Ок\n```crm_action\n"
         "["
-        "{\"action\":\"create_schedule_event\",\"title\":\"A\",\"start_at\":\"2026-02-27T10:00:00Z\"},"
-        "{\"action\":\"create_schedule_event\",\"title\":\"B\",\"start_at\":\"2026-02-27T11:00:00Z\"}"
+        '{"action":"create_schedule_event","title":"A","start_at":"2026-02-27T10:00:00Z"},'
+        '{"action":"create_schedule_event","title":"B","start_at":"2026-02-27T11:00:00Z"}'
         "]\n```"
     )
     payload3, cleaned3 = extract_action_payload(reply3)
@@ -61,8 +62,8 @@ async def test_extract_action_payload_from_codeblock_and_plain_json():
     reply4 = (
         "Список:\n"
         "["
-        "{\"action\":\"create_schedule_event\",\"title\":\"A\",\"start_at\":\"2026-02-27T10:00:00Z\"},"
-        "{\"action\":\"create_schedule_event\",\"title\":\"B\",\"start_at\":\"2026-02-27T11:00:00Z\"}"
+        '{"action":"create_schedule_event","title":"A","start_at":"2026-02-27T10:00:00Z"},'
+        '{"action":"create_schedule_event","title":"B","start_at":"2026-02-27T11:00:00Z"}'
         "]"
     )
     payload4, _ = extract_action_payload(reply4)
@@ -172,7 +173,9 @@ async def test_ai_service_can_create_document_job(client: AsyncClient, monkeypat
     async with UnitOfWork() as uow:
         user = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
         assert user is not None
-        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        membership = (
+            (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        )
         assert membership is not None
         org_id = membership.org_id
         user_id = user.id
@@ -211,13 +214,15 @@ async def test_ai_service_can_create_table_columns_records_and_event(client: Asy
     )
     from src.modules.auth.models import User
     from src.modules.org.models import Membership
-    from src.modules.tables.models import Table
     from src.modules.schedule.models import Event
+    from src.modules.tables.models import Table
 
     async with UnitOfWork() as uow:
         user = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
         assert user is not None
-        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        membership = (
+            (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        )
         assert membership is not None
         org_id = membership.org_id
         user_id = user.id
@@ -259,7 +264,11 @@ async def test_ai_service_can_create_table_columns_records_and_event(client: Asy
             uow,
             org_id,
             user_id,
-            {"action": "create_records", "table_id": str(table_id), "records": [{"Name": "Pear", "Price": 7, "SKU": "P-1"}]},
+            {
+                "action": "create_records",
+                "table_id": str(table_id),
+                "records": [{"Name": "Pear", "Price": 7, "SKU": "P-1"}],
+            },
             user_message="add one more product",
         )
         assert res_rec["ok"] is True
@@ -350,7 +359,9 @@ async def test_ai_schedule_batch_strict_day_limit_precheck(client: AsyncClient):
     async with UnitOfWork() as uow:
         user = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
         assert user is not None
-        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        membership = (
+            (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        )
         assert membership is not None
         org_id = membership.org_id
         user_id = user.id
@@ -373,7 +384,9 @@ async def test_ai_schedule_batch_strict_day_limit_precheck(client: AsyncClient):
     async with UnitOfWork() as uow:
         user = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
         assert user is not None
-        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        membership = (
+            (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        )
         assert membership is not None
         org_id = membership.org_id
         user_id = user.id
@@ -423,7 +436,9 @@ async def test_ai_schedule_resolves_participants_and_defaults(client: AsyncClien
     async with UnitOfWork() as uow:
         owner = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
         assert owner is not None
-        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == owner.id))).scalars().first()
+        membership = (
+            (await uow.session.execute(select(Membership).where(Membership.user_id == owner.id))).scalars().first()
+        )
         assert membership is not None
         org_id = membership.org_id
 
@@ -449,7 +464,9 @@ async def test_ai_schedule_resolves_participants_and_defaults(client: AsyncClien
     async with UnitOfWork() as uow:
         owner = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
         assert owner is not None
-        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == owner.id))).scalars().first()
+        membership = (
+            (await uow.session.execute(select(Membership).where(Membership.user_id == owner.id))).scalars().first()
+        )
         assert membership is not None
         org_id = membership.org_id
 
@@ -496,7 +513,9 @@ async def test_ai_service_can_create_knowledge_tree(client: AsyncClient):
     async with UnitOfWork() as uow:
         user = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
         assert user is not None
-        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        membership = (
+            (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        )
         assert membership is not None
         org_id = membership.org_id
         user_id = user.id
@@ -511,7 +530,11 @@ async def test_ai_service_can_create_knowledge_tree(client: AsyncClient):
                 "content": "Вводный материал",
                 "pages": [
                     {"title": "Урок 1", "content": "Базовый синтаксис"},
-                    {"title": "Урок 2", "content": "Типы данных", "children": [{"title": "Практика", "content": "Домашнее задание"}]},
+                    {
+                        "title": "Урок 2",
+                        "content": "Типы данных",
+                        "children": [{"title": "Практика", "content": "Домашнее задание"}],
+                    },
                 ],
             },
             user_message="создай курс и страницы",
@@ -546,7 +569,9 @@ async def test_ai_create_records_returns_limit_error_when_records_exhausted(clie
     async with UnitOfWork() as uow:
         user = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
         assert user is not None
-        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        membership = (
+            (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        )
         assert membership is not None
         org_id = membership.org_id
         user_id = user.id
@@ -613,7 +638,9 @@ async def test_ai_dashboard_builder_normalizes_sales_widgets(client: AsyncClient
     async with UnitOfWork() as uow:
         user = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
         assert user is not None
-        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        membership = (
+            (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        )
         assert membership is not None
 
         org_id = membership.org_id
@@ -633,9 +660,24 @@ async def test_ai_dashboard_builder_normalizes_sales_widgets(client: AsyncClient
                     {"name": "Дата оплаты", "field_type": "date"},
                 ],
                 "records": [
-                    {"Название курса": "Веб-дизайн", "Выручка": 45000, "Статус": "Оплачено", "Дата оплаты": "2026-02-20"},
-                    {"Название курса": "Data Science PRO", "Выручка": 62000, "Статус": "Оплачено", "Дата оплаты": "2026-02-21"},
-                    {"Название курса": "AI Basics", "Выручка": 15000, "Статус": "Ожидание", "Дата оплаты": "2026-02-22"},
+                    {
+                        "Название курса": "Веб-дизайн",
+                        "Выручка": 45000,
+                        "Статус": "Оплачено",
+                        "Дата оплаты": "2026-02-20",
+                    },
+                    {
+                        "Название курса": "Data Science PRO",
+                        "Выручка": 62000,
+                        "Статус": "Оплачено",
+                        "Дата оплаты": "2026-02-21",
+                    },
+                    {
+                        "Название курса": "AI Basics",
+                        "Выручка": 15000,
+                        "Статус": "Ожидание",
+                        "Дата оплаты": "2026-02-22",
+                    },
                 ],
             },
             user_message="создай таблицу продаж",
@@ -694,7 +736,9 @@ async def test_ai_dashboard_builder_does_not_flatten_all_widgets_to_preferred_ty
     async with UnitOfWork() as uow:
         user = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
         assert user is not None
-        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        membership = (
+            (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        )
         assert membership is not None
 
         org_id = membership.org_id

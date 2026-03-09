@@ -181,7 +181,9 @@ async def test_folders_views_filter_and_move(client: AsyncClient):
     assert f.status_code == 200
     folder_id = f.json()["data"]["id"]
 
-    fu = await client.patch(f"/api/v1/tables/folders/{folder_id}", json={"name": "Sales updated"}, headers=_headers(token))
+    fu = await client.patch(
+        f"/api/v1/tables/folders/{folder_id}", json={"name": "Sales updated"}, headers=_headers(token)
+    )
     assert fu.status_code == 200
 
     flist = await client.get("/api/v1/tables/folders/", headers=_headers(token))
@@ -228,8 +230,12 @@ async def test_folders_views_filter_and_move(client: AsyncClient):
     )
     assert cu.status_code == 200
 
-    r1 = await client.post(f"/api/v1/tables/{table_id}/records/", json={"data": {col_id: "New"}}, headers=_headers(token))
-    r2 = await client.post(f"/api/v1/tables/{table_id}/records/", json={"data": {col_id: "Won"}}, headers=_headers(token))
+    r1 = await client.post(
+        f"/api/v1/tables/{table_id}/records/", json={"data": {col_id: "New"}}, headers=_headers(token)
+    )
+    r2 = await client.post(
+        f"/api/v1/tables/{table_id}/records/", json={"data": {col_id: "Won"}}, headers=_headers(token)
+    )
     assert r1.status_code == 200 and r2.status_code == 200
     rec2_id = r2.json()["data"]["id"]
 
@@ -488,7 +494,9 @@ async def test_import_csv_respects_record_limit(client: AsyncClient):
     table_id = t.json()["data"]["id"]
 
     # Already 1 record.
-    created = await client.post(f"/api/v1/tables/{table_id}/records/", json={"data": {"a": "one"}}, headers=_headers(token))
+    created = await client.post(
+        f"/api/v1/tables/{table_id}/records/", json={"data": {"a": "one"}}, headers=_headers(token)
+    )
     assert created.status_code == 200 and created.json()["ok"] is True
 
     csv_content = "Название\nv2\nv3\n"

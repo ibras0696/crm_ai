@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 
-def apply_ui_intent_overrides(action_payload: dict[str, Any] | None, ui_intent: str | None, ui_params: dict | None) -> dict[str, Any] | None:
+def apply_ui_intent_overrides(
+    action_payload: dict[str, Any] | None, ui_intent: str | None, ui_params: dict | None
+) -> dict[str, Any] | None:
     """Применить подсказки интерфейса (UI intent) к payload действия.
 
     UI intent не является приказом модели, это подсказка от интерфейса. Но для некоторых

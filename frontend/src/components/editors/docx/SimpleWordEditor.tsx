@@ -1,10 +1,23 @@
-import { useState, useEffect } from 'react'
-import { CKEditor } from '@ckeditor/ckeditor5-react'
-import ClassicEditor from '@ckeditor/ckeditor5-build-classic'
-import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Document, HeadingLevel, Packer, Paragraph, TextRun } from 'docx'
 import mammoth from 'mammoth'
+import {
+  Bold,
+  Download,
+  FileText,
+  Heading1,
+  Heading2,
+  Italic,
+  List,
+  ListOrdered,
+  Loader2,
+  Quote,
+  Redo2,
+  Save,
+  Underline,
+  Undo2,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Save, Download, FileText, Loader2 } from 'lucide-react'
 
 interface SimpleWordEditorProps {
   fileUrl?: string
@@ -13,53 +26,89 @@ interface SimpleWordEditorProps {
   readOnly?: boolean
 }
 
-export function SimpleWordEditor({ 
-  fileUrl, 
-  initialContent = '', 
-  onSave, 
-  readOnly = false 
+type ToolbarAction =
+  | 'bold'
+  | 'italic'
+  | 'underline'
+  | 'insertUnorderedList'
+  | 'insertOrderedList'
+  | 'undo'
+  | 'redo'
+
+const TOOLBAR_BUTTONS: Array<{
+  action: ToolbarAction | 'h1' | 'h2' | 'blockquote'
+  icon: typeof Bold
+  label: string
+}> = [
+  { action: 'bold', icon: Bold, label: 'Жирный' },
+  { action: 'italic', icon: Italic, label: 'Курсив' },
+  { action: 'underline', icon: Underline, label: 'Подчеркнутый' },
+  { action: 'h1', icon: Heading1, label: 'Заголовок 1' },
+  { action: 'h2', icon: Heading2, label: 'Заголовок 2' },
+  { action: 'insertUnorderedList', icon: List, label: 'Маркированный список' },
+  { action: 'insertOrderedList', icon: ListOrdered, label: 'Нумерованный список' },
+  { action: 'blockquote', icon: Quote, label: 'Цитата' },
+  { action: 'undo', icon: Undo2, label: 'Отменить' },
+  { action: 'redo', icon: Redo2, label: 'Повторить' },
+]
+
+function normalizeHtml(html: string): string {
+  const trimmed = html.trim()
+  if (!trimmed) {
+    return '<p></p>'
+  }
+  return trimmed
+}
+
+export function SimpleWordEditor({
+  fileUrl,
+  initialContent = '',
+  onSave,
+  readOnly = false,
 }: SimpleWordEditorProps) {
-  const [content, setContent] = useState(initialContent)
+  const editorRef = useRef<HTMLDivElement | null>(null)
+  const [content, setContent] = useState(normalizeHtml(initialContent))
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [wordCount, setWordCount] = useState(0)
   const [characterCount, setCharacterCount] = useState(0)
 
-  useEffect(() => {
-    if (fileUrl) {
-      loadDocx()
-    }
-  }, [fileUrl])
-
-  useEffect(() => {
-    updateStats(content)
-  }, [content])
-
-  const loadDocx = async () => {
+  const loadDocx = useCallback(async () => {
     if (!fileUrl) return
 
     setIsLoading(true)
     try {
       const response = await fetch(fileUrl)
       const arrayBuffer = await response.arrayBuffer()
-      
       const result = await mammoth.convertToHtml({ arrayBuffer })
-      setContent(result.value)
+      setContent(normalizeHtml(result.value))
     } catch (error) {
       console.error('Failed to load DOCX:', error)
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [fileUrl])
 
-  const updateStats = (html: string) => {
-    const text = html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-    const words = text.split(/\s+/).filter(w => w.length > 0)
+  useEffect(() => {
+    if (fileUrl) {
+      void loadDocx()
+    }
+  }, [fileUrl, loadDocx])
+
+  useEffect(() => {
+    const text = content.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+    const words = text ? text.split(/\s+/).filter(Boolean) : []
     setWordCount(words.length)
     setCharacterCount(text.length)
-  }
+  }, [content])
 
-  const parseHTMLToDocx = (html: string): Paragraph[] => {
+  useEffect(() => {
+    if (editorRef.current && editorRef.current.innerHTML !== content) {
+      editorRef.current.innerHTML = content
+    }
+  }, [content])
+
+  const parseHTMLToDocx = useCallback((html: string): Paragraph[] => {
     const parser = new DOMParser()
     const doc = parser.parseFromString(html, 'text/html')
     const paragraphs: Paragraph[] = []
@@ -72,87 +121,84 @@ export function SimpleWordEditor({
         if (text.trim()) {
           runs.push(new TextRun(text))
         }
-      } else if (node.nodeType === Node.ELEMENT_NODE) {
-        const element = node as Element
-        const children: TextRun[] = []
-
-        element.childNodes.forEach(child => {
-          children.push(...processNode(child))
-        })
-
-        if (children.length > 0) {
-          const tagName = element.tagName.toLowerCase()
-          
-          if (tagName === 'strong' || tagName === 'b') {
-            runs.push(new TextRun({ text: element.textContent || '', bold: true }))
-          } else if (tagName === 'em' || tagName === 'i') {
-            runs.push(new TextRun({ text: element.textContent || '', italics: true }))
-          } else if (tagName === 'u') {
-            runs.push(new TextRun({ text: element.textContent || '', underline: {} }))
-          } else {
-            runs.push(...children)
-          }
-        }
+        return runs
       }
 
-      return runs
+      if (node.nodeType !== Node.ELEMENT_NODE) {
+        return runs
+      }
+
+      const element = node as Element
+      const children: TextRun[] = []
+      element.childNodes.forEach((child) => {
+        children.push(...processNode(child))
+      })
+
+      if (!children.length && element.textContent?.trim()) {
+        children.push(new TextRun(element.textContent))
+      }
+
+      const tagName = element.tagName.toLowerCase()
+      if (tagName === 'strong' || tagName === 'b') {
+        return [new TextRun({ text: element.textContent || '', bold: true })]
+      }
+      if (tagName === 'em' || tagName === 'i') {
+        return [new TextRun({ text: element.textContent || '', italics: true })]
+      }
+      if (tagName === 'u') {
+        return [new TextRun({ text: element.textContent || '', underline: {} })]
+      }
+      return children
     }
 
-    doc.body.childNodes.forEach(node => {
-      if (node.nodeType === Node.ELEMENT_NODE) {
-        const element = node as Element
-        const tagName = element.tagName.toLowerCase()
-        const runs = processNode(node)
+    doc.body.childNodes.forEach((node) => {
+      if (node.nodeType !== Node.ELEMENT_NODE) return
+      const element = node as Element
+      const tagName = element.tagName.toLowerCase()
+      const runs = processNode(node)
 
-        if (runs.length === 0 && element.textContent?.trim()) {
-          runs.push(new TextRun(element.textContent))
-        }
-
-        let heading
-
-        switch (tagName) {
-          case 'h1':
-            heading = HeadingLevel.HEADING_1
-            break
-          case 'h2':
-            heading = HeadingLevel.HEADING_2
-            break
-          case 'h3':
-            heading = HeadingLevel.HEADING_3
-            break
-          case 'h4':
-            heading = HeadingLevel.HEADING_4
-            break
-          case 'h5':
-            heading = HeadingLevel.HEADING_5
-            break
-          case 'h6':
-            heading = HeadingLevel.HEADING_6
-            break
-        }
-
-        paragraphs.push(new Paragraph({
-          children: runs.length > 0 ? runs : [new TextRun(element.textContent || '')],
-          heading,
-        }))
+      let heading
+      switch (tagName) {
+        case 'h1':
+          heading = HeadingLevel.HEADING_1
+          break
+        case 'h2':
+          heading = HeadingLevel.HEADING_2
+          break
+        case 'h3':
+          heading = HeadingLevel.HEADING_3
+          break
+        case 'h4':
+          heading = HeadingLevel.HEADING_4
+          break
+        case 'h5':
+          heading = HeadingLevel.HEADING_5
+          break
+        case 'h6':
+          heading = HeadingLevel.HEADING_6
+          break
+        default:
+          heading = undefined
       }
+
+      paragraphs.push(
+        new Paragraph({
+          children: runs.length ? runs : [new TextRun(element.textContent || '')],
+          heading,
+        }),
+      )
     })
 
     return paragraphs
-  }
+  }, [])
 
-  const exportToDocx = async () => {
+  const exportToDocx = useCallback(async () => {
     setIsSaving(true)
     try {
       const paragraphs = parseHTMLToDocx(content)
-
       const doc = new Document({
-        sections: [{
-          properties: {},
-          children: paragraphs,
-        }],
+        sections: [{ properties: {}, children: paragraphs }],
       })
-
       const blob = await Packer.toBlob(doc)
       await onSave(blob, content)
     } catch (error) {
@@ -161,17 +207,13 @@ export function SimpleWordEditor({
     } finally {
       setIsSaving(false)
     }
-  }
+  }, [content, onSave, parseHTMLToDocx])
 
-  const downloadDocx = async () => {
+  const downloadDocx = useCallback(async () => {
     const paragraphs = parseHTMLToDocx(content)
     const doc = new Document({
-      sections: [{
-        properties: {},
-        children: paragraphs,
-      }],
+      sections: [{ properties: {}, children: paragraphs }],
     })
-
     const blob = await Packer.toBlob(doc)
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -179,7 +221,43 @@ export function SimpleWordEditor({
     a.download = 'document.docx'
     a.click()
     URL.revokeObjectURL(url)
-  }
+  }, [content, parseHTMLToDocx])
+
+  const applyFormat = useCallback((action: ToolbarAction | 'h1' | 'h2' | 'blockquote') => {
+    if (readOnly) return
+    editorRef.current?.focus()
+
+    if (action === 'h1') {
+      document.execCommand('formatBlock', false, 'h1')
+    } else if (action === 'h2') {
+      document.execCommand('formatBlock', false, 'h2')
+    } else if (action === 'blockquote') {
+      document.execCommand('formatBlock', false, 'blockquote')
+    } else {
+      document.execCommand(action, false)
+    }
+
+    const nextHtml = normalizeHtml(editorRef.current?.innerHTML || '')
+    setContent(nextHtml)
+  }, [readOnly])
+
+  const toolbar = useMemo(
+    () =>
+      TOOLBAR_BUTTONS.map(({ action, icon: Icon, label }) => (
+        <Button
+          key={action}
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => applyFormat(action)}
+          title={label}
+          aria-label={label}
+        >
+          <Icon className="h-4 w-4" />
+        </Button>
+      )),
+    [applyFormat],
+  )
 
   if (isLoading) {
     return (
@@ -192,7 +270,7 @@ export function SimpleWordEditor({
   return (
     <div className="flex h-full flex-col">
       {!readOnly && (
-        <div className="flex items-center justify-between border-b border-border bg-background p-2">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-background p-3">
           <div className="flex items-center gap-4 text-sm text-muted-foreground">
             <span className="flex items-center gap-1">
               <FileText className="h-4 w-4" />
@@ -201,20 +279,13 @@ export function SimpleWordEditor({
             <span>{characterCount} characters</span>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={downloadDocx}
-            >
+          <div className="flex flex-wrap items-center gap-2">
+            {toolbar}
+            <Button type="button" variant="outline" size="sm" onClick={downloadDocx}>
               <Download className="mr-2 h-4 w-4" />
               Download
             </Button>
-            <Button
-              size="sm"
-              onClick={exportToDocx}
-              disabled={isSaving}
-            >
+            <Button type="button" size="sm" onClick={exportToDocx} disabled={isSaving}>
               <Save className="mr-2 h-4 w-4" />
               {isSaving ? 'Saving...' : 'Save'}
             </Button>
@@ -222,55 +293,19 @@ export function SimpleWordEditor({
         </div>
       )}
 
-      <div className="flex-1 overflow-auto p-4">
-        <CKEditor
-          editor={ClassicEditor as any}
-          data={content}
-          disabled={readOnly}
-          onChange={(_event, editor) => {
-            const data = editor.getData()
-            setContent(data)
-          }}
-          config={{
-            toolbar: {
-              items: [
-                'heading',
-                '|',
-                'bold',
-                'italic',
-                'underline',
-                'strikethrough',
-                '|',
-                'fontSize',
-                'fontColor',
-                'fontBackgroundColor',
-                '|',
-                'bulletedList',
-                'numberedList',
-                '|',
-                'alignment',
-                '|',
-                'link',
-                'insertTable',
-                'blockQuote',
-                '|',
-                'undo',
-                'redo',
-              ],
-            },
-            heading: {
-              options: [
-                { model: 'paragraph', title: 'Paragraph', class: 'ck-heading_paragraph' },
-                { model: 'heading1', view: 'h1', title: 'Heading 1', class: 'ck-heading_heading1' },
-                { model: 'heading2', view: 'h2', title: 'Heading 2', class: 'ck-heading_heading2' },
-                { model: 'heading3', view: 'h3', title: 'Heading 3', class: 'ck-heading_heading3' },
-              ],
-            },
-            table: {
-              contentToolbar: ['tableColumn', 'tableRow', 'mergeTableCells'],
-            },
-          }}
-        />
+      <div className="flex-1 overflow-auto bg-muted/20 p-4">
+        <div className="mx-auto min-h-full max-w-4xl rounded-xl border border-border bg-background shadow-sm">
+          <div
+            ref={editorRef}
+            className="min-h-[70vh] p-6 outline-none prose prose-sm max-w-none dark:prose-invert"
+            contentEditable={!readOnly}
+            suppressContentEditableWarning
+            onInput={(event) => {
+              const nextHtml = normalizeHtml((event.currentTarget as HTMLDivElement).innerHTML)
+              setContent(nextHtml)
+            }}
+          />
+        </div>
       </div>
     </div>
   )

@@ -47,19 +47,21 @@ def dispatch_schedule_reminders() -> dict:
                 reminder_at = event.start_at - timedelta(minutes=minutes)
                 if reminder_at <= now <= event.start_at:
                     for user_id in participants:
-                        session.add(Notification(
-                            org_id=event.org_id,
-                            user_id=UUID(str(user_id)),
-                            type=NotificationType.IN_APP,
-                            status=NotificationStatus.PENDING,
-                            title=f"Скоро событие: {event.title}",
-                            body=_build_reminder_text(minutes),
-                            meta={
-                                "event_id": str(event.id),
-                                "start_at": event.start_at.isoformat(),
-                                "offset_minutes": minutes,
-                            },
-                        ))
+                        session.add(
+                            Notification(
+                                org_id=event.org_id,
+                                user_id=UUID(str(user_id)),
+                                type=NotificationType.IN_APP,
+                                status=NotificationStatus.PENDING,
+                                title=f"Скоро событие: {event.title}",
+                                body=_build_reminder_text(minutes),
+                                meta={
+                                    "event_id": str(event.id),
+                                    "start_at": event.start_at.isoformat(),
+                                    "offset_minutes": minutes,
+                                },
+                            )
+                        )
                         created_notifications += 1
                     sent_offsets.add(minutes)
                     event.set_meta_fields(reminder_sent_offsets_minutes=sorted(sent_offsets))

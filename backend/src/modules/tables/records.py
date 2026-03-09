@@ -1,4 +1,5 @@
 """Record model and repository for JSONB-based records storage."""
+
 import uuid
 
 from sqlalchemy import ForeignKey, Integer, func, select, text
@@ -12,9 +13,15 @@ from src.common.base_model import BaseDBModel
 class Record(BaseDBModel):
     __tablename__ = "table_records"
 
-    table_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("tables.id", ondelete="CASCADE"), nullable=False, index=True)
-    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True)
-    created_by: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    table_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tables.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     data: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
 

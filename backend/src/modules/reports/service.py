@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 from collections import Counter
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -154,7 +154,7 @@ class ReportsService:
         )
 
     async def records_timeline(self, *, org_id: uuid.UUID, days: int) -> list[TimeSeriesPoint]:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff = datetime.now(UTC) - timedelta(days=days)
         rows = await self.repo.records_timeline(org_id, cutoff)
         return [TimeSeriesPoint(date=str(day.date()), count=count) for day, count in rows]
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
@@ -153,10 +153,7 @@ async def _build_org_context_internal(
                     tbl_stmt = tbl_stmt.where(Table.id.in_(valid_tids))
                     table_manual_scope = True
             # Без явного выбора не тянем таблицы автоматически.
-            if table_manual_scope:
-                tables = (await uow.session.execute(tbl_stmt)).scalars().all()
-            else:
-                tables = []
+            tables = (await uow.session.execute(tbl_stmt)).scalars().all() if table_manual_scope else []
 
             if tables and (flags["include_table_schema"] or flags["include_table_records"]):
                 parts.append("\n=== TABLES ===")
@@ -170,10 +167,12 @@ async def _build_org_context_internal(
                             select(
                                 Record.table_id.label("table_id"),
                                 Record.data.label("data"),
-                                func.row_number().over(
+                                func.row_number()
+                                .over(
                                     partition_by=Record.table_id,
                                     order_by=Record.created_at.desc(),
-                                ).label("rn"),
+                                )
+                                .label("rn"),
                             )
                             .where(Record.table_id.in_(table_ids))
                             .subquery()
@@ -217,10 +216,12 @@ async def _build_org_context_internal(
                     meta["sources"]["table_records"]["estimated_tokens"] = estimate_tokens(sample_block)
 
             if flags["include_schedule"]:
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 since = now - timedelta(days=30)
                 until = now + timedelta(days=flags["schedule_days"])
-                sched_stmt = select(Event).where(Event.org_id == org_id, Event.start_at >= since, Event.start_at <= until)
+                sched_stmt = select(Event).where(
+                    Event.org_id == org_id, Event.start_at >= since, Event.start_at <= until
+                )
                 if user_id:
                     sched_stmt = sched_stmt.where((Event.assigned_to == user_id) | (Event.created_by == user_id))
                 sched_stmt = sched_stmt.order_by(Event.start_at.asc()).limit(200)
@@ -241,13 +242,17 @@ async def _build_org_context_internal(
                 events = (await uow.session.execute(sched_stmt)).scalars().all()
                 if not events and user_id:
                     events = (
-                        await uow.session.execute(
-                            select(Event)
-                            .where(Event.org_id == org_id, Event.start_at >= since, Event.start_at <= until)
-                            .order_by(Event.start_at.asc())
-                            .limit(100)
+                        (
+                            await uow.session.execute(
+                                select(Event)
+                                .where(Event.org_id == org_id, Event.start_at >= since, Event.start_at <= until)
+                                .order_by(Event.start_at.asc())
+                                .limit(100)
+                            )
                         )
-                    ).scalars().all()
+                        .scalars()
+                        .all()
+                    )
                 if events:
                     schedule_lines: list[str] = []
                     for ev in events:
@@ -255,7 +260,8 @@ async def _build_org_context_internal(
                         end_s = ev.end_at.isoformat() if ev.end_at else ""
                         rec = ev.recurrence or "none"
                         schedule_lines.append(
-                            f"{start_s} | {ev.title} | recurrence={rec} | all_day={ev.all_day} | end={end_s} | done={ev.is_done}"
+                            f"{start_s} | {ev.title} | recurrence={rec} "
+                            f"| all_day={ev.all_day} | end={end_s} | done={ev.is_done}"
                         )
                     schedule_block = "\n".join(schedule_lines)
                     parts.append("\n=== SCHEDULE ===")

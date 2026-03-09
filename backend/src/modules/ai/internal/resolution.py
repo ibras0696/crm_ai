@@ -108,4 +108,3 @@ def safe_field_type(raw: Any) -> str:
         "timestamp": FieldType.DATETIME,
     }
     return mapping.get(value, FieldType.TEXT)
-

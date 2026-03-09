@@ -70,8 +70,15 @@ def _coerce_legacy_crm_action(payload: dict[str, Any]) -> dict[str, Any] | None:
                 "action": "create_document",
                 "type": properties.get("type") or payload.get("type") or payload.get("file_type") or "docx",
                 "title": properties.get("title") or payload.get("title") or payload.get("name") or "Новый документ",
-                "template": properties.get("template") or payload.get("template") or properties.get("style") or payload.get("style"),
-                "prompt": properties.get("prompt") or payload.get("prompt") or properties.get("description") or payload.get("description") or "",
+                "template": properties.get("template")
+                or payload.get("template")
+                or properties.get("style")
+                or payload.get("style"),
+                "prompt": properties.get("prompt")
+                or payload.get("prompt")
+                or properties.get("description")
+                or payload.get("description")
+                or "",
             }
 
         # Событие -> create_schedule_event

@@ -53,4 +53,3 @@ def send_smtp_email(
             smtp.send_message(msg)
     except Exception as exc:
         raise EmailSendError(str(exc)) from exc
-

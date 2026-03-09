@@ -98,7 +98,7 @@ class OnlyOfficeDocumentEditorProvider:
     async def convert_to_pdf(self, *, file_url: str, file_type: str) -> bytes:
         """Сконвертировать файл в PDF через ConvertService.ashx OnlyOffice."""
         self.ensure_configured()
-        
+
         convert_url = f"{self.document_server_url}/ConvertService.ashx"
         payload = {
             "async": False,
@@ -107,34 +107,28 @@ class OnlyOfficeDocumentEditorProvider:
             "outputtype": "pdf",
             "url": file_url,
         }
-        
+
         if self.jwt_secret:
             token = jwt.encode(payload, self.jwt_secret, algorithm="HS256")
             payload["token"] = token
-            
+
         timeout_s = float(getattr(settings, "DOCS_ONLYOFFICE_REQUEST_TIMEOUT_S", 60.0) or 60.0)
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_s), follow_redirects=True) as client:
-            response = await client.post(
-                convert_url, 
-                json=payload, 
-                headers={"Accept": "application/json"}
-            )
+            response = await client.post(convert_url, json=payload, headers={"Accept": "application/json"})
             response.raise_for_status()
             data = response.json()
-            
+
             if data.get("error"):
                 raise DocsModuleError(
-                    code="ONLYOFFICE_CONVERT_ERROR",
-                    message=f"Ошибка конвертации OnlyOffice: {data.get('error')}"
+                    code="ONLYOFFICE_CONVERT_ERROR", message=f"Ошибка конвертации OnlyOffice: {data.get('error')}"
                 )
-                
+
             file_url = data.get("fileUrl")
             if not file_url:
                 raise DocsModuleError(
-                    code="ONLYOFFICE_CONVERT_ERROR", 
-                    message="OnlyOffice не вернул ссылку на сконвертированный файл"
+                    code="ONLYOFFICE_CONVERT_ERROR", message="OnlyOffice не вернул ссылку на сконвертированный файл"
                 )
-                
+
             pdf_resp = await client.get(file_url)
             pdf_resp.raise_for_status()
             return bytes(pdf_resp.content)

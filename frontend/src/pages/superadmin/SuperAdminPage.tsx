@@ -70,7 +70,9 @@ export default function SuperAdminPage() {
   const logout = async () => {
     try {
       await superadminApi.logout()
-    } catch {}
+    } catch {
+      // logout should still clear local superadmin state
+    }
     setIsAuthed(false)
     setDashboard(EMPTY_DASHBOARD)
     setLoadError('')

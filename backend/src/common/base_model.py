@@ -5,8 +5,8 @@ from sqlalchemy import DateTime, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from src.infrastructure.database import Base
 from src.common.soft_delete import SoftDeleteMixin
+from src.infrastructure.database import Base
 
 
 class BaseDBModel(Base, SoftDeleteMixin):

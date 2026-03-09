@@ -30,11 +30,7 @@ class KnowledgeRepository:
 
     async def list_by_org(self, *, org_id: uuid.UUID) -> list[KBPage]:
         """List pages for organization."""
-        stmt = (
-            select(KBPage)
-            .where(KBPage.org_id == org_id)
-            .order_by(KBPage.position.asc(), KBPage.created_at.asc())
-        )
+        stmt = select(KBPage).where(KBPage.org_id == org_id).order_by(KBPage.position.asc(), KBPage.created_at.asc())
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -60,18 +56,10 @@ class KnowledgeRepository:
             .where(KBPage.id == root_page_id, KBPage.org_id == org_id)
             .cte(name="subtree", recursive=True)
         )
-        descendants = (
-            select(KBPage.id)
-            .join(subtree, KBPage.parent_id == subtree.c.id)
-            .where(KBPage.org_id == org_id)
-        )
+        descendants = select(KBPage.id).join(subtree, KBPage.parent_id == subtree.c.id).where(KBPage.org_id == org_id)
         subtree = subtree.union_all(descendants)
 
-        stmt = (
-            delete(KBPage)
-            .where(KBPage.id.in_(select(subtree.c.id)))
-            .returning(KBPage.id)
-        )
+        stmt = delete(KBPage).where(KBPage.id.in_(select(subtree.c.id))).returning(KBPage.id)
         result = await self.session.execute(stmt)
         return len(result.scalars().all())
 

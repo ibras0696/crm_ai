@@ -15,9 +15,9 @@ engine = create_async_engine(
     connect_args={
         "server_settings": {
             "statement_timeout": str(settings.DB_STATEMENT_TIMEOUT_MS),
-            "idle_in_transaction_session_timeout": "60000"
+            "idle_in_transaction_session_timeout": "60000",
         }
-    }
+    },
 )
 
 async_session_factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

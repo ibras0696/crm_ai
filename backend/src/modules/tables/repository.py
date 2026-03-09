@@ -34,6 +34,7 @@ class TableFolderRepository:
 
     async def get_max_position(self, org_id: uuid.UUID) -> int:
         from sqlalchemy import func
+
         stmt = select(func.coalesce(func.max(TableFolder.position), -1)).where(TableFolder.org_id == org_id)
         result = await self.session.execute(stmt)
         return result.scalar() or 0
@@ -89,11 +90,7 @@ class TableRepository:
         return result.scalar_one_or_none()
 
     async def clear_folder(self, *, org_id: uuid.UUID, folder_id: uuid.UUID) -> None:
-        stmt = (
-            update(Table)
-            .where(Table.org_id == org_id, Table.folder_id == folder_id)
-            .values(folder_id=None)
-        )
+        stmt = update(Table).where(Table.org_id == org_id, Table.folder_id == folder_id).values(folder_id=None)
         await self.session.execute(stmt)
         await self.session.flush()
 

@@ -481,7 +481,10 @@ class BillingService:
                         repo=repo,
                         org_id=sub.org_id,
                         title="Подписка скоро закончится",
-                        body="Срок тарифа заканчивается в течение 24 часов. Продлите подписку, чтобы не потерять доступ к платным возможностям.",
+                        body=(
+                            "Срок тарифа заканчивается в течение 24 часов. "
+                            "Продлите подписку, чтобы не потерять доступ к платным возможностям."
+                        ),
                         meta={"kind": "subscription_pre_expiry", "period_end": period_end.isoformat()},
                     )
                     if created > 0:
@@ -493,16 +496,15 @@ class BillingService:
                     sub.grace_period_end = grace_end
                     sub.data_purge_at = purge_at
 
-                if (
-                    is_paid_plan
-                    and period_end <= now_utc
-                    and sub.post_expiry_notified_at is None
-                ):
+                if is_paid_plan and period_end <= now_utc and sub.post_expiry_notified_at is None:
                     created = await self._create_billing_notification(
                         repo=repo,
                         org_id=sub.org_id,
                         title="Подписка завершена",
-                        body=f"Подписка завершилась. Льготный период для оплаты: {int(settings.BILLING_GRACE_DAYS)} дней.",
+                        body=(
+                            "Подписка завершилась. "
+                            f"Льготный период для оплаты: {int(settings.BILLING_GRACE_DAYS)} дней."
+                        ),
                         meta={
                             "kind": "subscription_post_expiry",
                             "period_end": period_end.isoformat(),
@@ -513,11 +515,7 @@ class BillingService:
                         sub.post_expiry_notified_at = now_utc
                         stats["post_expiry_notifications"] += created
 
-                if (
-                    sub.status == SubscriptionStatus.PAST_DUE
-                    and now_utc >= grace_end
-                    and sub.downgraded_at is None
-                ):
+                if sub.status == SubscriptionStatus.PAST_DUE and now_utc >= grace_end and sub.downgraded_at is None:
                     sub.status = SubscriptionStatus.CANCELLED
                     sub.plan = PlanTier.FREE
                     sub.downgraded_at = now_utc
@@ -525,11 +523,7 @@ class BillingService:
                     org.plan = PlanTier.FREE
                     stats["downgraded_orgs"] += 1
 
-                if (
-                    sub.status == SubscriptionStatus.CANCELLED
-                    and sub.data_purged_at is None
-                    and now_utc >= purge_at
-                ):
+                if sub.status == SubscriptionStatus.CANCELLED and sub.data_purged_at is None and now_utc >= purge_at:
                     await self._purge_org_data(repo=repo, org_id=sub.org_id)
                     sub.data_purged_at = now_utc
                     stats["purged_orgs"] += 1
@@ -554,15 +548,17 @@ class BillingService:
             return 0
 
         for user_id in recipients:
-            repo.session.add(Notification(
-                org_id=org_id,
-                user_id=user_id,
-                type=NotificationType.IN_APP,
-                status=NotificationStatus.PENDING,
-                title=title,
-                body=body,
-                meta=meta,
-            ))
+            repo.session.add(
+                Notification(
+                    org_id=org_id,
+                    user_id=user_id,
+                    type=NotificationType.IN_APP,
+                    status=NotificationStatus.PENDING,
+                    title=title,
+                    body=body,
+                    meta=meta,
+                )
+            )
         await repo.session.flush()
         return len(recipients)
 

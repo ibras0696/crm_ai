@@ -32,8 +32,10 @@ class SuperadminAIConfigService:
             row = (await uow.session.execute(select(AIRuntimeSettings).limit(1))).scalars().first()
             secret_row = (await uow.session.execute(select(AIRuntimeSecret).limit(1))).scalars().first()
             audits = (
-                await uow.session.execute(select(AIRuntimeAudit).order_by(AIRuntimeAudit.created_at.desc()).limit(20))
-            ).scalars().all()
+                (await uow.session.execute(select(AIRuntimeAudit).order_by(AIRuntimeAudit.created_at.desc()).limit(20)))
+                .scalars()
+                .all()
+            )
 
         env_base_url = (settings.AI_BASE_URL or "").rstrip("/")
         runtime_base_url = (row.ai_base_url if row and row.ai_base_url else env_base_url).rstrip("/")
@@ -60,7 +62,9 @@ class SuperadminAIConfigService:
                 "ai_bearer_token_configured": bool(runtime_token),
                 "system_prompt": (row.system_prompt if row and row.system_prompt else settings.AI_SYSTEM_PROMPT),
                 "temperature": float(row.temperature if row else 0.3),
-                "max_tokens_per_request": int(row.max_tokens_per_request if row else settings.AI_MAX_TOKENS_PER_REQUEST),
+                "max_tokens_per_request": int(
+                    row.max_tokens_per_request if row else settings.AI_MAX_TOKENS_PER_REQUEST
+                ),
                 "strict_actions": bool(row.strict_actions if row else True),
             },
             "audit": [
@@ -118,7 +122,9 @@ class SuperadminAIConfigService:
                 changed_fields.append("ai_base_url")
             if "ai_provider_mode" in updates:
                 old_values["ai_provider_mode"] = row.ai_provider_mode
-                row.ai_provider_mode = SuperadminAIConfigService._normalize_provider_mode(str(updates["ai_provider_mode"]))
+                row.ai_provider_mode = SuperadminAIConfigService._normalize_provider_mode(
+                    str(updates["ai_provider_mode"])
+                )
                 new_values["ai_provider_mode"] = row.ai_provider_mode
                 changed_fields.append("ai_provider_mode")
             if "system_prompt" in updates:

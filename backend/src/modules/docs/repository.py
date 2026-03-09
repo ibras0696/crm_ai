@@ -6,6 +6,7 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.enums import SubscriptionStatus
@@ -54,11 +55,7 @@ class DocsRepository:
 
     async def list_folders(self, *, org_id: uuid.UUID) -> list[Folder]:
         """Список папок организации."""
-        stmt = (
-            select(Folder)
-            .where(Folder.org_id == org_id)
-            .order_by(Folder.position.asc(), Folder.created_at.asc())
-        )
+        stmt = select(Folder).where(Folder.org_id == org_id).order_by(Folder.position.asc(), Folder.created_at.asc())
         return list((await self.session.execute(stmt)).scalars().all())
 
     async def get_max_folder_position(self, *, org_id: uuid.UUID) -> int:
@@ -162,24 +159,29 @@ class DocsRepository:
         return int((await self.session.execute(stmt)).scalar() or 0)
 
     async def get_storage_usage_for_update(self, *, org_id: uuid.UUID) -> OrgStorageUsage:
-        """Получить usage-строку с блокировкой `FOR UPDATE`, создать при отсутствии."""
-        stmt = (
-            select(OrgStorageUsage)
-            .where(OrgStorageUsage.org_id == org_id)
-            .with_for_update()
-            .limit(1)
-        )
+        """Получить usage-строку с блокировкой `FOR UPDATE`, создать при отсутствии.
+
+        Использует upsert, чтобы параллельные запросы не создавали дубликаты
+        usage-строки для одной и той же организации.
+        """
+        stmt = select(OrgStorageUsage).where(OrgStorageUsage.org_id == org_id).with_for_update().limit(1)
         usage = (await self.session.execute(stmt)).scalar_one_or_none()
         if usage is not None:
             return usage
 
-        usage = OrgStorageUsage(
-            org_id=org_id,
-            used_bytes=await self.sum_ready_file_bytes(org_id=org_id),
-            reserved_bytes=0,
+        used_bytes = await self.sum_ready_file_bytes(org_id=org_id)
+        await self.session.execute(
+            pg_insert(OrgStorageUsage)
+            .values(
+                org_id=org_id,
+                used_bytes=used_bytes,
+                reserved_bytes=0,
+            )
+            .on_conflict_do_nothing(index_elements=[OrgStorageUsage.org_id])
         )
-        self.session.add(usage)
-        await self.session.flush()
+        usage = (await self.session.execute(stmt)).scalar_one_or_none()
+        if usage is None:
+            raise RuntimeError(f"Failed to initialize org storage usage for org_id={org_id}")
         return usage
 
     async def get_storage_usage(self, *, org_id: uuid.UUID) -> OrgStorageUsage | None:
@@ -239,12 +241,7 @@ class DocsRepository:
 
     async def get_ai_generation_job_for_update(self, *, job_id: uuid.UUID) -> DocsAIGenerationJob | None:
         """Получить AI job с блокировкой строки FOR UPDATE."""
-        stmt = (
-            select(DocsAIGenerationJob)
-            .where(DocsAIGenerationJob.id == job_id)
-            .with_for_update()
-            .limit(1)
-        )
+        stmt = select(DocsAIGenerationJob).where(DocsAIGenerationJob.id == job_id).with_for_update().limit(1)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def update_ai_generation_job(self, job: DocsAIGenerationJob) -> DocsAIGenerationJob:

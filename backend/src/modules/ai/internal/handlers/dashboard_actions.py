@@ -105,13 +105,23 @@ async def handle_create_dashboard_action(
         )
         agg_name = normalize_aggregation(raw.get("aggregation"))
 
-        resolved_value_col = resolve_column_id(raw.get("value_column_id") or raw.get("value_column_name"), table_obj.columns)
-        resolved_group_col = resolve_column_id(raw.get("group_by_column_id") or raw.get("group_by_column_name"), table_obj.columns)
-        resolved_time_col = resolve_column_id(raw.get("time_column_id") or raw.get("time_column_name"), table_obj.columns)
+        resolved_value_col = resolve_column_id(
+            raw.get("value_column_id") or raw.get("value_column_name"), table_obj.columns
+        )
+        resolved_group_col = resolve_column_id(
+            raw.get("group_by_column_id") or raw.get("group_by_column_name"), table_obj.columns
+        )
+        resolved_time_col = resolve_column_id(
+            raw.get("time_column_id") or raw.get("time_column_name"), table_obj.columns
+        )
 
-        revenue_like = contains_any(semantic_text, ("выруч", "доход", "сумм", "оборот", "revenue", "amount", "sales", "цена"))
+        revenue_like = contains_any(
+            semantic_text, ("выруч", "доход", "сумм", "оборот", "revenue", "amount", "sales", "цена")
+        )
         status_like = contains_any(semantic_title, ("статус", "status", "state", "этап", "stage"))
-        trend_like = contains_any(semantic_title, ("динам", "trend", "по дат", "врем", "time", "день", "недел", "месяц")) or contains_any(
+        trend_like = contains_any(
+            semantic_title, ("динам", "trend", "по дат", "врем", "time", "день", "недел", "месяц")
+        ) or contains_any(
             normalized_message,
             ("динам", "trend", "по дат", "врем", "time", "день", "недел", "месяц"),
         )
@@ -138,7 +148,7 @@ async def handle_create_dashboard_action(
                 resolved_group_col = str(group_col.id)
 
         selected_column_ids: list[str] = []
-        for col_ref in (raw.get("selected_column_ids") or raw.get("selected_column_names") or []):
+        for col_ref in raw.get("selected_column_ids") or raw.get("selected_column_names") or []:
             col_id = resolve_column_id(col_ref, table_obj.columns)
             if col_id:
                 selected_column_ids.append(col_id)
@@ -152,7 +162,9 @@ async def handle_create_dashboard_action(
                 resolved_filter_col = resolve_column_id(f.get("column_id") or f.get("column_name"), table_obj.columns)
                 if not resolved_filter_col:
                     continue
-                normalized_filters.append({"column_id": resolved_filter_col, "op": str(f.get("op") or "eq"), "value": f.get("value")})
+                normalized_filters.append(
+                    {"column_id": resolved_filter_col, "op": str(f.get("op") or "eq"), "value": f.get("value")}
+                )
 
         cfg = WidgetConfig.model_validate(
             {

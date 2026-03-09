@@ -381,8 +381,10 @@ async def test_org_admin_can_manage_ai_limits(client: AsyncClient):
         assert int(org_limit.daily_tokens_limit) == 1111
         assert int(org_limit.monthly_tokens_limit) == 2222
         user_limit = (
-            await uow.session.execute(select(AIUserLimit).where(AIUserLimit.user_id == uuid.UUID(owner_user_id)))
-        ).scalars().first()
+            (await uow.session.execute(select(AIUserLimit).where(AIUserLimit.user_id == uuid.UUID(owner_user_id))))
+            .scalars()
+            .first()
+        )
         assert user_limit is not None
         assert int(user_limit.daily_tokens_limit) == 333
         assert int(user_limit.rpm_limit) == 4

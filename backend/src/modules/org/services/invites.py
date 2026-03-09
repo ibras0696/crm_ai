@@ -17,7 +17,7 @@ from src.modules.auth.security import (
     refresh_token_expires_at,
 )
 from src.modules.notifications.tasks import send_invite_email
-from src.modules.org.models import Invite, Membership, Organization
+from src.modules.org.models import Invite, Membership
 from src.modules.org.repository import (
     InviteRepository,
     MembershipRepository,

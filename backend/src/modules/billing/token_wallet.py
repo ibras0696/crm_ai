@@ -12,7 +12,6 @@ from src.config import settings
 from src.modules.billing.models import TokenBalance, TokenLedger, TokenPurchase, TokenUsageIdempotency
 from src.modules.billing.token_wallet_repository import TokenWalletRepository
 
-
 DEFAULT_TOKEN_PACKAGE_CATALOG: dict[str, int] = {
     "pack_50k": 50_000,
     "pack_100k": 100_000,
@@ -47,7 +46,9 @@ async def _monthly_plan_quota(session: AsyncSession, *, org_id: uuid.UUID) -> in
         org_rows = await repo.get_org_plans_by_org_ids(org_ids=[org_id])
         org_plan = org_rows[0][1] if org_rows else None
         try:
-            plan_tier = PlanTier(str(org_plan.value if hasattr(org_plan, "value") else org_plan)) if org_plan else PlanTier.FREE
+            plan_tier = (
+                PlanTier(str(org_plan.value if hasattr(org_plan, "value") else org_plan)) if org_plan else PlanTier.FREE
+            )
         except Exception:
             plan_tier = PlanTier.FREE
 
@@ -117,7 +118,9 @@ async def ensure_token_balances_bulk(
 
     effective_plan_by_org: dict[uuid.UUID, PlanTier] = {}
     for org_id in unique_org_ids:
-        effective_plan_by_org[org_id] = active_sub_plan_by_org.get(org_id) or org_plan_by_org.get(org_id) or PlanTier.FREE
+        effective_plan_by_org[org_id] = (
+            active_sub_plan_by_org.get(org_id) or org_plan_by_org.get(org_id) or PlanTier.FREE
+        )
 
     active_plans = await repo.get_active_plans_for_tiers(plan_names=[p.value for p in PlanTier])
     plan_db_by_name = {str(p.name).lower(): p for p in active_plans}
@@ -302,7 +305,11 @@ async def purchase_addon_tokens(
             request_id=None,
             balance_plan_after=int(balance.plan_tokens_remaining or 0),
             balance_addon_after=int(balance.addon_tokens_remaining or 0),
-            meta={"package_code": package_code, "purchase_tokens": amount, "expires_at": expires_at.isoformat() if expires_at else None},
+            meta={
+                "package_code": package_code,
+                "purchase_tokens": amount,
+                "expires_at": expires_at.isoformat() if expires_at else None,
+            },
         )
     )
     await repo.flush()

@@ -12,4 +12,3 @@ router.include_router(core_router)
 router.include_router(records_router)
 router.include_router(views_router)
 router.include_router(query_router)
-

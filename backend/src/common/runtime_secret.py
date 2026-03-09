@@ -18,11 +18,7 @@ _TAG_SIZE = 32
 
 
 def _derive_key() -> bytes:
-    raw = (
-        (settings.JWT_SUPERADMIN_SECRET_KEY or "").strip()
-        or (settings.SECRET_KEY or "").strip()
-        or "dev-secret"
-    )
+    raw = (settings.JWT_SUPERADMIN_SECRET_KEY or "").strip() or (settings.SECRET_KEY or "").strip() or "dev-secret"
     return hashlib.sha256(raw.encode("utf-8")).digest()
 
 

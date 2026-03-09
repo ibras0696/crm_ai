@@ -1,5 +1,5 @@
-import os
 import asyncio
+import os
 import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
@@ -14,9 +14,9 @@ from sqlalchemy import create_engine as create_sync_engine
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+import src.modules.superadmin.models  # noqa: F401
 from src.config import settings
 from src.infrastructure.database import get_async_session
-import src.modules.superadmin.models  # noqa: F401
 
 # Tests should not be rate-limited.
 # Important: set flags before importing `src.main`, because middleware is wired at import time.

@@ -79,6 +79,21 @@ const item: Variants = {
 
 // --- Ambient Cursors (Native Cursor is Visible) ---
 
+function DataStreamParticle({ mouseX, mouseY, index }: { mouseX: any; mouseY: any; index: number }) {
+  return (
+    <motion.div
+      className="fixed top-0 left-0 w-[1px] h-4 bg-primary/50 z-[9990] pointer-events-none"
+      style={{
+        x: useSpring(mouseX, { damping: 20 - index * 5, stiffness: 150 - index * 30 }),
+        y: useSpring(mouseY, { damping: 20 - index * 5, stiffness: 150 - index * 30 }),
+        translateX: `${(index - 1) * 8}px`,
+        translateY: '10px',
+        opacity: 1 - index * 0.3,
+      }}
+    />
+  )
+}
+
 const Cursors = {
   // 1. Subtle Aura (Soft glow following the cursor)
   SubtleAura: ({ mouseX, mouseY }: any) => (
@@ -105,7 +120,7 @@ const Cursors = {
   DataStream: ({ mouseX, mouseY }: any) => (
     <>
       {[0, 1, 2].map((i) => (
-        <motion.div key={i} className="fixed top-0 left-0 w-[1px] h-4 bg-primary/50 z-[9990] pointer-events-none" style={{ x: useSpring(mouseX, { damping: 20 - i * 5, stiffness: 150 - i * 30 }), y: useSpring(mouseY, { damping: 20 - i * 5, stiffness: 150 - i * 30 }), translateX: `${(i - 1) * 8}px`, translateY: '10px', opacity: 1 - i * 0.3 }} />
+        <DataStreamParticle key={i} mouseX={mouseX} mouseY={mouseY} index={i} />
       ))}
     </>
   ),

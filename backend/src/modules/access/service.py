@@ -156,8 +156,6 @@ async def check_access(
 
     if enforce_if_rules_exist:
         has_any = await repo.org_has_any_rules_for_type(org_id=org_id, resource_type=normalized_resource_type)
-        if not has_any:
-            return True
-        return False
+        return not has_any
 
     return False

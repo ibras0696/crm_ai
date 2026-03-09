@@ -6,4 +6,3 @@
 from src.modules.ai.internal.repository import AIRepository  # noqa: F401
 
 __all__ = ["AIRepository"]
-

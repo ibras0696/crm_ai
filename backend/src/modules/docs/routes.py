@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import io
 import logging
 import uuid  # noqa: TC003
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from starlette.background import BackgroundTask
 
 from src.common.enums import UserRole
 from src.common.schemas import ApiResponse
@@ -368,8 +366,6 @@ async def get_file_text(
     return ApiResponse(data=item)
 
 
-
-
 @router.get("/files/{file_id}/versions", response_model=ApiResponse[list[FileVersionOut]])
 async def list_file_versions(
     file_id: uuid.UUID,
@@ -387,8 +383,6 @@ async def list_file_versions(
             return _error_response(error)
         payload = [FileVersionOut.model_validate(item) for item in rows]
     return ApiResponse(data=payload)
-
-
 
 
 @router.post("/files/{file_id}/pdf/sign", response_model=ApiResponse[FileOut])
@@ -468,8 +462,8 @@ async def internal_download(version_id: uuid.UUID, token: str):
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
         if payload.get("action") != "internal_download" or payload.get("sub") != str(version_id):
             raise HTTPException(status_code=403, detail="Invalid token scope")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=403, detail="Invalid token")
+    except jwt.InvalidTokenError as err:
+        raise HTTPException(status_code=403, detail="Invalid token") from err
 
     async with UnitOfWork() as uow:
         service = DocsService(uow.session)
@@ -477,10 +471,11 @@ async def internal_download(version_id: uuid.UUID, token: str):
             version = await service.repo.get_file_version_by_id(version_id=version_id)
             if not version or not version.s3_key:
                 raise HTTPException(status_code=404, detail="Version not found")
-        except DocsModuleError:
-            raise HTTPException(status_code=404, detail="Version not found")
+        except DocsModuleError as err:
+            raise HTTPException(status_code=404, detail="Version not found") from err
 
     from src.modules.files.storage import get_s3_client
+
     s3 = get_s3_client()
     try:
         resp = s3.get_object(Bucket=version.s3_bucket, Key=version.s3_key)
@@ -489,9 +484,9 @@ async def internal_download(version_id: uuid.UUID, token: str):
             body,
             media_type=resp.get("ContentType", "application/octet-stream"),
         )
-    except Exception as e:
-        logger.error(f"S3 download failed internally: {e}")
-        raise HTTPException(status_code=500, detail="Storage error")
+    except Exception as err:
+        logger.error(f"S3 download failed internally: {err}")
+        raise HTTPException(status_code=500, detail="Storage error") from err
 
 
 @router.post("/integrations/onlyoffice/callback")
@@ -711,7 +706,6 @@ async def get_export_pdf_url(
             return _error_response(error)
         item = DownloadOut.model_validate(payload)
     return ApiResponse(data=item)
-
 
 
 @router.get("/usage", response_model=ApiResponse[UsageOut])

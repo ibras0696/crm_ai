@@ -87,10 +87,14 @@ class SuperadminBillingService:
         async with UnitOfWork() as uow:
             resolved = await resolve_yookassa_runtime_config(uow.session)
             audits = (
-                await uow.session.execute(
-                    select(BillingRuntimeAudit).order_by(BillingRuntimeAudit.created_at.desc()).limit(20)
+                (
+                    await uow.session.execute(
+                        select(BillingRuntimeAudit).order_by(BillingRuntimeAudit.created_at.desc()).limit(20)
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
 
         return {
             "shop_id": resolved.shop_id,
@@ -115,13 +119,19 @@ class SuperadminBillingService:
         now_utc = datetime.now(UTC)
         async with UnitOfWork() as uow:
             plans = (
-                await uow.session.execute(select(Plan).order_by(Plan.price_monthly.asc(), Plan.name.asc()))
-            ).scalars().all()
+                (await uow.session.execute(select(Plan).order_by(Plan.price_monthly.asc(), Plan.name.asc())))
+                .scalars()
+                .all()
+            )
             packages = (
-                await uow.session.execute(
-                    select(TokenPackage).order_by(TokenPackage.sort_order.asc(), TokenPackage.created_at.asc())
+                (
+                    await uow.session.execute(
+                        select(TokenPackage).order_by(TokenPackage.sort_order.asc(), TokenPackage.created_at.asc())
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             purchases = (
                 await uow.session.execute(
                     select(TokenPurchase, Organization.name)
@@ -174,8 +184,8 @@ class SuperadminBillingService:
     async def upsert_token_package(self, *, code: str, payload: dict) -> dict:
         async with UnitOfWork() as uow:
             package = (
-                await uow.session.execute(select(TokenPackage).where(TokenPackage.code == code))
-            ).scalars().first()
+                (await uow.session.execute(select(TokenPackage).where(TokenPackage.code == code))).scalars().first()
+            )
             created = False
             if package is None:
                 if payload.get("tokens") is None:
@@ -220,8 +230,8 @@ class SuperadminBillingService:
     async def delete_token_package(self, *, code: str) -> dict:
         async with UnitOfWork() as uow:
             package = (
-                await uow.session.execute(select(TokenPackage).where(TokenPackage.code == code))
-            ).scalars().first()
+                (await uow.session.execute(select(TokenPackage).where(TokenPackage.code == code))).scalars().first()
+            )
             if package is None:
                 raise LookupError("TOKEN_PACKAGE_NOT_FOUND")
             package.is_active = False

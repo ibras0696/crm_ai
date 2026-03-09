@@ -30,10 +30,10 @@ async def get_current_user(
 
     try:
         payload = decode_user_access_token(token)
-    except jwt.ExpiredSignatureError:
-        raise UnauthorizedError("Token expired")
-    except jwt.InvalidTokenError:
-        raise UnauthorizedError("Invalid token")
+    except jwt.ExpiredSignatureError as err:
+        raise UnauthorizedError("Token expired") from err
+    except jwt.InvalidTokenError as err:
+        raise UnauthorizedError("Invalid token") from err
 
     user_id = uuid.UUID(payload["sub"])
     org_id = uuid.UUID(payload["org_id"]) if payload.get("org_id") else None

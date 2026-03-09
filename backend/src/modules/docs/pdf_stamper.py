@@ -94,4 +94,3 @@ def stamp_pdf_with_signature(
         "author": str(stamp.author or "").strip() or None,
     }
     return stamped, meta
-

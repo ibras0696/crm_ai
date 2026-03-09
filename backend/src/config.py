@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     DOCS_CLAMAV_TIMEOUT_S: float = 10.0
     DOCS_SCAN_CHUNK_SIZE_KB: int = 256
     DOCS_TEXT_SAVE_RPM: int = 20
-    
+
     # --- OnlyOffice Document Server ---
     DOCS_ONLYOFFICE_ENABLED: bool = False
     DOCS_ONLYOFFICE_DOCUMENT_SERVER_URL: str = ""
@@ -52,7 +52,7 @@ class Settings(BaseSettings):
     DOCS_ONLYOFFICE_CALLBACK_URL: str = "http://api:8000/api/v1/docs/integrations/onlyoffice/callback"
     DOCS_ONLYOFFICE_EDITOR_LANG: str = "ru"
     DOCS_ONLYOFFICE_REQUEST_TIMEOUT_S: float = 20.0
-    
+
     # --- AI Document Generation ---
     DOCS_AI_GENERATION_ENABLED: bool = True
     DOCS_AI_MAX_PROMPT_CHARS: int = 12000
@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     DOCS_AI_MAX_CHARS_DOCX: int = 80000
     DOCS_AI_MAX_CHARS_PDF: int = 70000
     DOCS_AI_RESERVED_BYTES_BASE: int = 262144
-    
+
     # --------------------------------------------------------------------------
     # Retention & Cleanup
     # --------------------------------------------------------------------------

@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config import settings
 from src.modules.billing.models import Plan, TokenPackage
 
-
 DEFAULT_PLANS: list[dict] = [
     {
         "name": "free",
@@ -104,9 +103,7 @@ DEFAULT_TOKEN_PACKAGES: list[dict] = [
 
 async def upsert_default_plans(session: AsyncSession) -> None:
     names = [str(data["name"]) for data in DEFAULT_PLANS]
-    existing_rows = (
-        await session.execute(select(Plan).where(Plan.name.in_(names)))
-    ).scalars().all()
+    existing_rows = (await session.execute(select(Plan).where(Plan.name.in_(names)))).scalars().all()
     existing_by_name = {plan.name: plan for plan in existing_rows}
 
     for data in DEFAULT_PLANS:

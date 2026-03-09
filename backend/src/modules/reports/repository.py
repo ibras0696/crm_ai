@@ -38,11 +38,7 @@ class ReportsRepository:
     async def get_tables_map_by_ids(self, *, org_id: uuid.UUID, table_ids: list[uuid.UUID]) -> dict[uuid.UUID, Table]:
         if not table_ids:
             return {}
-        stmt = (
-            select(Table)
-            .where(Table.org_id == org_id, Table.id.in_(table_ids))
-            .options(selectinload(Table.columns))
-        )
+        stmt = select(Table).where(Table.org_id == org_id, Table.id.in_(table_ids)).options(selectinload(Table.columns))
         rows = (await self.session.execute(stmt)).scalars().all()
         return {table.id: table for table in rows}
 
@@ -59,9 +55,7 @@ class ReportsRepository:
 
     async def list_records_by_table(self, table_id: uuid.UUID) -> list[Record]:
         stmt = (
-            select(Record)
-            .where(Record.table_id == table_id)
-            .order_by(Record.position.asc(), Record.created_at.desc())
+            select(Record).where(Record.table_id == table_id).order_by(Record.position.asc(), Record.created_at.desc())
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
@@ -92,9 +86,7 @@ class ReportsRepository:
 
     async def list_dashboards(self, org_id: uuid.UUID) -> list[ReportDashboard]:
         stmt = (
-            select(ReportDashboard)
-            .where(ReportDashboard.org_id == org_id)
-            .order_by(ReportDashboard.created_at.desc())
+            select(ReportDashboard).where(ReportDashboard.org_id == org_id).order_by(ReportDashboard.created_at.desc())
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())

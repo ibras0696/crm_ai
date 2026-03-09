@@ -5,7 +5,6 @@ import time
 from prometheus_client import Gauge, Info
 from prometheus_fastapi_instrumentator import Instrumentator
 
-
 APP_INFO = Info("app_info", "Application info")
 APP_UPTIME_SECONDS = Gauge("app_uptime_seconds", "Uptime in seconds")
 _START_TS = time.time()

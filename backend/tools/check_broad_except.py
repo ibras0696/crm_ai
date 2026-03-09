@@ -6,7 +6,6 @@ import pathlib
 import re
 import sys
 
-
 BROAD_EXCEPT_RE = re.compile(r"^\s*except\s+Exception(?:\s+as\s+\w+)?\s*:")
 
 

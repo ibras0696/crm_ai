@@ -3,6 +3,7 @@ import uuid
 import pytest
 from httpx import AsyncClient
 
+
 def _h(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
 
@@ -41,7 +42,9 @@ async def _create_table_with_data(client: AsyncClient, token: str, *, name: str)
     assert t.status_code == 200
     table_id = t.json()["data"]["id"]
 
-    col = await client.post(f"/api/v1/tables/{table_id}/columns", json={"name": "Title", "field_type": "text"}, headers=_h(token))
+    col = await client.post(
+        f"/api/v1/tables/{table_id}/columns", json={"name": "Title", "field_type": "text"}, headers=_h(token)
+    )
     assert col.status_code == 200
     col_id = col.json()["data"]["id"]
 

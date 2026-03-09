@@ -1,6 +1,8 @@
+"""Action/pending-логика оркестратора AI-чата."""
+
 from __future__ import annotations
 
-"""Action/pending-логика оркестратора AI-чата."""
+from typing import Any
 
 from src.common.enums import UserRole
 from src.infrastructure.uow import UnitOfWork
@@ -53,7 +55,12 @@ ACTION_ALLOWED_ROLES = {
     "create_table": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value},
     "create_columns": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value},
     "create_records": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value},
-    "create_schedule_event": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.EMPLOYEE.value},
+    "create_schedule_event": {
+        UserRole.OWNER.value,
+        UserRole.ADMIN.value,
+        UserRole.MANAGER.value,
+        UserRole.EMPLOYEE.value,
+    },
     "create_kb_page": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value},
     "edit_kb_page": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value},
 }
@@ -114,8 +121,7 @@ def _get_last_pending_action(db_messages: list[AIChatMessage]) -> dict | None:
         if msg.role != "assistant":
             user_meta = msg.meta or {}
             if isinstance(user_meta, dict) and (
-                user_meta.get("pending_action_confirmed") is True
-                or user_meta.get("pending_action_cancelled") is True
+                user_meta.get("pending_action_confirmed") is True or user_meta.get("pending_action_cancelled") is True
             ):
                 return None
             continue
@@ -125,9 +131,10 @@ def _get_last_pending_action(db_messages: list[AIChatMessage]) -> dict | None:
         # Если после pending уже был финальный assistant-ответ по нему,
         # не позволяем повторно подтверждать/отменять старую операцию.
         action_result = meta.get("action_result")
-        if isinstance(action_result, dict):
-            if action_result.get("cancelled") is True or action_result.get("ok") is True:
-                return None
+        if isinstance(action_result, dict) and (
+            action_result.get("cancelled") is True or action_result.get("ok") is True
+        ):
+            return None
         pending = meta.get("pending_action")
         if isinstance(pending, dict) and str(pending.get("action") or "").strip():
             return pending
@@ -251,11 +258,14 @@ def _normalize_action_payload_for_execution(
         action_payload.get("title")
         or action_payload.get("content")
         or action_payload.get("pages")
-        or (isinstance(action_payload.get("properties"), dict) and (
-            action_payload["properties"].get("title")
-            or action_payload["properties"].get("content")
-            or action_payload["properties"].get("pages")
-        ))
+        or (
+            isinstance(action_payload.get("properties"), dict)
+            and (
+                action_payload["properties"].get("title")
+                or action_payload["properties"].get("content")
+                or action_payload["properties"].get("pages")
+            )
+        )
     )
     kb_hint = ("база знан" in text) or ("knowledge" in text) or ("wiki" in text) or ("kb" in text)
     if has_kb_shape and (ui == "create_kb_page" or kb_hint):
@@ -294,7 +304,14 @@ def _build_kb_fallback_action(
     title = "Новая страница"
     user_text = (user_message or "").strip()
     lowered = user_text.lower()
-    for marker in ("создай курс", "создать курс", "добавь курс", "create course", "создай страницу", "создать страницу"):
+    for marker in (
+        "создай курс",
+        "создать курс",
+        "добавь курс",
+        "create course",
+        "создай страницу",
+        "создать страницу",
+    ):
         idx = lowered.find(marker)
         if idx >= 0:
             rest = user_text[idx + len(marker) :].strip(" :,-")

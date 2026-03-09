@@ -50,7 +50,7 @@ export function UsersListView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedQ, isActive, orgId, limit])
 
-  const items = page?.items || []
+  const items = useMemo(() => page?.items ?? [], [page?.items])
   const total = page?.total || 0
   const canPrev = offset > 0
   const canNext = offset + limit < total
@@ -63,7 +63,9 @@ export function UsersListView() {
       await navigator.clipboard.writeText(value)
       setCopied(kind)
       window.setTimeout(() => setCopied(null), 1200)
-    } catch {}
+    } catch {
+      // clipboard failures should stay silent in this view
+    }
   }
 
   return (

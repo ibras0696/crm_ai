@@ -2,20 +2,26 @@
 
 from __future__ import annotations
 
-
 ACTION_INSTRUCTIONS_PROMPT = (
     "IMPORTANT:\n"
     "- Only append ONE final ```crm_action``` block at the end of your answer.\n"
     "- If user did not explicitly ask to create/change entities, do NOT append crm_action.\n"
     "- If the user asks for a dashboard/report, do NOT modify tables. Return create_dashboard only.\n"
     "- Do NOT create columns/records unless the user explicitly asked to change/fill a table.\n"
-    "- For dashboards: explain in simple business language what is on horizontal axis, vertical axis and what filters are applied.\n"
-    "- For dashboards: use only existing table/column names from context. Never invent missing columns.\n"
-    "- If columns are not enough for requested dashboard, ask a short clarifying question instead of generating fake config.\n"
-    "- Prefer human-friendly keys in action payload (for schedule: дата/время/повтор/цвет/напоминания).\n"
-    "- Never dump huge JSON in the normal text. Put the action JSON ONLY inside the final ```crm_action``` block.\n"
-    "- If user explicitly asks for many rows (100/500/1000), return records in action payload up to real system limits.\n"
-    "- For table rows ALWAYS use compact records format ONLY: records={columns:[...],rows:[[...],[...]]}. NEVER use list of objects for records.\n"
+    "- For dashboards: explain in simple business language what is on horizontal axis, "
+    "vertical axis and what filters are applied.\n"
+    "- For dashboards: use only existing table/column names from context. "
+    "Never invent missing columns.\n"
+    "- If columns are not enough for requested dashboard, ask a short clarifying question "
+    "instead of generating fake config.\n"
+    "- Prefer human-friendly keys in action payload "
+    "(for schedule: дата/время/повтор/цвет/напоминания).\n"
+    "- Never dump huge JSON in the normal text. Put the action JSON ONLY inside the final "
+    "```crm_action``` block.\n"
+    "- If user explicitly asks for many rows (100/500/1000), return records in action payload "
+    "up to real system limits.\n"
+    "- For table rows ALWAYS use compact records format ONLY: "
+    "records={columns:[...],rows:[[...],[...]]}. NEVER use list of objects for records.\n"
     "If user asks to create dashboard/report, append final block:\n"
     "```crm_action\n"
     '{"action":"create_dashboard","name":"...","description":"...","widgets":[...]}\n'
@@ -34,15 +40,19 @@ ACTION_INSTRUCTIONS_PROMPT = (
     "```"
     "\nIf user asks to create a schedule event, append final block:\n"
     "```crm_action\n"
-    '{"action":"create_schedule_event","events":[{"title":"...","start_at":"2026-01-01T10:00:00Z","end_at":"2026-01-01T11:00:00Z","recurrence":"weekly","color":"#3b82f6","participants":["user@example.com","Иван Иванов"],"reminder_offsets_minutes":[60,1440]}]}\n'
+    '{"action":"create_schedule_event","events":[{"title":"...","start_at":"2026-01-01T10:00:00Z",'
+    '"end_at":"2026-01-01T11:00:00Z","recurrence":"weekly","color":"#3b82f6",'
+    '"participants":["user@example.com","Иван Иванов"],"reminder_offsets_minutes":[60,1440]}]}\n'
     "```"
     "\nIf user asks to create a knowledge base page, append final block:\n"
     "```crm_action\n"
-    '{"action":"create_kb_page","title":"Курс Python","content":"Описание курса","pages":[{"title":"Урок 1","content":"..."},{"title":"Урок 2","content":"..."}]}\n'
+    '{"action":"create_kb_page","title":"Курс Python","content":"Описание курса",'
+    '"pages":[{"title":"Урок 1","content":"..."},{"title":"Урок 2","content":"..."}]}\n'
     "```"
     "\nIf user asks to create a document, append final block:\n"
     "```crm_action\n"
-    '{"action":"create_document","type":"docx","title":"Коммерческое предложение","template":"business","prompt":"Подготовь коммерческое предложение для клиента..."}\n'
+    '{"action":"create_document","type":"docx","title":"Коммерческое предложение",'
+    '"template":"business","prompt":"Подготовь коммерческое предложение для клиента..."}\n'
     "```"
 )
 
@@ -68,10 +78,7 @@ ACTION_NOT_EXECUTED_MESSAGE = (
     "«создай событие в расписании на ...»."
 )
 
-CONFIRM_TABLE_CHANGE_MESSAGE = (
-    "Подтвердите изменение таблицы: напишите «подтверждаю». "
-    "Для отмены напишите «отмена»."
-)
+CONFIRM_TABLE_CHANGE_MESSAGE = "Подтвердите изменение таблицы: напишите «подтверждаю». " "Для отмены напишите «отмена»."
 
 
 def build_repair_user_prompt(broken_reply: str) -> str:
@@ -101,7 +108,5 @@ def build_synthesis_user_prompt(user_message: str, assistant_reply: str) -> str:
         Текст запроса для synthesis-helper вызова.
     """
     return (
-        f"Сообщение пользователя:\n{user_message}\n\n"
-        f"Ответ ассистента:\n{assistant_reply}\n\n"
-        "Верни только JSON."
+        f"Сообщение пользователя:\n{user_message}\n\n" f"Ответ ассистента:\n{assistant_reply}\n\n" "Верни только JSON."
     )

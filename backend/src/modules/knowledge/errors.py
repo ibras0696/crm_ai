@@ -10,7 +10,7 @@ class KnowledgeModuleError(AppError):
         super().__init__(code=code, message=message, status_code=status_code)
 
     @classmethod
-    def limit_reached(cls) -> "KnowledgeModuleError":
+    def limit_reached(cls) -> KnowledgeModuleError:
         return cls(
             code="KNOWLEDGE_LIMIT_REACHED",
             message="Достигнут лимит тарифа по базе знаний.",

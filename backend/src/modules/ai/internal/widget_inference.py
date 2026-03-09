@@ -45,12 +45,20 @@ def should_use_inferred_widgets(widgets_payload: list[dict[str, Any]]) -> bool:
         wtype = str(raw.get("widget_type") or "metric").strip().lower()
         has_group = bool(raw.get("group_by_column_id") or raw.get("group_by_column_name"))
         has_value = bool(raw.get("value_column_id") or raw.get("value_column_name"))
-        if agg == "count" and wtype == "metric" and not has_group and not has_value and is_generic_widget_title(raw.get("title")):
+        if (
+            agg == "count"
+            and wtype == "metric"
+            and not has_group
+            and not has_value
+            and is_generic_widget_title(raw.get("title"))
+        ):
             low_signal += 1
     return checked > 0 and low_signal == checked
 
 
-def pick_column_by_keywords(columns: list[Column], keywords: tuple[str, ...], allow_types: tuple[str, ...] | None = None) -> Column | None:
+def pick_column_by_keywords(
+    columns: list[Column], keywords: tuple[str, ...], allow_types: tuple[str, ...] | None = None
+) -> Column | None:
     """Подобрать колонку по ключевым словам и допустимым типам.
 
     Args:
@@ -97,12 +105,32 @@ def infer_widgets_for_table(table_obj: Table, normalized_message: str) -> list[d
 
     widgets: list[dict[str, Any]] = [{"title": total_title, "widget_type": "metric", "aggregation": "count"}]
     if value_col:
-        widgets.append({"title": avg_title, "widget_type": "metric", "aggregation": "avg", "value_column_id": str(value_col.id)})
-        widgets.append({"title": sum_title, "widget_type": "metric", "aggregation": "sum", "value_column_id": str(value_col.id)})
+        widgets.append(
+            {"title": avg_title, "widget_type": "metric", "aggregation": "avg", "value_column_id": str(value_col.id)}
+        )
+        widgets.append(
+            {"title": sum_title, "widget_type": "metric", "aggregation": "sum", "value_column_id": str(value_col.id)}
+        )
     if dept_col:
-        widgets.append({"title": "По отделам", "widget_type": "bar", "aggregation": "count", "group_by_column_id": str(dept_col.id), "limit": 20})
+        widgets.append(
+            {
+                "title": "По отделам",
+                "widget_type": "bar",
+                "aggregation": "count",
+                "group_by_column_id": str(dept_col.id),
+                "limit": 20,
+            }
+        )
     if role_col:
-        widgets.append({"title": "По должностям", "widget_type": "bar", "aggregation": "count", "group_by_column_id": str(role_col.id), "limit": 20})
+        widgets.append(
+            {
+                "title": "По должностям",
+                "widget_type": "bar",
+                "aggregation": "count",
+                "group_by_column_id": str(role_col.id),
+                "limit": 20,
+            }
+        )
     if date_col and value_col:
         widgets.append(
             {
@@ -209,4 +237,3 @@ def coerce_widget_type_by_semantics(*, current_type: str, semantic_text: str, fo
     if bar_like and widget_type == "metric":
         return "bar"
     return widget_type
-

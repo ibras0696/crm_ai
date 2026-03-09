@@ -94,4 +94,3 @@ async def delete_rule(
     except Exception:
         await session.rollback()
         raise
-

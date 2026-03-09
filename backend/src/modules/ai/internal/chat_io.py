@@ -9,8 +9,8 @@ from typing import Any
 import httpx
 
 from src.config import settings
-from src.modules.ai.models import AIChatMessage
 from src.modules.ai.internal.prompts import ACTION_INSTRUCTIONS_PROMPT
+from src.modules.ai.models import AIChatMessage
 
 
 def build_messages(
@@ -39,6 +39,7 @@ def build_messages(
     Returns:
         Список сообщений в формате API chat-completions.
     """
+
     def _clip(text: str, limit: int = 1800) -> str:
         """Ограничить длину текста для стабильности запроса.
 
@@ -67,12 +68,12 @@ def build_messages(
             }
         )
     if db_messages:
-        history_tail = db_messages[-(4 if compact_history else 12):]
+        history_tail = db_messages[-(4 if compact_history else 12) :]
         for msg in history_tail:
             clip_limit = 700 if compact_history else 1800
             messages.append({"role": msg.role, "content": _clip(msg.content, clip_limit)})
     else:
-        raw_tail = history[-(4 if compact_history else 8):]
+        raw_tail = history[-(4 if compact_history else 8) :]
         for item in raw_tail:
             clip_limit = 700 if compact_history else 1800
             messages.append({"role": item.get("role", "user"), "content": _clip(item.get("content", ""), clip_limit)})

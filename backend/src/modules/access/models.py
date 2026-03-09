@@ -49,4 +49,3 @@ class AccessRule(BaseDBModel):
     can_read: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
     can_write: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
     can_delete: Mapped[bool] = mapped_column(Boolean, default=False, server_default=text("false"))
-

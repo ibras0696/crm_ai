@@ -16,11 +16,11 @@ def _correlation_id(request: Request) -> str | None:
 
 def _json_safe(value):
     """Привести произвольное значение к JSON-сериализуемому виду."""
-    if value is None or isinstance(value, (str, int, float, bool)):
+    if value is None or isinstance(value, str | int | float | bool):
         return value
     if isinstance(value, dict):
         return {str(k): _json_safe(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple, set)):
+    if isinstance(value, list | tuple | set):
         return [_json_safe(v) for v in value]
     return str(value)
 

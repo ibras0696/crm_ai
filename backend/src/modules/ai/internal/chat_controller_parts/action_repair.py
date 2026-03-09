@@ -1,17 +1,17 @@
-from __future__ import annotations
-
 """Helper-вызовы модели для восстановления/синтеза crm_action."""
+
+from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
 
+from src.modules.ai.internal.chat_controller_parts.provider import _extract_provider_reply, _extract_usage_dict
 from src.modules.ai.internal.prompts import (
     ACTION_SYNTH_SYSTEM_PROMPT,
     JSON_REPAIR_SYSTEM_PROMPT,
     build_repair_user_prompt,
     build_synthesis_user_prompt,
 )
-from src.modules.ai.internal.chat_controller_parts.provider import _extract_provider_reply, _extract_usage_dict
 from src.modules.ai.service import extract_action_payload
 
 OpenAICall = Callable[..., Awaitable[dict]]

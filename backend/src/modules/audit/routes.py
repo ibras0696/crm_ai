@@ -25,4 +25,3 @@ async def list_audit_logs(
         service = AuditService(repo)
         logs = await service.list_logs(org_id=current_user.org_id, limit=limit, offset=offset)
     return ApiResponse(data=[AuditLogItem.model_validate(log) for log in logs])
-

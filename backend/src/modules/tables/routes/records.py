@@ -19,7 +19,6 @@ from src.modules.tables.schemas import (
 )
 from src.modules.tables.service import TableRecordsService, TableServiceError
 
-
 router = APIRouter(prefix="/tables/{table_id}/records", tags=["records"])
 
 
@@ -42,7 +41,9 @@ def _error_json_response(error: TableServiceError) -> JSONResponse:
 async def create_record(
     table_id: uuid.UUID,
     body: CreateRecordRequest,
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
+    ),
     _: None = Depends(require_access(resource_type="table", permission="can_write", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:
@@ -115,7 +116,9 @@ async def update_record(
     table_id: uuid.UUID,
     record_id: uuid.UUID,
     body: UpdateRecordRequest,
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
+    ),
     _: None = Depends(require_access(resource_type="table", permission="can_write", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:
@@ -163,7 +166,9 @@ async def move_record(
     table_id: uuid.UUID,
     record_id: uuid.UUID,
     body: MoveRecordRequest,
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
+    ),
     _: None = Depends(require_access(resource_type="table", permission="can_write", resource_id_param="table_id")),
 ):
     async with UnitOfWork() as uow:

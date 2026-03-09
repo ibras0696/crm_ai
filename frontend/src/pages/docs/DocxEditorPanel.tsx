@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import type { DocsFile } from '@/lib/api'
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type OnlyOfficeConfig = any
 
 interface DocxEditorPanelProps {
@@ -43,7 +42,6 @@ export function DocxEditorPanel({
       script.onerror = handleError
       document.body.appendChild(script)
     } else {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if ((window as any).DocsAPI) {
         setScriptLoaded(true)
       } else {
@@ -69,37 +67,38 @@ export function DocxEditorPanel({
 
     let docEditor: any = null
     let retries = 0
-    let initInterval: ReturnType<typeof setInterval>
+    const container = containerRef.current
+    const initInterval = window.setInterval(() => {
+      initDocs()
+    }, 100)
 
     const initDocs = () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const DocsAPI = (window as any).DocsAPI
       if (!DocsAPI) {
         if (retries > 50) { // 5 секунд ожидания
           onError('API редактора отсутствует. Превышено время ожидания.')
-          clearInterval(initInterval)
+          window.clearInterval(initInterval)
         }
         retries++
         return
       }
 
-      clearInterval(initInterval)
+      window.clearInterval(initInterval)
       try {
         docEditor = new DocsAPI.DocEditor(editorId, config)
-      } catch (err) {
+      } catch {
         onError('Ошибка инициализации редактора')
       }
     }
 
-    initInterval = setInterval(initDocs, 100)
     initDocs() // первый синхронный вызов
 
     return () => {
-      clearInterval(initInterval)
+      window.clearInterval(initInterval)
       if (docEditor && docEditor.destroyEditor) {
         docEditor.destroyEditor()
       }
-      if (containerRef.current) containerRef.current.innerHTML = ''
+      if (container) container.innerHTML = ''
     }
   }, [scriptLoaded, scriptFailed, file.id, config, onError])
 

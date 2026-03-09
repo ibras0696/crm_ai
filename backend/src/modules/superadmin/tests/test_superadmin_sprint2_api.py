@@ -280,17 +280,13 @@ async def test_superadmin_can_manage_billing_config_plans_and_token_packages(cli
     sa = await _login_sa(client)
     owner_token, owner_org_id = await _register_owner(client, org_name="Billing Org")
 
-    from src.modules.billing.seed import upsert_default_plans, upsert_default_token_packages
     from src.modules.billing.models import TokenPackage
+    from src.modules.billing.seed import upsert_default_plans, upsert_default_token_packages
 
     async with UnitOfWork() as uow:
         await upsert_default_plans(uow.session)
         await upsert_default_token_packages(uow.session)
-        pkg = (
-            await uow.session.execute(
-                select(TokenPackage).where(TokenPackage.code == "pack_50k")
-            )
-        ).scalars().first()
+        pkg = (await uow.session.execute(select(TokenPackage).where(TokenPackage.code == "pack_50k"))).scalars().first()
         assert pkg is not None
         pkg.price_rub_cents = 0
         await uow.commit()

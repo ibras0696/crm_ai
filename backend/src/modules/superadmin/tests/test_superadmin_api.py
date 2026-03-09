@@ -1,5 +1,3 @@
-import uuid
-
 import pytest
 
 
@@ -39,7 +37,6 @@ async def test_superadmin_forbids_non_superadmin_token(client, random_email):
 
 @pytest.mark.asyncio
 async def test_superadmin_login_and_overview(client, random_email):
-
     # Create some data.
     reg = await client.post(
         "/api/v1/auth/register",
@@ -103,7 +100,9 @@ async def test_superadmin_profile_can_update_email_and_password(client):
     assert body["data"]["runtime_email_overridden"] is True
     assert body["data"]["runtime_password_overridden"] is True
 
-    old_login = await client.post("/api/v1/superadmin/login", json={"email": "admin@test.local", "password": "12345678"})
+    old_login = await client.post(
+        "/api/v1/superadmin/login", json={"email": "admin@test.local", "password": "12345678"}
+    )
     assert old_login.status_code == 200
     assert old_login.json()["ok"] is False
 

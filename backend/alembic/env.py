@@ -1,5 +1,6 @@
 import os
 import sys
+from contextlib import suppress
 from logging.config import fileConfig
 
 from alembic import context
@@ -7,23 +8,19 @@ from sqlalchemy import engine_from_config, pool
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from src.infrastructure.database import Base
-
 # Import all models so Alembic can detect them
 import importlib
 import pkgutil
+
 import src.modules
+from src.infrastructure.database import Base
 
 for _, _module_name, _ispkg in pkgutil.iter_modules(src.modules.__path__):
     if _ispkg:
-        try:
+        with suppress(ModuleNotFoundError):
             importlib.import_module(f"src.modules.{_module_name}.models")
-        except ModuleNotFoundError:
-            pass
-        try:
+        with suppress(ModuleNotFoundError):
             importlib.import_module(f"src.modules.{_module_name}.records")
-        except ModuleNotFoundError:
-            pass
 
 
 config = context.config

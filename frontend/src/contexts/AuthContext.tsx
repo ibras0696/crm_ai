@@ -125,7 +125,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = async () => {
     try {
       await authApi.logout()
-    } catch {}
+    } catch {
+      // logout should still clear local auth state
+    }
     setUser(null)
     setOrg(null)
     setMembers([])

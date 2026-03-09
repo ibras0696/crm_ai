@@ -53,7 +53,9 @@ def _parse_chat_uuid(chat_id: str) -> uuid.UUID | None:
 @router.post("/chat", response_model=ApiResponse[ChatResponse])
 async def ai_chat(
     body: ChatRequest,
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
+    ),
 ):
     """Отправить сообщение в AI чат.
 
@@ -69,7 +71,9 @@ async def ai_chat(
 
 @router.get("/status", response_model=ApiResponse[dict])
 async def ai_status(
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
+    ),
 ):
     """Статус AI (включен ли, настроен ли, статистика и лимиты).
 
@@ -101,7 +105,9 @@ async def ai_usage_detail(
 async def ai_chats(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
+    ),
 ):
     """Список чат-сессий текущего пользователя.
 
@@ -125,7 +131,9 @@ async def ai_chats(
 @router.post("/chats", response_model=ApiResponse[ChatSessionOut])
 async def ai_create_chat(
     body: CreateChatRequest,
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
+    ),
 ):
     """Создать новую чат-сессию.
 
@@ -144,7 +152,9 @@ async def ai_create_chat(
 @router.delete("/chats/{chat_id}", response_model=ApiResponse[None])
 async def ai_delete_chat(
     chat_id: str,
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
+    ),
 ):
     """Удалить чат-сессию пользователя.
 
@@ -170,7 +180,9 @@ async def ai_chat_messages(
     chat_id: str,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
+    ),
 ):
     """Получить сообщения чат-сессии.
 
@@ -214,7 +226,9 @@ async def ai_chat_messages(
 @router.post("/context-estimate", response_model=ApiResponse[dict])
 async def ai_context_estimate(
     body: ContextEstimateRequest,
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
+    ),
 ):
     """Оценить контекст и стоимость следующего запроса (эвристика).
 
@@ -240,7 +254,9 @@ async def ai_context_estimate(
 
 @router.get("/context-sources", response_model=ApiResponse[dict])
 async def ai_context_sources(
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
+    ),
 ):
     """Получить доступные источники контекста для выбора в UI.
 

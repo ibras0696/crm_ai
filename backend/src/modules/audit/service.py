@@ -23,4 +23,3 @@ class AuditService:
         safe_limit = max(1, min(limit, 200))
         safe_offset = max(0, offset)
         return await self.repo.list_by_org(org_id=org_id, limit=safe_limit, offset=safe_offset)
-

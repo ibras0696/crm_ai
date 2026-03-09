@@ -70,8 +70,12 @@ class RefreshTokenRepository:
         await self.session.execute(stmt)
 
     async def revoke_all_for_user(self, user_id: uuid.UUID) -> None:
-        stmt = update(RefreshToken).where(
-            RefreshToken.user_id == user_id,
-            RefreshToken.is_revoked.is_(False),
-        ).values(is_revoked=True)
+        stmt = (
+            update(RefreshToken)
+            .where(
+                RefreshToken.user_id == user_id,
+                RefreshToken.is_revoked.is_(False),
+            )
+            .values(is_revoked=True)
+        )
         await self.session.execute(stmt)

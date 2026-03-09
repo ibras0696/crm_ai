@@ -6,8 +6,8 @@ import re
 import uuid
 from typing import Any
 
-from src.modules.ai.internal.repository import AIRepository
 from src.infrastructure.uow import UnitOfWork
+from src.modules.ai.internal.repository import AIRepository
 from src.modules.ai.internal.resolution import normalize_name, resolve_table_by_ref, safe_field_type
 from src.modules.tables.models import Column, FieldType, Table
 from src.modules.tables.records import Record
@@ -113,7 +113,9 @@ def _infer_rows_from_message(user_message: str | None, columns: list[Column]) ->
     segments = segments[:100]
 
     primary = next((c for c in columns if c.is_primary), None)
-    text_target = primary or next((c for c in columns if c.field_type in (FieldType.TEXT, FieldType.URL, FieldType.EMAIL, FieldType.PHONE)), None)
+    text_target = primary or next(
+        (c for c in columns if c.field_type in (FieldType.TEXT, FieldType.URL, FieldType.EMAIL, FieldType.PHONE)), None
+    )
     num_columns = [c for c in columns if c.field_type in (FieldType.NUMBER, FieldType.FORMULA)]
     date_columns = [c for c in columns if c.field_type in (FieldType.DATE, FieldType.DATETIME)]
     select_columns = [c for c in columns if c.field_type in (FieldType.SELECT, FieldType.MULTI_SELECT)]
@@ -222,7 +224,9 @@ async def _create_records_for_table(
         if primary_col and str(primary_col.id) not in record_data:
             record_data[str(primary_col.id)] = f"Row {idx + 1}"
         max_position += 1
-        rec = Record(table_id=table_obj.id, org_id=org_id, created_by=user_id, data=record_data, position=int(max_position))
+        rec = Record(
+            table_id=table_obj.id, org_id=org_id, created_by=user_id, data=record_data, position=int(max_position)
+        )
         uow.session.add(rec)
         created.append(rec)
         if len(preview) < 5:
@@ -252,7 +256,9 @@ async def handle_create_table_action(
     description = str(action_payload.get("description") or "").strip() or None
     icon = str(action_payload.get("icon") or "").strip() or None
     color = str(action_payload.get("color") or "").strip()[:20] or None
-    table_obj = Table(org_id=org_id, created_by=user_id, name=name, description=description, icon=icon, color=color, is_archived=False)
+    table_obj = Table(
+        org_id=org_id, created_by=user_id, name=name, description=description, icon=icon, color=color, is_archived=False
+    )
     uow.session.add(table_obj)
     await uow.session.flush()
 
@@ -292,7 +298,16 @@ async def handle_create_table_action(
             primary_exists = True
 
     if not created_columns:
-        created_columns.append(Column(table_id=table_obj.id, name="Название", field_type=FieldType.TEXT, position=0, is_required=True, is_primary=True))
+        created_columns.append(
+            Column(
+                table_id=table_obj.id,
+                name="Название",
+                field_type=FieldType.TEXT,
+                position=0,
+                is_required=True,
+                is_primary=True,
+            )
+        )
     elif not any(c.is_primary for c in created_columns):
         first = created_columns[0]
         first.is_primary = True
@@ -306,7 +321,9 @@ async def handle_create_table_action(
     rows_payload = _extract_rows_payload(action_payload)
     if not rows_payload:
         rows_payload = _infer_rows_from_message(user_message, list(table_obj.columns))
-    created_records, records_preview, ignored = await _create_records_for_table(uow, org_id, user_id, table_obj, rows_payload)
+    created_records, records_preview, ignored = await _create_records_for_table(
+        uow, org_id, user_id, table_obj, rows_payload
+    )
     return {
         "action": "create_table",
         "ok": True,
@@ -400,7 +417,9 @@ async def handle_create_columns_action(
     rows_payload = _extract_rows_payload(action_payload)
     if not rows_payload:
         rows_payload = _infer_rows_from_message(user_message, list(table_obj.columns))
-    created_records, records_preview, ignored = await _create_records_for_table(uow, org_id, user_id, table_obj, rows_payload)
+    created_records, records_preview, ignored = await _create_records_for_table(
+        uow, org_id, user_id, table_obj, rows_payload
+    )
     return {
         "action": "create_columns",
         "ok": True,
@@ -444,7 +463,9 @@ async def handle_create_records_action(
     if not rows_payload:
         return {"action": "create_records", "ok": False, "error": "records_required"}
 
-    created_records, records_preview, ignored = await _create_records_for_table(uow, org_id, user_id, table_obj, rows_payload)
+    created_records, records_preview, ignored = await _create_records_for_table(
+        uow, org_id, user_id, table_obj, rows_payload
+    )
     if not created_records and ignored > 0:
         return {
             "action": "create_records",

@@ -54,10 +54,14 @@ class SuperadminAuthService:
                 settings_row = (await uow.session.execute(select(SuperadminRuntimeSettings).limit(1))).scalars().first()
                 secret_row = (await uow.session.execute(select(SuperadminRuntimeSecret).limit(1))).scalars().first()
                 audits = (
-                    await uow.session.execute(
-                        select(SuperadminRuntimeAudit).order_by(SuperadminRuntimeAudit.created_at.desc()).limit(20)
+                    (
+                        await uow.session.execute(
+                            select(SuperadminRuntimeAudit).order_by(SuperadminRuntimeAudit.created_at.desc()).limit(20)
+                        )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
         except SQLAlchemyError:
             settings_row = None
             secret_row = None

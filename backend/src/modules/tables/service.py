@@ -7,8 +7,8 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.optimistic_lock import optimistic_lock_matches
-from src.modules.tables.models import Column, FieldType, Table, TableFolder, TableView
 from src.modules.tables.errors import TablesModuleError
+from src.modules.tables.models import Column, FieldType, Table, TableFolder, TableView
 from src.modules.tables.records import Record, RecordRepository
 from src.modules.tables.repository import (
     ColumnRepository,
@@ -40,6 +40,7 @@ class TableServiceError(TablesModuleError):
 
 class TablesService:
     """Application service for folders/tables/columns CRUD."""
+
     MAX_FOLDER_DEPTH = 2
 
     def __init__(self, session: AsyncSession):

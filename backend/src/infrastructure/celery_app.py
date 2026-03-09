@@ -1,6 +1,6 @@
+import sentry_sdk
 from celery import Celery
 from celery.schedules import crontab
-import sentry_sdk
 from sentry_sdk.integrations.celery import CeleryIntegration
 
 from src.config import settings
@@ -42,7 +42,7 @@ celery.conf.update(
     broker_connection_retry_on_startup=True,
     broker_connection_max_retries=None,
     broker_heartbeat=30,
-    worker_enable_remote_control=False,
+    worker_enable_remote_control=True,
     beat_schedule={
         "dispatch-schedule-reminders-every-minute": {
             "task": "dispatch_schedule_reminders",
@@ -76,5 +76,11 @@ celery.conf.update(
 )
 
 celery.autodiscover_tasks(
-    ["src.modules.notifications", "src.modules.schedule", "src.modules.billing", "src.modules.docs", "src.modules.tables"]
+    [
+        "src.modules.notifications",
+        "src.modules.schedule",
+        "src.modules.billing",
+        "src.modules.docs",
+        "src.modules.tables",
+    ]
 )

@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from src.common.enums import AuditAction, PlanTier, SubscriptionStatus
 from src.infrastructure.uow import UnitOfWork
@@ -120,7 +120,11 @@ class SuperadminOrgsService:
         start_at = now
 
         if current_period_end is not None:
-            end_at = current_period_end.astimezone(UTC) if current_period_end.tzinfo else current_period_end.replace(tzinfo=UTC)
+            end_at = (
+                current_period_end.astimezone(UTC)
+                if current_period_end.tzinfo
+                else current_period_end.replace(tzinfo=UTC)
+            )
         elif period_days is not None:
             end_at = now + timedelta(days=int(period_days))
         else:
@@ -225,8 +229,8 @@ class SuperadminOrgsService:
 
     async def reset_org_ai_usage_today(self, *, org_id: str) -> dict:
         """Сбросить AI usage за текущий день для организации."""
-        now = datetime.now(timezone.utc)
-        day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+        now = datetime.now(UTC)
+        day_start = datetime(now.year, now.month, now.day, tzinfo=UTC)
 
         async with UnitOfWork() as uow:
             repo = SuperadminRepository(uow.session)

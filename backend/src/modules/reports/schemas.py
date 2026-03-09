@@ -9,7 +9,20 @@ ALLOWED_WIDGET_TYPES = {"metric", "bar", "line", "area", "pie", "donut", "table"
 ALLOWED_ANALYTICS_WIDGET_TYPES = {"metric", "bar", "line", "donut", "table", "pie", "area"}
 ALLOWED_AGGREGATIONS = {"count", "sum", "avg", "min", "max"}
 ALLOWED_TIME_GRANULARITY = {"day", "week", "month"}
-ALLOWED_FILTER_OPS = {"eq", "neq", "contains", "gt", "lt", "gte", "lte", "in", "not_in", "is_empty", "not_empty", "between"}
+ALLOWED_FILTER_OPS = {
+    "eq",
+    "neq",
+    "contains",
+    "gt",
+    "lt",
+    "gte",
+    "lte",
+    "in",
+    "not_in",
+    "is_empty",
+    "not_empty",
+    "between",
+}
 ALLOWED_SORT_BY = {"label", "metric"}
 ALLOWED_SORT_DIRECTION = {"asc", "desc"}
 

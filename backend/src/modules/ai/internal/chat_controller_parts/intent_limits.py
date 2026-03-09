@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Проверки и подсказки лимитов тарифа для action-intent в AI-чате."""
+
+from __future__ import annotations
 
 import uuid
 

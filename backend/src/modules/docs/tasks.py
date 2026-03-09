@@ -11,6 +11,7 @@ from collections.abc import Iterable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
+from typing import Any
 
 from sqlalchemy import delete, func, select
 
@@ -43,6 +44,22 @@ from src.modules.docs.storage import DEFAULT_STORAGE_PROVIDER
 from src.modules.files.models import File
 
 logger = logging.getLogger(__name__)
+_WORKER_EVENT_LOOP: asyncio.AbstractEventLoop | None = None
+
+
+def _run_async_on_worker_loop(coro: Any) -> Any:
+    """Выполнить async-код на стабильном loop процесса Celery worker.
+
+    ``asyncio.run`` создаёт новый event loop на каждый task. Для asyncpg это
+    приводит к reuse соединений между разными loop и даёт ошибки вида
+    ``Future attached to a different loop`` / ``another operation is in progress``.
+    Держим один loop на процесс worker и выполняем все async docs-task'и на нём.
+    """
+    global _WORKER_EVENT_LOOP
+    if _WORKER_EVENT_LOOP is None or _WORKER_EVENT_LOOP.is_closed():
+        _WORKER_EVENT_LOOP = asyncio.new_event_loop()
+    asyncio.set_event_loop(_WORKER_EVENT_LOOP)
+    return _WORKER_EVENT_LOOP.run_until_complete(coro)
 
 
 @celery.task(name="scan_version")
@@ -75,10 +92,7 @@ def scan_version(version_id: str) -> dict[str, str]:
 
         usage = (
             session.execute(
-                select(OrgStorageUsage)
-                .where(OrgStorageUsage.org_id == file_obj.org_id)
-                .with_for_update()
-                .limit(1)
+                select(OrgStorageUsage).where(OrgStorageUsage.org_id == file_obj.org_id).with_for_update().limit(1)
             )
             .scalars()
             .first()
@@ -112,10 +126,10 @@ def scan_version(version_id: str) -> dict[str, str]:
         ai_job_id = _safe_uuid(str(ai_job_id_raw)) if ai_job_id_raw else None
         if ai_job_id is not None:
             ai_job = (
-                session.execute(
-                    select(DocsAIGenerationJob).where(DocsAIGenerationJob.id == ai_job_id).limit(1)
-                )
-            ).scalars().first()
+                (session.execute(select(DocsAIGenerationJob).where(DocsAIGenerationJob.id == ai_job_id).limit(1)))
+                .scalars()
+                .first()
+            )
             if ai_job is not None:
                 ai_job.status = final_status if final_status in {"ready", "blocked"} else "failed"
                 ai_job.finished_at = datetime.now(UTC)
@@ -226,10 +240,7 @@ def pdf_stamp_sign(version_id: str, payload: dict, requested_by: str | None = No
 
         usage = (
             session.execute(
-                select(OrgStorageUsage)
-                .where(OrgStorageUsage.org_id == file_obj.org_id)
-                .with_for_update()
-                .limit(1)
+                select(OrgStorageUsage).where(OrgStorageUsage.org_id == file_obj.org_id).with_for_update().limit(1)
             )
             .scalars()
             .first()
@@ -341,10 +352,13 @@ def ai_generate(self, job_id: str) -> dict[str, str]:
     """Сгенерировать документ через AI и запустить AV-пайплайн версии."""
     task_id = str(getattr(getattr(self, "request", None), "id", "") or "")
     try:
-        return asyncio.run(run_ai_generate_inline(job_id=job_id, task_id=task_id))
+        return _run_async_on_worker_loop(run_ai_generate_inline(job_id=job_id, task_id=task_id)) or {
+            "status": "failed",
+            "reason": "empty_result",
+        }
     except Exception as exc:
         with suppress(Exception):
-            asyncio.run(_mark_ai_job_failed_unexpected(job_id=job_id, reason=str(exc)))
+            _run_async_on_worker_loop(_mark_ai_job_failed_unexpected(job_id=job_id, reason=str(exc)))
         _inc_ai_generate_error_metric("unexpected_exception")
         return {"status": "failed", "reason": str(exc)[:240]}
 
@@ -701,16 +715,20 @@ def cleanup_old_doc_versions() -> dict[str, int | str]:
         for file_id, current_version_id in files:
             scanned_files += 1
             versions = (
-                session.execute(
-                    select(FileVersion)
-                    .where(
-                        FileVersion.file_id == file_id,
-                        FileVersion.id != current_version_id,
-                        FileVersion.created_at < threshold,
+                (
+                    session.execute(
+                        select(FileVersion)
+                        .where(
+                            FileVersion.file_id == file_id,
+                            FileVersion.id != current_version_id,
+                            FileVersion.created_at < threshold,
+                        )
+                        .order_by(FileVersion.created_at.desc())
                     )
-                    .order_by(FileVersion.created_at.desc())
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             if len(versions) <= keep_latest:
                 continue
             for version in versions[keep_latest:]:
@@ -738,47 +756,47 @@ def docs_cleanup_stale_files() -> dict[str, int | str]:
     threshold = datetime.now(UTC) - timedelta(hours=24)
     batch_size = max(1, int(getattr(settings, "DOCS_RETENTION_BATCH_SIZE", 200) or 200))
     deleted_count = 0
-    
+
     with sync_session_factory() as session:
-        files = session.execute(
-            select(File)
-            .where(
-                File.status.in_([FileStatus.UPLOADING.value, FileStatus.DRAFT.value]),
-                File.created_at < threshold,
+        files = (
+            session.execute(
+                select(File)
+                .where(
+                    File.status.in_([FileStatus.UPLOADING.value, FileStatus.DRAFT.value]),
+                    File.created_at < threshold,
+                )
+                .limit(batch_size)
             )
-            .limit(batch_size)
-        ).scalars().all()
-        
+            .scalars()
+            .all()
+        )
+
         try:
             from src.modules.files.storage import get_s3_client
+
             s3_client = get_s3_client()
         except Exception:
             s3_client = None
 
         for file_obj in files:
             # Освобождаем reserved квоту
-            try:
-                from src.modules.docs.repository import DocsRepository # sync access needs async, so we'll just do manual query
+            with suppress(Exception):
                 usage = session.execute(
                     select(OrgStorageUsage).where(OrgStorageUsage.org_id == file_obj.org_id).with_for_update()
                 ).scalar_one_or_none()
                 if usage:
                     usage.reserved_bytes = max(0, int(usage.reserved_bytes) - int(file_obj.size or 0))
-            except Exception:
-                pass
-            
+
             # Удаляем из S3
             if s3_client and getattr(file_obj, "s3_bucket", None) and getattr(file_obj, "s3_key", None):
-                try:
+                with suppress(Exception):
                     s3_client.delete_object(Bucket=file_obj.s3_bucket, Key=file_obj.s3_key)
-                except Exception:
-                    pass
-            
+
             session.execute(delete(File).where(File.id == file_obj.id))
             deleted_count += 1
-            
+
         session.commit()
-    
+
     _inc_retention_metric("stale_files_ok")
     return {"status": "ok", "deleted": deleted_count}
 
@@ -957,7 +975,7 @@ def _inc_ai_generate_error_metric(reason: str) -> None:
 
 
 def _inc_retention_metric(status: str) -> None:
-        DOCS_RETENTION_CLEANUP_TOTAL.labels(status=status).inc()
+    DOCS_RETENTION_CLEANUP_TOTAL.labels(status=status).inc()
 
 
 @celery.task(name="docs_delete_file_background")
@@ -976,30 +994,27 @@ def docs_delete_file_background(file_id: str) -> dict[str, int | str]:
 
         try:
             from src.modules.files.storage import get_s3_client
+
             s3_client = get_s3_client()
         except Exception:
             s3_client = None
 
         versions = session.execute(select(FileVersion).where(FileVersion.file_id == file_uuid)).scalars().all()
-        
+
         # Удаляем каждую версию из S3 и БД
         for version in versions:
             if s3_client and version.s3_bucket and version.s3_key:
-                try:
+                with suppress(Exception):
                     s3_client.delete_object(Bucket=version.s3_bucket, Key=version.s3_key)
-                except Exception:
-                    pass
             session.execute(delete(FileVersion).where(FileVersion.id == version.id))
             deleted_versions += 1
-            
+
         # Зачастую `file_obj.s3_key` есть, а `FileVersion` нет (незавершенная загрузка или упавшая AI генерация).
         # Пытаемся удалить из S3 и `file_obj.s3_key`.
         if s3_client and getattr(file_obj, "s3_bucket", None) and getattr(file_obj, "s3_key", None):
-            try:
+            with suppress(Exception):
                 s3_client.delete_object(Bucket=file_obj.s3_bucket, Key=file_obj.s3_key)
-            except Exception:
-                pass
-        
+
         session.execute(delete(File).where(File.id == file_uuid))
         session.commit()
     return {"status": "ok", "deleted_versions": deleted_versions}

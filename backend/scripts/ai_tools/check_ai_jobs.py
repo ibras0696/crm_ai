@@ -1,13 +1,14 @@
 import asyncio
-import os
 import sys
 
 # Add src to path
 sys.path.append("/app")
 
+from sqlalchemy import select
+
 from src.infrastructure.database import async_session_factory
 from src.modules.docs.models import DocsAIGenerationJob
-from sqlalchemy import select
+
 
 async def check():
     async with async_session_factory() as s:
@@ -22,6 +23,7 @@ async def check():
                 print(f"  Error: {j.error_message}")
             if j.meta_json:
                 print(f"  Meta: {j.meta_json}")
+
 
 if __name__ == "__main__":
     asyncio.run(check())

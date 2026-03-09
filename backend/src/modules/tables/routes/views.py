@@ -14,7 +14,6 @@ from src.modules.auth.dependencies import CurrentUser, require_roles
 from src.modules.tables.schemas import CreateViewRequest, ViewOut
 from src.modules.tables.service import TableServiceError, TableViewsService
 
-
 router = APIRouter(prefix="/tables/{table_id}/views", tags=["views"])
 
 

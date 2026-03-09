@@ -22,24 +22,14 @@ def _tools_hint_for_domain(domain: str) -> str:
         )
     if domain == "dashboard":
         return (
-            "- Дашборды: create_dashboard.\n"
-            "- Не модифицируй таблицы, если пользователь просит только отчет/дашборд."
+            "- Дашборды: create_dashboard.\n" "- Не модифицируй таблицы, если пользователь просит только отчет/дашборд."
         )
     if domain == "schedule":
-        return (
-            "- Расписание: create_schedule_event.\n"
-            "- Для просмотра расписания не добавляй crm_action."
-        )
+        return "- Расписание: create_schedule_event.\n" "- Для просмотра расписания не добавляй crm_action."
     if domain == "knowledge":
-        return (
-            "- База знаний: create_kb_page.\n"
-            "- Для чтения/поиска по KB не добавляй crm_action."
-        )
+        return "- База знаний: create_kb_page.\n" "- Для чтения/поиска по KB не добавляй crm_action."
     if domain == "document":
-        return (
-            "- Документы: create_document.\n"
-            "- Для анализа уже существующих документов не добавляй crm_action."
-        )
+        return "- Документы: create_document.\n" "- Для анализа уже существующих документов не добавляй crm_action."
     return (
         "- Если пользователь явно просит изменение сущностей CRM, добавь один crm_action.\n"
         "- Если явного запроса на изменение нет, отвечай без crm_action."
@@ -69,9 +59,7 @@ def build_turn_system_prompt(
 
     base_compact = _clip_text(base_system_prompt, 900)
     context_hint = (
-        "- Пользователь выбрал контекст в UI: используй его как источник истины.\n"
-        if has_selected_context
-        else ""
+        "- Пользователь выбрал контекст в UI: используй его как источник истины.\n" if has_selected_context else ""
     )
     return (
         f"{base_compact}\n\n"

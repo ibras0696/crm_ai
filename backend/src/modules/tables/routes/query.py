@@ -20,7 +20,6 @@ from src.modules.auth.dependencies import CurrentUser, require_roles
 from src.modules.tables.query_service import TableQueryService
 from src.modules.tables.schemas import FilterRequest, RecordOut
 
-
 router = APIRouter(prefix="/tables/{table_id}", tags=["records"])
 
 
@@ -58,7 +57,9 @@ async def filter_records(
 @router.get("/export/csv")
 async def export_csv(
     table_id: uuid.UUID,
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
+    ),
     _: None = Depends(require_access(resource_type="table", permission="can_read", resource_id_param="table_id")),
 ):
     """Экспорт таблицы в CSV."""
@@ -71,10 +72,20 @@ async def export_csv(
         except ValueError as exc:
             code = str(exc)
             if code == "EXPORT_TOO_MANY_ROWS":
-                return ApiResponse(ok=False, data=None, error={"code": "EXPORT_TOO_MANY_ROWS", "message": "Слишком много строк для экспорта."})
+                return ApiResponse(
+                    ok=False,
+                    data=None,
+                    error={"code": "EXPORT_TOO_MANY_ROWS", "message": "Слишком много строк для экспорта."},
+                )
             if code == "EXPORT_TOO_MANY_COLUMNS":
-                return ApiResponse(ok=False, data=None, error={"code": "EXPORT_TOO_MANY_COLUMNS", "message": "Слишком много колонок для экспорта."})
-            return ApiResponse(ok=False, data=None, error={"code": "BAD_REQUEST", "message": "Невозможно выполнить экспорт."})
+                return ApiResponse(
+                    ok=False,
+                    data=None,
+                    error={"code": "EXPORT_TOO_MANY_COLUMNS", "message": "Слишком много колонок для экспорта."},
+                )
+            return ApiResponse(
+                ok=False, data=None, error={"code": "BAD_REQUEST", "message": "Невозможно выполнить экспорт."}
+            )
 
         return StreamingResponse(
             iter([payload]),
@@ -86,7 +97,9 @@ async def export_csv(
 @router.get("/export/xlsx")
 async def export_xlsx(
     table_id: uuid.UUID,
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE)
+    ),
     _: None = Depends(require_access(resource_type="table", permission="can_read", resource_id_param="table_id")),
 ):
     """Экспорт таблицы в XLSX."""
@@ -99,10 +112,20 @@ async def export_xlsx(
         except ValueError as exc:
             code = str(exc)
             if code == "EXPORT_TOO_MANY_ROWS":
-                return ApiResponse(ok=False, data=None, error={"code": "EXPORT_TOO_MANY_ROWS", "message": "Слишком много строк для экспорта."})
+                return ApiResponse(
+                    ok=False,
+                    data=None,
+                    error={"code": "EXPORT_TOO_MANY_ROWS", "message": "Слишком много строк для экспорта."},
+                )
             if code == "EXPORT_TOO_MANY_COLUMNS":
-                return ApiResponse(ok=False, data=None, error={"code": "EXPORT_TOO_MANY_COLUMNS", "message": "Слишком много колонок для экспорта."})
-            return ApiResponse(ok=False, data=None, error={"code": "BAD_REQUEST", "message": "Невозможно выполнить экспорт."})
+                return ApiResponse(
+                    ok=False,
+                    data=None,
+                    error={"code": "EXPORT_TOO_MANY_COLUMNS", "message": "Слишком много колонок для экспорта."},
+                )
+            return ApiResponse(
+                ok=False, data=None, error={"code": "BAD_REQUEST", "message": "Невозможно выполнить экспорт."}
+            )
 
         return StreamingResponse(
             iter([payload]),
@@ -136,19 +159,41 @@ async def import_csv(
             if code == "EMPTY_CSV":
                 return ApiResponse(ok=False, data=None, error={"code": "BAD_REQUEST", "message": "Пустой CSV"})
             if code == "NO_MATCHING_COLUMNS":
-                return ApiResponse(ok=False, data=None, error={"code": "NO_MATCHING_COLUMNS", "message": "В CSV нет совпадений с колонками таблицы."})
+                return ApiResponse(
+                    ok=False,
+                    data=None,
+                    error={"code": "NO_MATCHING_COLUMNS", "message": "В CSV нет совпадений с колонками таблицы."},
+                )
             if code == "CSV_TOO_LARGE":
-                return ApiResponse(ok=False, data=None, error={"code": "CSV_TOO_LARGE", "message": "CSV превышает допустимый размер."})
+                return ApiResponse(
+                    ok=False, data=None, error={"code": "CSV_TOO_LARGE", "message": "CSV превышает допустимый размер."}
+                )
             if code == "TOO_MANY_COLUMNS":
-                return ApiResponse(ok=False, data=None, error={"code": "TOO_MANY_COLUMNS", "message": "В CSV слишком много колонок."})
+                return ApiResponse(
+                    ok=False, data=None, error={"code": "TOO_MANY_COLUMNS", "message": "В CSV слишком много колонок."}
+                )
             if code == "TOO_MANY_ROWS":
-                return ApiResponse(ok=False, data=None, error={"code": "TOO_MANY_ROWS", "message": "В CSV слишком много строк."})
+                return ApiResponse(
+                    ok=False, data=None, error={"code": "TOO_MANY_ROWS", "message": "В CSV слишком много строк."}
+                )
             if code == "CELL_TOO_LARGE":
-                return ApiResponse(ok=False, data=None, error={"code": "CELL_TOO_LARGE", "message": "В CSV есть слишком длинные значения."})
+                return ApiResponse(
+                    ok=False,
+                    data=None,
+                    error={"code": "CELL_TOO_LARGE", "message": "В CSV есть слишком длинные значения."},
+                )
             if code == "IMPORT_TIMEOUT":
-                return ApiResponse(ok=False, data=None, error={"code": "IMPORT_TIMEOUT", "message": "Импорт прерван по лимиту времени."})
+                return ApiResponse(
+                    ok=False,
+                    data=None,
+                    error={"code": "IMPORT_TIMEOUT", "message": "Импорт прерван по лимиту времени."},
+                )
             if code == "RECORD_LIMIT_REACHED":
-                return ApiResponse(ok=False, data=None, error={"code": "RECORD_LIMIT_REACHED", "message": "Достигнут лимит тарифа по записям."})
+                return ApiResponse(
+                    ok=False,
+                    data=None,
+                    error={"code": "RECORD_LIMIT_REACHED", "message": "Достигнут лимит тарифа по записям."},
+                )
             return ApiResponse(ok=False, data=None, error={"code": "BAD_REQUEST", "message": "Некорректный CSV"})
 
         await uow.commit()

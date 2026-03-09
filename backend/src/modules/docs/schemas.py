@@ -183,8 +183,6 @@ class FileTextOut(BaseModel):
     content: str
 
 
-
-
 class FileVersionOut(BaseModel):
     """DTO версии файла для истории версий."""
 

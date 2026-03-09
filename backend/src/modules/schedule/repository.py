@@ -52,7 +52,9 @@ class ScheduleRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def count_events_in_day(self, *, org_id: uuid.UUID, day_start: datetime, day_end: datetime, exclude_event_id: uuid.UUID | None = None) -> int:
+    async def count_events_in_day(
+        self, *, org_id: uuid.UUID, day_start: datetime, day_end: datetime, exclude_event_id: uuid.UUID | None = None
+    ) -> int:
         stmt = select(func.count(Event.id)).where(
             Event.org_id == org_id,
             Event.start_at >= day_start,

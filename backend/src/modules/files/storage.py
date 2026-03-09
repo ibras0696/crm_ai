@@ -1,4 +1,5 @@
 """S3/MinIO storage service."""
+
 import uuid
 from contextlib import suppress
 from typing import BinaryIO

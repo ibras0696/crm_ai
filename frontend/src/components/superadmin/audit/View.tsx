@@ -42,7 +42,7 @@ export function SuperadminAuditView({ selectedOrgId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedOrgId, limit])
 
-  const items = page?.items || []
+  const items = useMemo(() => page?.items ?? [], [page?.items])
   const total = page?.total || 0
   const canPrev = offset > 0
   const canNext = offset + limit < total

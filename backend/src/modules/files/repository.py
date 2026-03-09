@@ -33,13 +33,7 @@ class FileRepository:
 
     async def list_by_org(self, org_id: uuid.UUID, limit: int = 50, offset: int = 0) -> list[File]:
         """Get organization files with pagination."""
-        stmt = (
-            select(File)
-            .where(File.org_id == org_id)
-            .order_by(File.created_at.desc())
-            .limit(limit)
-            .offset(offset)
-        )
+        stmt = select(File).where(File.org_id == org_id).order_by(File.created_at.desc()).limit(limit).offset(offset)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -50,9 +44,7 @@ class FileRepository:
 
     async def get_org_storage_bytes(self, org_id: uuid.UUID) -> int:
         """Get current total storage size for organization."""
-        result = await self.session.execute(
-            select(func.coalesce(func.sum(File.size), 0)).where(File.org_id == org_id)
-        )
+        result = await self.session.execute(select(func.coalesce(func.sum(File.size), 0)).where(File.org_id == org_id))
         return int(result.scalar_one() or 0)
 
     async def resolve_effective_plan(self, org_id: uuid.UUID) -> Plan | None:
@@ -69,7 +61,5 @@ class FileRepository:
             ).scalar_one_or_none()
             plan_name = str(getattr(org_plan, "value", org_plan or "free"))
         return (
-            await self.session.execute(
-                select(Plan).where(Plan.name == plan_name.lower(), Plan.is_active.is_(True))
-            )
+            await self.session.execute(select(Plan).where(Plan.name == plan_name.lower(), Plan.is_active.is_(True)))
         ).scalar_one_or_none()

@@ -484,7 +484,7 @@ export default function KnowledgePage() {
 
 /* ─── Simple Markdown → HTML renderer ─── */
 function renderMarkdown(md: string): string {
-  let html = md
+  const html = md
     // code blocks ```lang\n...\n```
     .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="bg-secondary/50 rounded-lg p-3 overflow-x-auto text-sm font-mono my-3"><code>$2</code></pre>')
     // inline code

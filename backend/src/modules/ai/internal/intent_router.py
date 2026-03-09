@@ -15,7 +15,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-
 IntentDomain = Literal["table", "schedule", "knowledge", "dashboard", "document", "general"]
 IntentMode = Literal["read", "create", "update", "delete", "unknown"]
 
@@ -92,7 +91,14 @@ def _detect_mode(text: str, *, ui_intent: str | None) -> tuple[IntentMode, list[
 
 def _detect_domain(text: str, *, ui_intent: str | None) -> tuple[IntentDomain, list[str]]:
     reasons: list[str] = []
-    scores: dict[IntentDomain, int] = {"table": 0, "schedule": 0, "knowledge": 0, "dashboard": 0, "document": 0, "general": 0}
+    scores: dict[IntentDomain, int] = {
+        "table": 0,
+        "schedule": 0,
+        "knowledge": 0,
+        "dashboard": 0,
+        "document": 0,
+        "general": 0,
+    }
 
     for domain, markers in _DOMAIN_MARKERS.items():
         if domain == "general":

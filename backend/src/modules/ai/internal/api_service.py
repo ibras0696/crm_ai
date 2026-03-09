@@ -1,22 +1,22 @@
-from __future__ import annotations
-
 """Сервисные функции для AI API (тонкий слой поверх репозитория).
 
 Здесь нет SQL. Этот слой собирает данные в структуры, удобные для API/интерфейса.
 """
 
+from __future__ import annotations
+
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from src.config import settings
 from src.infrastructure.uow import UnitOfWork
+from src.modules.ai.internal.runtime_secrets import decrypt_runtime_secret
 from src.modules.ai.limits import is_org_ai_enabled, resolve_org_plan, resolve_plan_limits
 from src.modules.ai.models import AIChatMessage
-from src.modules.ai.internal.runtime_secrets import decrypt_runtime_secret
 from src.modules.ai.repository import AIRepository
-from src.modules.billing.token_wallet import get_token_balance_view
 from src.modules.ai.service import build_messages, build_org_context_for_user, estimate_tokens
+from src.modules.billing.token_wallet import get_token_balance_view
 
 
 async def build_ai_status(*, org_id: uuid.UUID) -> dict[str, Any]:
@@ -28,8 +28,8 @@ async def build_ai_status(*, org_id: uuid.UUID) -> dict[str, Any]:
     Returns:
         Словарь со статусом включенности, наличием credentials, планом, статистикой и лимитами.
     """
-    now = datetime.now(timezone.utc)
-    day_start = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+    now = datetime.now(UTC)
+    day_start = datetime(now.year, now.month, now.day, tzinfo=UTC)
 
     async with UnitOfWork() as uow:
         repo = AIRepository(uow.session)
@@ -94,7 +94,9 @@ async def build_ai_usage_by_user(*, org_id: uuid.UUID) -> list[dict[str, Any]]:
         ]
 
 
-async def build_chat_sessions(*, org_id: uuid.UUID, user_id: uuid.UUID, limit: int, offset: int) -> list[dict[str, Any]]:
+async def build_chat_sessions(
+    *, org_id: uuid.UUID, user_id: uuid.UUID, limit: int, offset: int
+) -> list[dict[str, Any]]:
     """Получить список чат-сессий пользователя с превью последнего сообщения.
 
     Args:
@@ -280,7 +282,10 @@ async def build_context_sources(*, org_id: uuid.UUID) -> dict[str, Any]:
         tables = await repo.list_tables_with_columns(org_id=org_id, limit=200)
         schedule_events = await repo.list_schedule_events(org_id=org_id, limit=100)
         return {
-            "kb_pages": [{"id": str(p.id), "title": p.title, "parent_id": str(p.parent_id) if p.parent_id else None} for p in kb_pages],
+            "kb_pages": [
+                {"id": str(p.id), "title": p.title, "parent_id": str(p.parent_id) if p.parent_id else None}
+                for p in kb_pages
+            ],
             "tables": [
                 {
                     "id": str(t.id),

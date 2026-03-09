@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from collections import Counter, defaultdict
-from datetime import datetime, timezone
+from collections import defaultdict
+from datetime import UTC, datetime
 from typing import Any
 
 from src.modules.reports.models import ReportWidget
@@ -58,10 +58,10 @@ def parse_bool(v: Any) -> bool | None:
 
 def parse_datetime_value(v: Any) -> datetime | None:
     if isinstance(v, datetime):
-        return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
+        return v if v.tzinfo else v.replace(tzinfo=UTC)
     if isinstance(v, int | float):
         try:
-            return datetime.fromtimestamp(float(v), tz=timezone.utc)
+            return datetime.fromtimestamp(float(v), tz=UTC)
         except (TypeError, ValueError, OSError):
             return None
     if not isinstance(v, str):
@@ -71,12 +71,12 @@ def parse_datetime_value(v: Any) -> datetime | None:
         return None
     try:
         parsed = datetime.fromisoformat(s.replace("Z", "+00:00"))
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
     except ValueError:
         pass
     for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%Y/%m/%d"):
         try:
-            return datetime.strptime(s, fmt).replace(tzinfo=timezone.utc)
+            return datetime.strptime(s, fmt).replace(tzinfo=UTC)
         except ValueError:
             continue
     return None
@@ -132,7 +132,7 @@ def value_is_empty(value: Any) -> bool:
         return True
     if isinstance(value, str):
         return not value.strip()
-    if isinstance(value, (list, tuple, set, dict)):
+    if isinstance(value, list | tuple | set | dict):
         return len(value) == 0
     return False
 
@@ -342,7 +342,8 @@ def build_table_schema(table: Table, records_count: int) -> AnalyticsTableSchema
         (
             field.id
             for field in fields
-            if field.analytics_type in {"list", "text"} and not next((col for col in table.columns if str(col.id) == field.id and col.is_primary), None)
+            if field.analytics_type in {"list", "text"}
+            and not next((col for col in table.columns if str(col.id) == field.id and col.is_primary), None)
         ),
         None,
     )
@@ -359,7 +360,9 @@ def build_table_schema(table: Table, records_count: int) -> AnalyticsTableSchema
     )
 
 
-def query_from_widget(widget: ReportWidget, extra_filters: list[AnalyticsFilter] | None = None) -> AnalyticsQueryRequest:
+def query_from_widget(
+    widget: ReportWidget, extra_filters: list[AnalyticsFilter] | None = None
+) -> AnalyticsQueryRequest:
     config = WidgetConfig.model_validate(widget.config or {})
     metrics = config.metrics or [
         AnalyticsMetric(
@@ -474,7 +477,9 @@ async def execute_query(
             "rows": rows,
             "points": [{"x": row["label"], "y": row["metrics"].get(primary_metric.key)} for row in rows],
             "series": [{"key": metric.key, "label": metric.label or metric.key} for metric in metrics],
-            "group_by_column": columns_map.get(group_column_id).name if columns_map.get(group_column_id) else group_column_id,
+            "group_by_column": columns_map.get(group_column_id).name
+            if columns_map.get(group_column_id)
+            else group_column_id,
             "time_granularity": query.date_bucket if query.time_column_id else None,
             "total_records": len(filtered),
         }
@@ -500,10 +505,15 @@ async def execute_query(
                 group_rows.append({"label": key, "metrics": metric_values, "count": len(group_records)})
             group_rows = sorted_group_rows(group_rows, query.sort)[: query.limit]
             header = [label_name] + [metric.label or metric.key for metric in metrics]
-            rows = [[str(row["label"]), *[str(row["metrics"].get(metric.key, "—")) for metric in metrics]] for row in group_rows]
+            rows = [
+                [str(row["label"]), *[str(row["metrics"].get(metric.key, "—")) for metric in metrics]]
+                for row in group_rows
+            ]
             return table, {"type": "table", "header": header, "rows": rows, "total": len(filtered)}
 
-        selected_ids = query.selected_column_ids or [str(col.id) for col in sorted(table.columns, key=lambda c: c.position)[:6]]
+        selected_ids = query.selected_column_ids or [
+            str(col.id) for col in sorted(table.columns, key=lambda c: c.position)[:6]
+        ]
         selected_ids = selected_ids[:12]
         header = [columns_map[cid].name if cid in columns_map else cid for cid in selected_ids]
         rows: list[list[str]] = []

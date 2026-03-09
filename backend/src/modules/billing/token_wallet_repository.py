@@ -7,7 +7,14 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.enums import SubscriptionStatus
-from src.modules.billing.models import Plan, TokenBalance, TokenLedger, TokenPackage, TokenPurchase, TokenUsageIdempotency
+from src.modules.billing.models import (
+    Plan,
+    TokenBalance,
+    TokenLedger,
+    TokenPackage,
+    TokenPurchase,
+    TokenUsageIdempotency,
+)
 from src.modules.org.models import Organization, Subscription
 
 
@@ -28,7 +35,9 @@ class TokenWalletRepository:
             stmt = stmt.with_for_update()
         return list((await self.session.execute(stmt)).scalars().all())
 
-    async def get_active_subscription_plans_by_org_ids(self, *, org_ids: list[uuid.UUID]) -> list[tuple[uuid.UUID, object]]:
+    async def get_active_subscription_plans_by_org_ids(
+        self, *, org_ids: list[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, object]]:
         return (
             await self.session.execute(
                 select(Subscription.org_id, Subscription.plan).where(
@@ -39,7 +48,9 @@ class TokenWalletRepository:
         ).all()
 
     async def get_org_plans_by_org_ids(self, *, org_ids: list[uuid.UUID]) -> list[tuple[uuid.UUID, object]]:
-        return (await self.session.execute(select(Organization.id, Organization.plan).where(Organization.id.in_(org_ids)))).all()
+        return (
+            await self.session.execute(select(Organization.id, Organization.plan).where(Organization.id.in_(org_ids)))
+        ).all()
 
     async def get_active_plans_for_tiers(self, *, plan_names: list[str]) -> list[Plan]:
         stmt = select(Plan).where(Plan.is_active.is_(True), Plan.name.in_(plan_names))
@@ -54,9 +65,13 @@ class TokenWalletRepository:
         )
         return list((await self.session.execute(stmt)).scalars().all())
 
-    async def get_addon_sum_by_org_ids(self, *, org_ids: list[uuid.UUID], now_utc: datetime) -> list[tuple[uuid.UUID, int]]:
+    async def get_addon_sum_by_org_ids(
+        self, *, org_ids: list[uuid.UUID], now_utc: datetime
+    ) -> list[tuple[uuid.UUID, int]]:
         stmt = (
-            select(TokenPurchase.org_id, func.coalesce(func.sum(TokenPurchase.tokens_remaining), 0).label("addon_tokens"))
+            select(
+                TokenPurchase.org_id, func.coalesce(func.sum(TokenPurchase.tokens_remaining), 0).label("addon_tokens")
+            )
             .where(
                 TokenPurchase.org_id.in_(org_ids),
                 TokenPurchase.is_active.is_(True),

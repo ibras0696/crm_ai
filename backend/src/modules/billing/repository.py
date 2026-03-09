@@ -51,19 +51,13 @@ class BillingRepository:
 
     async def get_usage_counts(self, *, org_id: uuid.UUID) -> tuple[int, int, int, int, int]:
         mem_cnt = (
-            await self.session.execute(
-                select(func.count()).select_from(Membership).where(Membership.org_id == org_id)
-            )
+            await self.session.execute(select(func.count()).select_from(Membership).where(Membership.org_id == org_id))
         ).scalar()
         tbl_cnt = (
-            await self.session.execute(
-                select(func.count()).select_from(Table).where(Table.org_id == org_id)
-            )
+            await self.session.execute(select(func.count()).select_from(Table).where(Table.org_id == org_id))
         ).scalar()
         rec_cnt = (
-            await self.session.execute(
-                select(func.count()).select_from(Record).where(Record.org_id == org_id)
-            )
+            await self.session.execute(select(func.count()).select_from(Record).where(Record.org_id == org_id))
         ).scalar()
         file_row = (
             await self.session.execute(
@@ -99,9 +93,7 @@ class BillingRepository:
     async def list_orgs_by_ids(self, org_ids: list[uuid.UUID]) -> dict[uuid.UUID, Organization]:
         if not org_ids:
             return {}
-        rows = (
-            await self.session.execute(select(Organization).where(Organization.id.in_(org_ids)))
-        ).scalars().all()
+        rows = (await self.session.execute(select(Organization).where(Organization.id.in_(org_ids)))).scalars().all()
         return {org.id: org for org in rows}
 
     async def list_org_member_user_ids(self, *, org_id: uuid.UUID) -> list[uuid.UUID]:

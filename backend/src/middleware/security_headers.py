@@ -1,4 +1,5 @@
 """Security headers middleware — adds protective HTTP headers to every response."""
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
@@ -14,9 +15,6 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         if not request.url.path.startswith("/api/docs"):
             response.headers["Content-Security-Policy"] = (
-                "default-src 'none'; "
-                "frame-ancestors 'none'; "
-                "base-uri 'none'; "
-                "form-action 'none'"
+                "default-src 'none'; " "frame-ancestors 'none'; " "base-uri 'none'; " "form-action 'none'"
             )
         return response

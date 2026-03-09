@@ -3,8 +3,8 @@ import uuid
 from src.common.enums import UserRole
 from src.modules.auth.models import User
 from src.modules.org.models import Invite, Membership, Organization
-from src.modules.org.services import OrgAILimitsService, OrgInviteService, OrgMembersService, OrgProfileService
 from src.modules.org.schemas import OrgUpdateRequest
+from src.modules.org.services import OrgAILimitsService, OrgInviteService, OrgMembersService, OrgProfileService
 
 
 class OrgService:

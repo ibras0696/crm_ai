@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Утилиты вызова/разбора ответов AI-провайдера для chat_controller."""
+
+from __future__ import annotations
 
 import asyncio
 
@@ -129,10 +129,7 @@ def _extract_usage_dict(data: dict) -> dict[str, int]:
         if not isinstance(obj, dict):
             return None
         prompt = _to_int(
-            obj.get("prompt_tokens")
-            or obj.get("promptTokens")
-            or obj.get("input_tokens")
-            or obj.get("inputTokens")
+            obj.get("prompt_tokens") or obj.get("promptTokens") or obj.get("input_tokens") or obj.get("inputTokens")
         )
         completion = _to_int(
             obj.get("completion_tokens")
@@ -141,13 +138,10 @@ def _extract_usage_dict(data: dict) -> dict[str, int]:
             or obj.get("outputTokens")
         )
         provider_total = _to_int(obj.get("total_tokens") or obj.get("totalTokens"))
-        if prompt > 0 or completion > 0:
-            # Для биллинга используем сумму фактических in/out токенов.
-            # Некоторые провайдеры могут возвращать total_tokens с иным смыслом
-            # (например, с учетом max_tokens/request budget), что искажает списание.
-            total = prompt + completion
-        else:
-            total = provider_total
+        # Для биллинга используем сумму фактических in/out токенов.
+        # Некоторые провайдеры могут возвращать total_tokens с иным смыслом
+        # (например, с учетом max_tokens/request budget), что искажает списание.
+        total = prompt + completion if prompt > 0 or completion > 0 else provider_total
         if prompt > 0 or completion > 0 or total > 0:
             return {
                 "prompt_tokens": prompt,

@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Сбор и оценка prompt-состава для диагностики AI-чата."""
+
+from __future__ import annotations
 
 from src.modules.ai.internal.prompts import ACTION_INSTRUCTIONS_PROMPT
 from src.modules.ai.models import AIChatMessage

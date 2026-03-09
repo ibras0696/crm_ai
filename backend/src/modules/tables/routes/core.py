@@ -22,7 +22,6 @@ from src.modules.tables.schemas import (
 )
 from src.modules.tables.service import TableServiceError, TablesService
 
-
 router = APIRouter(prefix="/tables", tags=["tables"])
 
 

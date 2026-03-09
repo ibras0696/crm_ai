@@ -47,9 +47,15 @@ class ReportWidget(BaseDBModel):
         nullable=False,
         index=True,
     )
-    title: Mapped[str] = mapped_column(String(255), nullable=False, default="Новый виджет", server_default=text("'Новый виджет'"))
-    widget_type: Mapped[str] = mapped_column(String(50), nullable=False, default="metric", server_default=text("'metric'"))
-    table_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("tables.id", ondelete="SET NULL"), nullable=True, index=True)
+    title: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="Новый виджет", server_default=text("'Новый виджет'")
+    )
+    widget_type: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="metric", server_default=text("'metric'")
+    )
+    table_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tables.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     config: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb"))
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
 

@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """Метрики AI-чата для оркестратора `chat_controller`."""
+
+from __future__ import annotations
 
 import logging
 

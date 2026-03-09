@@ -21,10 +21,10 @@ from src.modules.ai.internal.service import (  # noqa: F401
     handle_create_dashboard_action,
     handle_create_document_action,
     handle_create_kb_page_action,
-    handle_edit_kb_page_action,
     handle_create_records_action,
     handle_create_schedule_event_action,
     handle_create_table_action,
+    handle_edit_kb_page_action,
     resolve_timeweb_agent_id,
 )
 

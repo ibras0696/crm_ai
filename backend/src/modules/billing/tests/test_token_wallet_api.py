@@ -1,7 +1,7 @@
 import uuid
 
-import pytest
 import httpx
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
@@ -39,7 +39,9 @@ async def _owner_identity(client: AsyncClient, token: str) -> tuple[uuid.UUID, u
     assert me.status_code == 200
     user_id = uuid.UUID(me.json()["data"]["id"])
     async with UnitOfWork() as uow:
-        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user_id))).scalars().first()
+        membership = (
+            (await uow.session.execute(select(Membership).where(Membership.user_id == user_id))).scalars().first()
+        )
         assert membership is not None
         return user_id, membership.org_id
 
@@ -73,14 +75,14 @@ async def _ensure_free_plan(ai_tokens_per_day: int) -> None:
 
 async def _configure_runtime_yookassa() -> None:
     async with UnitOfWork() as uow:
-        uow.session.add(BillingRuntimeSettings(
-            yookassa_shop_id="wallet-shop-1",
-            yookassa_return_url="https://runtime.example/billing/success",
-            yookassa_webhook_url="https://runtime.example/webhook",
-        ))
-        uow.session.add(BillingRuntimeSecret(
-            yookassa_secret_key_encrypted=encrypt_runtime_secret("wallet-secret-1")
-        ))
+        uow.session.add(
+            BillingRuntimeSettings(
+                yookassa_shop_id="wallet-shop-1",
+                yookassa_return_url="https://runtime.example/billing/success",
+                yookassa_webhook_url="https://runtime.example/webhook",
+            )
+        )
+        uow.session.add(BillingRuntimeSecret(yookassa_secret_key_encrypted=encrypt_runtime_secret("wallet-secret-1")))
         await uow.commit()
 
 
@@ -154,7 +156,9 @@ async def test_token_packages_balance_and_purchase_api(client: AsyncClient):
         assert current_org.status_code == 200
         org_id = current_org.json()["data"]["id"]
 
-        buy = await client.post("/api/v1/billing/tokens/purchase", json={"package_code": "pack_50k"}, headers=_headers(token))
+        buy = await client.post(
+            "/api/v1/billing/tokens/purchase", json={"package_code": "pack_50k"}, headers=_headers(token)
+        )
         assert buy.status_code == 200
         assert buy.json()["ok"] is True
         assert buy.json()["data"]["requires_payment"] is True
@@ -202,7 +206,9 @@ async def test_wallet_spend_prefers_addon_then_plan_and_idempotency(client: Asyn
     billing_service_module.httpx.AsyncClient = _MockYooKassaClient
     try:
         # Покупаем addon-пакет и подтверждаем его webhook'ом.
-        buy = await client.post("/api/v1/billing/tokens/purchase", json={"package_code": "pack_50k"}, headers=_headers(token))
+        buy = await client.post(
+            "/api/v1/billing/tokens/purchase", json={"package_code": "pack_50k"}, headers=_headers(token)
+        )
         assert buy.status_code == 200
         assert buy.json()["ok"] is True
         assert buy.json()["data"]["requires_payment"] is True

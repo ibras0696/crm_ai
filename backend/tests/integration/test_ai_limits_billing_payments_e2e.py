@@ -126,7 +126,7 @@ async def test_e2e_ai_limits_billing_payments_flow(client: AsyncClient, monkeypa
                         "content": (
                             "Создаю страницу в базе знаний.\n"
                             "```crm_action\n"
-                            "{\"action\":\"create_kb_page\",\"title\":\"E2E курс\",\"content\":\"Модуль 1\"}\n"
+                            '{"action":"create_kb_page","title":"E2E курс","content":"Модуль 1"}\n'
                             "```"
                         )
                     }

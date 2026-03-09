@@ -7,4 +7,3 @@
 from src.modules.ai.internal.chat_controller import run_ai_chat  # noqa: F401
 
 __all__ = ["run_ai_chat"]
-

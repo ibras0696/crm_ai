@@ -8,8 +8,7 @@ from html.parser import HTMLParser
 from typing import Any
 
 from docx import Document
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Inches, Pt, RGBColor
+from docx.shared import Inches
 from docx.text.paragraph import Paragraph
 
 
@@ -132,10 +131,7 @@ class DocxProcessor:
         document.save(output)
         output.seek(0)
 
-        word_count = sum(
-            len(paragraph.text.split())
-            for paragraph in document.paragraphs
-        )
+        word_count = sum(len(paragraph.text.split()) for paragraph in document.paragraphs)
 
         return DocxProcessorResult(
             docx_bytes=output.read(),
@@ -156,9 +152,7 @@ class DocxProcessor:
             if paragraph.style.name.startswith("Heading"):
                 level = paragraph.style.name.replace("Heading ", "")
                 html_parts.append(f"<h{level}>{self._escape_html(paragraph.text)}</h{level}>")
-            elif paragraph.style.name == "List Bullet":
-                html_parts.append(f"<li>{self._format_runs(paragraph)}</li>")
-            elif paragraph.style.name == "List Number":
+            elif paragraph.style.name == "List Bullet" or paragraph.style.name == "List Number":
                 html_parts.append(f"<li>{self._format_runs(paragraph)}</li>")
             else:
                 html_parts.append(f"<p>{self._format_runs(paragraph)}</p>")
@@ -171,14 +165,14 @@ class DocxProcessor:
 
         for run in paragraph.runs:
             text = self._escape_html(run.text)
-            
+
             if run.bold:
                 text = f"<strong>{text}</strong>"
             if run.italic:
                 text = f"<em>{text}</em>"
             if run.underline:
                 text = f"<u>{text}</u>"
-            
+
             result.append(text)
 
         return "".join(result)
@@ -196,10 +190,10 @@ class DocxProcessor:
     def create_empty_docx(self, title: str | None = None) -> bytes:
         """Create empty DOCX with optional title."""
         document = Document()
-        
+
         if title:
             document.add_heading(title, level=1)
-        
+
         document.add_paragraph("")
 
         output = io.BytesIO()
@@ -215,10 +209,7 @@ class DocxProcessor:
     def get_word_count(self, docx_bytes: bytes) -> int:
         """Get word count from DOCX."""
         document = Document(io.BytesIO(docx_bytes))
-        return sum(
-            len(paragraph.text.split())
-            for paragraph in document.paragraphs
-        )
+        return sum(len(paragraph.text.split()) for paragraph in document.paragraphs)
 
     def extract_metadata(self, docx_bytes: bytes) -> dict[str, Any]:
         """Extract DOCX metadata."""

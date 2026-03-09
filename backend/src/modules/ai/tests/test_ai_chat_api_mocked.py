@@ -57,7 +57,7 @@ async def test_ai_chat_executes_action_with_mocked_provider(client: AsyncClient,
                         "content": (
                             "Создам таблицу.\n"
                             "```crm_action\n"
-                            "{\"action\":\"create_table\",\"name\":\"Mocked\",\"columns\":[{\"name\":\"Name\",\"field_type\":\"text\",\"is_primary\":true}],\"records\":[{\"Name\":\"A\"},{\"Name\":\"B\"}]}\n"
+                            '{"action":"create_table","name":"Mocked","columns":[{"name":"Name","field_type":"text","is_primary":true}],"records":[{"Name":"A"},{"Name":"B"}]}\n'
                             "```"
                         )
                     }
@@ -121,6 +121,7 @@ async def test_ai_chat_regression_create_kb_course_persists_page(client: AsyncCl
     old_token = settings.OPENAI_BEARER_TOKEN
     settings.OPENAI_BEARER_TOKEN = "test-token"
     try:
+
         async def _fake_call(*args, **kwargs):
             return {
                 "choices": [
@@ -129,7 +130,7 @@ async def test_ai_chat_regression_create_kb_course_persists_page(client: AsyncCl
                             "content": (
                                 "Создаю курс.\n"
                                 "```crm_action\n"
-                                "{\"action\":\"create_kb_page\",\"title\":\"Курс по FastAPI\",\"content\":\"Модуль 1: Введение\"}\n"
+                                '{"action":"create_kb_page","title":"Курс по FastAPI","content":"Модуль 1: Введение"}\n'
                                 "```"
                             )
                         }
@@ -154,18 +155,30 @@ async def test_ai_chat_regression_create_kb_course_persists_page(client: AsyncCl
 
         async with UnitOfWork() as uow:
             me = (
-                await uow.session.execute(select(User).where(User.email.like("ai-chat-%@example.com")).order_by(User.created_at.desc()))
-            ).scalars().first()
+                (
+                    await uow.session.execute(
+                        select(User).where(User.email.like("ai-chat-%@example.com")).order_by(User.created_at.desc())
+                    )
+                )
+                .scalars()
+                .first()
+            )
             assert me is not None
-            membership = (await uow.session.execute(select(Membership).where(Membership.user_id == me.id))).scalars().first()
+            membership = (
+                (await uow.session.execute(select(Membership).where(Membership.user_id == me.id))).scalars().first()
+            )
             assert membership is not None
             page = (
-                await uow.session.execute(
-                    select(KBPage)
-                    .where(KBPage.org_id == membership.org_id, KBPage.title == "Курс по FastAPI")
-                    .order_by(KBPage.created_at.desc())
+                (
+                    await uow.session.execute(
+                        select(KBPage)
+                        .where(KBPage.org_id == membership.org_id, KBPage.title == "Курс по FastAPI")
+                        .order_by(KBPage.created_at.desc())
+                    )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             assert page is not None
             assert "Модуль 1" in (page.content or "")
     finally:
@@ -202,7 +215,8 @@ async def test_ai_chat_regression_create_table_in_middle_of_chat(client: AsyncCl
                             "content": (
                                 "Создаю таблицу.\n"
                                 "```crm_action\n"
-                                "{\"action\":\"create_table\",\"name\":\"Сделки из чата\",\"columns\":[{\"name\":\"Клиент\",\"field_type\":\"text\"}]}\n"
+                                '{"action":"create_table","name":"Сделки из чата",'
+                                '"columns":[{"name":"Клиент","field_type":"text"}]}\n'
                                 "```"
                             )
                         }
@@ -239,25 +253,39 @@ async def test_ai_chat_regression_create_table_in_middle_of_chat(client: AsyncCl
 
         async with UnitOfWork() as uow:
             me = (
-                await uow.session.execute(select(User).where(User.email.like("ai-chat-%@example.com")).order_by(User.created_at.desc()))
-            ).scalars().first()
+                (
+                    await uow.session.execute(
+                        select(User).where(User.email.like("ai-chat-%@example.com")).order_by(User.created_at.desc())
+                    )
+                )
+                .scalars()
+                .first()
+            )
             assert me is not None
-            membership = (await uow.session.execute(select(Membership).where(Membership.user_id == me.id))).scalars().first()
+            membership = (
+                (await uow.session.execute(select(Membership).where(Membership.user_id == me.id))).scalars().first()
+            )
             assert membership is not None
             table = (
-                await uow.session.execute(
-                    select(Table)
-                    .where(Table.org_id == membership.org_id, Table.name == "Сделки из чата")
-                    .order_by(Table.created_at.desc())
+                (
+                    await uow.session.execute(
+                        select(Table)
+                        .where(Table.org_id == membership.org_id, Table.name == "Сделки из чата")
+                        .order_by(Table.created_at.desc())
+                    )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             assert table is not None
     finally:
         settings.OPENAI_BEARER_TOKEN = old_token
 
 
 @pytest.mark.asyncio
-async def test_ai_chat_regression_greeting_and_math_without_action_and_with_prompt_debug(client: AsyncClient, monkeypatch):
+async def test_ai_chat_regression_greeting_and_math_without_action_and_with_prompt_debug(
+    client: AsyncClient, monkeypatch
+):
     token = await _register_owner(client)
 
     from src.config import settings
@@ -308,12 +336,16 @@ async def test_ai_chat_regression_greeting_and_math_without_action_and_with_prom
 
         async with UnitOfWork() as uow:
             assistant_row = (
-                await uow.session.execute(
-                    select(AIChatMessage)
-                    .where(AIChatMessage.session_id == uuid.UUID(chat_id), AIChatMessage.role == "assistant")
-                    .order_by(AIChatMessage.created_at.desc())
+                (
+                    await uow.session.execute(
+                        select(AIChatMessage)
+                        .where(AIChatMessage.session_id == uuid.UUID(chat_id), AIChatMessage.role == "assistant")
+                        .order_by(AIChatMessage.created_at.desc())
+                    )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             assert assistant_row is not None
             assert isinstance(assistant_row.meta, dict)
             prompt_debug = assistant_row.meta.get("prompt_debug")
@@ -345,7 +377,7 @@ async def test_ai_chat_executes_action_when_model_returns_action(client: AsyncCl
                         "content": (
                             "Привет!\n"
                             "```crm_action\n"
-                            "{\"action\":\"create_table\",\"name\":\"ShouldNotRun\",\"columns\":[{\"name\":\"Name\",\"field_type\":\"text\"}]}\n"
+                            '{"action":"create_table","name":"ShouldNotRun","columns":[{"name":"Name","field_type":"text"}]}\n'
                             "```"
                         )
                     }
@@ -387,11 +419,7 @@ async def test_ai_chat_synthesizes_action_when_reply_has_no_action_block(client:
         if calls["count"] == 1:
             return {
                 "choices": [
-                    {
-                        "message": {
-                            "content": "Отлично, создал таблицу Неправильные глаголы и добавил первые 20 слов."
-                        }
-                    }
+                    {"message": {"content": "Отлично, создал таблицу Неправильные глаголы и добавил первые 20 слов."}}
                 ],
                 "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
             }
@@ -400,10 +428,10 @@ async def test_ai_chat_synthesizes_action_when_reply_has_no_action_block(client:
                 {
                     "message": {
                         "content": (
-                            "{\"action\":\"create_table\",\"name\":\"Неправильные глаголы (Top 100)\","
-                            "\"columns\":[{\"name\":\"Infinitive\",\"field_type\":\"text\"},"
-                            "{\"name\":\"Past Simple\",\"field_type\":\"text\"}],"
-                            "\"records\":[{\"Infinitive\":\"be\",\"Past Simple\":\"was/were\"}]}"
+                            '{"action":"create_table","name":"Неправильные глаголы (Top 100)",'
+                            '"columns":[{"name":"Infinitive","field_type":"text"},'
+                            '{"name":"Past Simple","field_type":"text"}],'
+                            '"records":[{"Infinitive":"be","Past Simple":"was/were"}]}'
                         )
                     }
                 }
@@ -488,7 +516,7 @@ async def test_ai_chat_accepts_continue_as_explicit_action_request(client: Async
                         "content": (
                             "Продолжаю создание.\n"
                             "```crm_action\n"
-                            "{\"action\":\"create_table\",\"name\":\"Employees\",\"columns\":[{\"name\":\"Name\",\"field_type\":\"text\"}]}\n"
+                            '{"action":"create_table","name":"Employees","columns":[{"name":"Name","field_type":"text"}]}\n'
                             "```"
                         )
                     }
@@ -569,6 +597,7 @@ async def test_ai_chat_handles_provider_error_variants(client: AsyncClient, monk
     old_token = settings.OPENAI_BEARER_TOKEN
     settings.OPENAI_BEARER_TOKEN = "test-token"
     try:
+
         async def _bad_payload(*args, **kwargs):
             return {"choices": []}
 
@@ -628,6 +657,7 @@ async def test_ai_chat_rejects_on_limit_before_provider_call(client: AsyncClient
     old_token = settings.OPENAI_BEARER_TOKEN
     settings.OPENAI_BEARER_TOKEN = "test-token"
     try:
+
         async def _deny_limit(*args, **kwargs):
             return False, {"code": "AI_DAILY_LIMIT", "message": "limit reached"}
 
@@ -666,10 +696,18 @@ async def test_ai_chat_prechecks_table_limit_by_ui_intent(client: AsyncClient, m
     try:
         async with UnitOfWork() as uow:
             me = (
-                await uow.session.execute(select(User).where(User.email.like("ai-chat-%@example.com")).order_by(User.created_at.desc()))
-            ).scalars().first()
+                (
+                    await uow.session.execute(
+                        select(User).where(User.email.like("ai-chat-%@example.com")).order_by(User.created_at.desc())
+                    )
+                )
+                .scalars()
+                .first()
+            )
             assert me is not None
-            membership = (await uow.session.execute(select(Membership).where(Membership.user_id == me.id))).scalars().first()
+            membership = (
+                (await uow.session.execute(select(Membership).where(Membership.user_id == me.id))).scalars().first()
+            )
             assert membership is not None
             free_plan = (await uow.session.execute(select(Plan).where(Plan.name == "free"))).scalars().first()
             if free_plan is None:
@@ -732,10 +770,18 @@ async def test_ai_chat_prechecks_kb_limit_by_ui_intent(client: AsyncClient, monk
     try:
         async with UnitOfWork() as uow:
             me = (
-                await uow.session.execute(select(User).where(User.email.like("ai-chat-%@example.com")).order_by(User.created_at.desc()))
-            ).scalars().first()
+                (
+                    await uow.session.execute(
+                        select(User).where(User.email.like("ai-chat-%@example.com")).order_by(User.created_at.desc())
+                    )
+                )
+                .scalars()
+                .first()
+            )
             assert me is not None
-            membership = (await uow.session.execute(select(Membership).where(Membership.user_id == me.id))).scalars().first()
+            membership = (
+                (await uow.session.execute(select(Membership).where(Membership.user_id == me.id))).scalars().first()
+            )
             assert membership is not None
             free_plan = (await uow.session.execute(select(Plan).where(Plan.name == "free"))).scalars().first()
             if free_plan is None:
@@ -759,7 +805,13 @@ async def test_ai_chat_prechecks_kb_limit_by_ui_intent(client: AsyncClient, monk
             else:
                 free_plan.max_records = 1
             uow.session.add(
-                KBPage(org_id=membership.org_id, created_by=me.id, title="Used", slug=f"used-{uuid.uuid4().hex[:8]}", content="x")
+                KBPage(
+                    org_id=membership.org_id,
+                    created_by=me.id,
+                    title="Used",
+                    slug=f"used-{uuid.uuid4().hex[:8]}",
+                    content="x",
+                )
             )
             await uow.commit()
 
@@ -797,13 +849,7 @@ async def test_ai_chat_create_document_via_ui_intent_fallback(client: AsyncClien
 
     async def _fake_call(*args, **kwargs):
         return {
-            "choices": [
-                {
-                    "message": {
-                        "content": "Подготовлю документ и сохраню его в документах."
-                    }
-                }
-            ],
+            "choices": [{"message": {"content": "Подготовлю документ и сохраню его в документах."}}],
             "usage": {"prompt_tokens": 10, "completion_tokens": 15, "total_tokens": 25},
         }
 
@@ -853,8 +899,6 @@ async def test_ai_chat_create_document_via_ui_intent_fallback(client: AsyncClien
         settings.OPENAI_BEARER_TOKEN = old_token
 
 
-
-
 @pytest.mark.asyncio
 async def test_ai_chat_uses_request_id_idempotency_for_token_spend(client: AsyncClient, monkeypatch):
     token = await _register_owner(client)
@@ -872,10 +916,18 @@ async def test_ai_chat_uses_request_id_idempotency_for_token_spend(client: Async
     try:
         async with UnitOfWork() as uow:
             me = (
-                await uow.session.execute(select(User).where(User.email.like("ai-chat-%@example.com")).order_by(User.created_at.desc()))
-            ).scalars().first()
+                (
+                    await uow.session.execute(
+                        select(User).where(User.email.like("ai-chat-%@example.com")).order_by(User.created_at.desc())
+                    )
+                )
+                .scalars()
+                .first()
+            )
             assert me is not None
-            membership = (await uow.session.execute(select(Membership).where(Membership.user_id == me.id))).scalars().first()
+            membership = (
+                (await uow.session.execute(select(Membership).where(Membership.user_id == me.id))).scalars().first()
+            )
             assert membership is not None
             free_plan = (await uow.session.execute(select(Plan).where(Plan.name == "free"))).scalars().first()
             if not free_plan:
@@ -902,14 +954,18 @@ async def test_ai_chat_uses_request_id_idempotency_for_token_spend(client: Async
 
         async with UnitOfWork() as uow:
             me = (
-                await uow.session.execute(
-                    select(User).where(User.email.like("ai-chat-%@example.com")).order_by(User.created_at.desc())
+                (
+                    await uow.session.execute(
+                        select(User).where(User.email.like("ai-chat-%@example.com")).order_by(User.created_at.desc())
+                    )
                 )
-            ).scalars().first()
+                .scalars()
+                .first()
+            )
             assert me is not None
             membership = (
-                await uow.session.execute(select(Membership).where(Membership.user_id == me.id))
-            ).scalars().first()
+                (await uow.session.execute(select(Membership).where(Membership.user_id == me.id))).scalars().first()
+            )
             assert membership is not None
             await purchase_addon_tokens(
                 uow.session,
@@ -947,10 +1003,18 @@ async def test_ai_chat_uses_request_id_idempotency_for_token_spend(client: Async
 
         async with UnitOfWork() as uow:
             me = (
-                await uow.session.execute(select(User).where(User.email.like("ai-chat-%@example.com")).order_by(User.created_at.desc()))
-            ).scalars().first()
+                (
+                    await uow.session.execute(
+                        select(User).where(User.email.like("ai-chat-%@example.com")).order_by(User.created_at.desc())
+                    )
+                )
+                .scalars()
+                .first()
+            )
             assert me is not None
-            membership = (await uow.session.execute(select(Membership).where(Membership.user_id == me.id))).scalars().first()
+            membership = (
+                (await uow.session.execute(select(Membership).where(Membership.user_id == me.id))).scalars().first()
+            )
             assert membership is not None
             wallet = await get_token_balance_view(uow.session, org_id=membership.org_id)
             # Списали только 1 раз (12 токенов) из addon-корзины.
@@ -970,6 +1034,7 @@ async def test_ai_chat_idempotent_replay_does_not_duplicate_usage_logs_or_messag
     old_token = settings.OPENAI_BEARER_TOKEN
     settings.OPENAI_BEARER_TOKEN = "test-token"
     try:
+
         async def _fake_call(*args, **kwargs):
             return {
                 "choices": [{"message": {"content": "Готово"}}],

@@ -10,8 +10,8 @@ from src.common.schemas import ApiResponse
 from src.infrastructure.uow import UnitOfWork
 from src.modules.access.dependencies import require_access
 from src.modules.auth.dependencies import CurrentUser, require_roles
-from src.modules.files.schemas import FileItem
 from src.modules.files.errors import FilesModuleError
+from src.modules.files.schemas import FileItem
 from src.modules.files.service import FilesService
 
 router = APIRouter(prefix="/files", tags=["files"])

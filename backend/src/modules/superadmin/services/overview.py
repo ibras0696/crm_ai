@@ -66,11 +66,17 @@ class SuperadminOverviewService:
             # Funnel
             activated_orgs = (
                 await uow.session.execute(
-                    select(func.count(func.distinct(AuditLog.org_id))).where(AuditLog.action == AuditAction.LOGIN.value),
+                    select(func.count(func.distinct(AuditLog.org_id))).where(
+                        AuditLog.action == AuditAction.LOGIN.value
+                    ),
                 )
             ).scalar() or 0
-            first_table_orgs = (await uow.session.execute(select(func.count(func.distinct(Table.org_id))))).scalar() or 0
-            first_record_orgs = (await uow.session.execute(select(func.count(func.distinct(Record.org_id))))).scalar() or 0
+            first_table_orgs = (
+                await uow.session.execute(select(func.count(func.distinct(Table.org_id))))
+            ).scalar() or 0
+            first_record_orgs = (
+                await uow.session.execute(select(func.count(func.distinct(Record.org_id))))
+            ).scalar() or 0
 
             # WAU/MAU / stickiness
             dau = (
@@ -130,8 +136,9 @@ class SuperadminOverviewService:
             # Cohorts (orgs) D1/D7/D30
             org_rows = (
                 await uow.session.execute(
-                    select(Organization.id, func.date(Organization.created_at).label("cohort_day"))
-                    .where(Organization.created_at >= d120),
+                    select(Organization.id, func.date(Organization.created_at).label("cohort_day")).where(
+                        Organization.created_at >= d120
+                    ),
                 )
             ).all()
             org_ids = [r.id for r in org_rows]
@@ -320,7 +327,9 @@ class SuperadminOverviewService:
             ).all()
             rec_30_by_org_rows = (
                 await uow.session.execute(
-                    select(Record.org_id, func.count().label("cnt")).where(Record.created_at >= d30).group_by(Record.org_id),
+                    select(Record.org_id, func.count().label("cnt"))
+                    .where(Record.created_at >= d30)
+                    .group_by(Record.org_id),
                 )
             ).all()
             storage_30_by_org_rows = (
@@ -356,10 +365,12 @@ class SuperadminOverviewService:
                 )
                 storage_days_left = (
                     (limits["max_storage_bytes"] - s_cnt) / storage_growth_day
-                    if storage_growth_day > 0 and limits["max_storage_bytes"] > 0 and s_cnt < limits["max_storage_bytes"]
+                    if storage_growth_day > 0
+                    and limits["max_storage_bytes"] > 0
+                    and s_cnt < limits["max_storage_bytes"]
                     else None
                 )
-                days_candidates = [x for x in [rec_days_left, storage_days_left] if isinstance(x, (int, float))]
+                days_candidates = [x for x in [rec_days_left, storage_days_left] if isinstance(x, int | float)]
                 limits_items.append(
                     {
                         "org_id": str(row.id),
@@ -445,7 +456,17 @@ class SuperadminOverviewService:
                         )
                         SELECT
                             COALESCE(COUNT(*), 0) AS total_cells,
-                            COALESCE(SUM(CASE WHEN v IS NULL OR trim(both '"' from v::text) IN ('', 'null', 'undefined', 'nan') THEN 1 ELSE 0 END), 0) AS empty_or_invalid_cells
+                            COALESCE(
+                                SUM(
+                                    CASE
+                                        WHEN v IS NULL
+                                        OR trim(both '"' from v::text) IN ('', 'null', 'undefined', 'nan')
+                                        THEN 1
+                                        ELSE 0
+                                    END
+                                ),
+                                0
+                            ) AS empty_or_invalid_cells
                         FROM cells
                         """
                     )
@@ -534,7 +555,10 @@ class SuperadminOverviewService:
             # Geo/timezone and activity heatmap
             timezone_rows = (
                 await uow.session.execute(
-                    select(User.timezone, func.count().label("cnt")).group_by(User.timezone).order_by(func.count().desc()).limit(20),
+                    select(User.timezone, func.count().label("cnt"))
+                    .group_by(User.timezone)
+                    .order_by(func.count().desc())
+                    .limit(20),
                 )
             ).all()
             heatmap_rows = (
@@ -552,8 +576,7 @@ class SuperadminOverviewService:
             # Executive cards
             plan_prices = {(p.name or "").strip().lower(): _safe_int(p.price_monthly) for p in plans_rows}
             org_plan_counts = {
-                str(r.plan.value if hasattr(r.plan, "value") else r.plan).lower(): _safe_int(r.cnt)
-                for r in plan_rows
+                str(r.plan.value if hasattr(r.plan, "value") else r.plan).lower(): _safe_int(r.cnt) for r in plan_rows
             }
             mrr_proxy_cents = sum(org_plan_counts.get(plan, 0) * price for plan, price in plan_prices.items())
             revenue_by_plan = []
@@ -571,7 +594,9 @@ class SuperadminOverviewService:
             revenue_by_plan.sort(key=lambda x: x["month_revenue"], reverse=True)
             paid_orgs = sum(v for k, v in org_plan_counts.items() if k in {"team", "business"})
             free_orgs = _safe_int(org_plan_counts.get("free", 0))
-            new_orgs_30 = (await uow.session.execute(select(func.count()).where(Organization.created_at >= d30))).scalar() or 0
+            new_orgs_30 = (
+                await uow.session.execute(select(func.count()).where(Organization.created_at >= d30))
+            ).scalar() or 0
             new_orgs_prev_30 = (
                 await uow.session.execute(
                     select(func.count()).where(Organization.created_at >= d60, Organization.created_at < d30),
@@ -579,7 +604,11 @@ class SuperadminOverviewService:
             ).scalar() or 0
 
         sec_anomalies = []
-        for action in [AuditAction.LOGIN_FAILED.value, AuditAction.ACCESS_DENIED.value, AuditAction.TOKEN_ANOMALY.value]:
+        for action in [
+            AuditAction.LOGIN_FAILED.value,
+            AuditAction.ACCESS_DENIED.value,
+            AuditAction.TOKEN_ANOMALY.value,
+        ]:
             last = _safe_int(sec_last.get(action, 0))
             prev = _safe_int(sec_prev.get(action, 0))
             growth_pct = round(((last - prev) / max(prev, 1)) * 100, 1) if prev > 0 else (100.0 if last > 0 else 0.0)
@@ -594,8 +623,7 @@ class SuperadminOverviewService:
                 export_import["import_count_30d"] = _safe_int(r.cnt)
 
         heatmap = [
-            {"dow": _safe_int(r.dow), "hour": _safe_int(r.hour), "count": _safe_int(r.cnt)}
-            for r in heatmap_rows
+            {"dow": _safe_int(r.dow), "hour": _safe_int(r.hour), "count": _safe_int(r.cnt)} for r in heatmap_rows
         ]
         ai_tokens = [_safe_int(r.tokens) for r in ai_user_rows]
         total_ai_requests = sum(_safe_int(r.requests) for r in ai_user_rows)
@@ -626,7 +654,9 @@ class SuperadminOverviewService:
                 }
                 for r in role_rows
             ],
-            "activity_by_module": [{"module": str(r.entity_type or "unknown"), "events_30d": _safe_int(r.events)} for r in module_rows],
+            "activity_by_module": [
+                {"module": str(r.entity_type or "unknown"), "events_30d": _safe_int(r.events)} for r in module_rows
+            ],
             "churn_risk": {"top_orgs": churn_risk_items},
             "tariff_analytics": {
                 "free_to_team_30d": _safe_int(free_to_team),
@@ -661,14 +691,20 @@ class SuperadminOverviewService:
             },
             "export_import": export_import,
             "geo_timezones": {
-                "top_timezones": [{"timezone": str(r.timezone or "UTC"), "users": _safe_int(r.cnt)} for r in timezone_rows],
+                "top_timezones": [
+                    {"timezone": str(r.timezone or "UTC"), "users": _safe_int(r.cnt)} for r in timezone_rows
+                ],
                 "activity_heatmap_30d": heatmap,
             },
             "executive_cards": {
                 "mrr_proxy": round(mrr_proxy_cents / 100, 2),
                 "new_orgs_30d": _safe_int(new_orgs_30),
                 "new_orgs_prev_30d": _safe_int(new_orgs_prev_30),
-                "growth_rate_pct": round(((_safe_int(new_orgs_30) - _safe_int(new_orgs_prev_30)) / max(_safe_int(new_orgs_prev_30), 1)) * 100, 1),
+                "growth_rate_pct": round(
+                    ((_safe_int(new_orgs_30) - _safe_int(new_orgs_prev_30)) / max(_safe_int(new_orgs_prev_30), 1))
+                    * 100,
+                    1,
+                ),
                 "net_org_growth_30d": _safe_int(new_orgs_30) - _safe_int(new_orgs_prev_30),
             },
             "revenue_detailed": {
@@ -695,8 +731,7 @@ class SuperadminOverviewService:
             },
             "registrations_timeline": [{"date": str(r.day)[:10], "count": r.cnt} for r in reg_rows],
             "orgs_by_plan": [
-                {"plan": str(r.plan.value if hasattr(r.plan, "value") else r.plan), "count": r.cnt}
-                for r in plan_rows
+                {"plan": str(r.plan.value if hasattr(r.plan, "value") else r.plan), "count": r.cnt} for r in plan_rows
             ],
             "analytics": analytics,
         }
@@ -780,9 +815,9 @@ class SuperadminOverviewService:
             orgs_map: dict = {}
             if org_ids:
                 orgs = list(
-                    (
-                        await uow.session.execute(select(Organization).where(Organization.id.in_(org_ids)))
-                    ).scalars().all(),
+                    (await uow.session.execute(select(Organization).where(Organization.id.in_(org_ids))))
+                    .scalars()
+                    .all(),
                 )
                 orgs_map = {org.id: org.name for org in orgs}
 

@@ -133,4 +133,3 @@ async def test_create_and_list_tables(client: AsyncClient):
     assert list_resp.status_code == 200
     tables = list_resp.json()["data"]
     assert any(t["id"] == table_id for t in tables)
-

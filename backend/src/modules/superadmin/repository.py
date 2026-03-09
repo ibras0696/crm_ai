@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import String, and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,8 +23,8 @@ from src.modules.tables.records import Record
 
 
 def _utc_day_start(dt: datetime) -> datetime:
-    dt = dt.astimezone(timezone.utc)
-    return datetime(dt.year, dt.month, dt.day, tzinfo=timezone.utc)
+    dt = dt.astimezone(UTC)
+    return datetime(dt.year, dt.month, dt.day, tzinfo=UTC)
 
 
 class SuperadminRepository:
@@ -79,7 +79,9 @@ class SuperadminRepository:
 
     async def get_subscription_by_org(self, *, org_id: uuid.UUID) -> Subscription | None:
         """Получить подписку организации (если есть)."""
-        return (await self.session.execute(select(Subscription).where(Subscription.org_id == org_id))).scalar_one_or_none()
+        return (
+            await self.session.execute(select(Subscription).where(Subscription.org_id == org_id))
+        ).scalar_one_or_none()
 
     async def reset_ai_usage_today(self, *, org_id: uuid.UUID, day_start: datetime) -> tuple[int, int]:
         """Сбросить usage AI за текущий день для организации.
@@ -121,8 +123,16 @@ class SuperadminRepository:
         offset: int,
     ) -> tuple[list[dict], int]:
         """Список таблиц организации (без N+1)."""
-        col_sq = select(Column.table_id.label("table_id"), func.count().label("columns")).group_by(Column.table_id).subquery()
-        rec_sq = select(Record.table_id.label("table_id"), func.count().label("records")).group_by(Record.table_id).subquery()
+        col_sq = (
+            select(Column.table_id.label("table_id"), func.count().label("columns"))
+            .group_by(Column.table_id)
+            .subquery()
+        )
+        rec_sq = (
+            select(Record.table_id.label("table_id"), func.count().label("records"))
+            .group_by(Record.table_id)
+            .subquery()
+        )
 
         stmt = (
             select(
@@ -204,10 +214,13 @@ class SuperadminRepository:
 
         Поиск:
         - если указан sort_col_id, то используем data->>col_id ILIKE.
-        - иначе ищем по строковому представлению JSONB (data::text ILIKE) — это медленнее, но приемлемо для read-only админки.
+        - иначе ищем по строковому представлению JSONB (data::text ILIKE).
+          Это медленнее, но приемлемо для read-only админки.
         """
         stmt = select(Record).where(Record.org_id == org_id, Record.table_id == table_id)
-        count_stmt = select(func.count()).select_from(Record).where(Record.org_id == org_id, Record.table_id == table_id)
+        count_stmt = (
+            select(func.count()).select_from(Record).where(Record.org_id == org_id, Record.table_id == table_id)
+        )
 
         if q:
             like = f"%{q.strip().lower()}%"
@@ -244,7 +257,9 @@ async def list_orgs_page(
 ) -> tuple[list[dict], int]:
     """Return (items, total) for organizations list."""
 
-    mem_sq = select(Membership.org_id.label("org_id"), func.count().label("members")).group_by(Membership.org_id).subquery()
+    mem_sq = (
+        select(Membership.org_id.label("org_id"), func.count().label("members")).group_by(Membership.org_id).subquery()
+    )
     tbl_sq = select(Table.org_id.label("org_id"), func.count().label("tables")).group_by(Table.org_id).subquery()
     rec_sq = select(Record.org_id.label("org_id"), func.count().label("records")).group_by(Record.org_id).subquery()
 
@@ -293,7 +308,9 @@ async def list_orgs_page(
     if filters:
         stmt = stmt.where(and_(*filters))
 
-    count_stmt = select(func.count()).select_from(Organization).outerjoin(Subscription, Subscription.org_id == Organization.id)
+    count_stmt = (
+        select(func.count()).select_from(Organization).outerjoin(Subscription, Subscription.org_id == Organization.id)
+    )
     if filters:
         count_stmt = count_stmt.where(and_(*filters))
 
@@ -335,11 +352,19 @@ async def get_org_detail(session: AsyncSession, *, org_id: uuid.UUID) -> dict | 
     sub = (await session.execute(select(Subscription).where(Subscription.org_id == org_id))).scalar_one_or_none()
 
     # Usage counts.
-    mem_cnt = (await session.execute(select(func.count()).select_from(Membership).where(Membership.org_id == org_id))).scalar() or 0
-    tbl_cnt = (await session.execute(select(func.count()).select_from(Table).where(Table.org_id == org_id))).scalar() or 0
-    rec_cnt = (await session.execute(select(func.count()).select_from(Record).where(Record.org_id == org_id))).scalar() or 0
+    mem_cnt = (
+        await session.execute(select(func.count()).select_from(Membership).where(Membership.org_id == org_id))
+    ).scalar() or 0
+    tbl_cnt = (
+        await session.execute(select(func.count()).select_from(Table).where(Table.org_id == org_id))
+    ).scalar() or 0
+    rec_cnt = (
+        await session.execute(select(func.count()).select_from(Record).where(Record.org_id == org_id))
+    ).scalar() or 0
     files_row = (
-        await session.execute(select(func.count(), func.coalesce(func.sum(File.size), 0)).select_from(File).where(File.org_id == org_id))
+        await session.execute(
+            select(func.count(), func.coalesce(func.sum(File.size), 0)).select_from(File).where(File.org_id == org_id)
+        )
     ).one()
 
     # Plan limits (source of truth: plans table).
@@ -347,13 +372,17 @@ async def get_org_detail(session: AsyncSession, *, org_id: uuid.UUID) -> dict | 
     if sub and getattr(sub, "status", None) == SubscriptionStatus.ACTIVE and getattr(sub, "plan", None) is not None:
         plan_name = sub.plan.value if hasattr(sub.plan, "value") else str(sub.plan)
 
-    plan = (await session.execute(select(Plan).where(Plan.name == plan_name, Plan.is_active.is_(True)))).scalars().first()
+    plan = (
+        (await session.execute(select(Plan).where(Plan.name == plan_name, Plan.is_active.is_(True)))).scalars().first()
+    )
 
     # AI usage today (for progress UI).
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     used_today = (
         await session.execute(
-            select(func.coalesce(func.sum(AIUsageLog.total_tokens), 0)).where(AIUsageLog.org_id == org_id, AIUsageLog.created_at >= _utc_day_start(now))
+            select(func.coalesce(func.sum(AIUsageLog.total_tokens), 0)).where(
+                AIUsageLog.org_id == org_id, AIUsageLog.created_at >= _utc_day_start(now)
+            )
         )
     ).scalar_one()
 
@@ -408,8 +437,15 @@ async def get_org_detail(session: AsyncSession, *, org_id: uuid.UUID) -> dict | 
     }
 
 
-async def list_org_members(session: AsyncSession, *, org_id: uuid.UUID, limit: int, offset: int) -> tuple[list[dict], int]:
-    total = int((await session.execute(select(func.count()).select_from(Membership).where(Membership.org_id == org_id))).scalar() or 0)
+async def list_org_members(
+    session: AsyncSession, *, org_id: uuid.UUID, limit: int, offset: int
+) -> tuple[list[dict], int]:
+    total = int(
+        (
+            await session.execute(select(func.count()).select_from(Membership).where(Membership.org_id == org_id))
+        ).scalar()
+        or 0
+    )
     stmt = (
         select(Membership, User)
         .join(User, User.id == Membership.user_id)
@@ -474,10 +510,10 @@ async def list_users_page(
     memberships: dict[uuid.UUID, list[dict]] = {u.id: [] for u in users}
     if users:
         mem_rows = (
-            await session.execute(
-                select(Membership).where(Membership.user_id.in_([u.id for u in users]))
-            )
-        ).scalars().all()
+            (await session.execute(select(Membership).where(Membership.user_id.in_([u.id for u in users]))))
+            .scalars()
+            .all()
+        )
         for m in mem_rows:
             memberships.setdefault(m.user_id, []).append(
                 {"org_id": str(m.org_id), "role": m.role.value if hasattr(m.role, "value") else str(m.role)}
@@ -506,7 +542,11 @@ async def list_audit_logs_page(
     limit: int,
     offset: int,
 ) -> tuple[list[dict], int]:
-    base = select(AuditLog, Organization.name).join(Organization, Organization.id == AuditLog.org_id).order_by(AuditLog.created_at.desc())
+    base = (
+        select(AuditLog, Organization.name)
+        .join(Organization, Organization.id == AuditLog.org_id)
+        .order_by(AuditLog.created_at.desc())
+    )
     count_stmt = select(func.count()).select_from(AuditLog)
     if org_id is not None:
         base = base.where(AuditLog.org_id == org_id)

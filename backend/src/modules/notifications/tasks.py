@@ -33,9 +33,7 @@ def _can_send_invite_email(*, to_email: str, invite_token: str) -> tuple[bool, s
     """Validate invite state right before sending email to avoid stale/duplicate sends."""
     try:
         with sync_session_factory() as session:
-            invite = session.execute(
-                select(Invite).where(Invite.token == invite_token).limit(1)
-            ).scalar_one_or_none()
+            invite = session.execute(select(Invite).where(Invite.token == invite_token).limit(1)).scalar_one_or_none()
             if not invite:
                 return False, "invite_not_found"
             if invite.status != InviteStatus.PENDING:
@@ -50,10 +48,12 @@ def _can_send_invite_email(*, to_email: str, invite_token: str) -> tuple[bool, s
             ).scalar_one_or_none()
             if existing_user:
                 is_member = session.execute(
-                    select(Membership.id).where(
+                    select(Membership.id)
+                    .where(
                         Membership.user_id == existing_user.id,
                         Membership.org_id == invite.org_id,
-                    ).limit(1)
+                    )
+                    .limit(1)
                 ).scalar_one_or_none()
                 if is_member:
                     return False, "already_member"
@@ -128,7 +128,7 @@ def send_invite_email(self, to_email: str, org_name: str, invite_token: str, inv
     url = invite_url or f"{settings.FRONTEND_URL.rstrip('/')}/invite/accept?token={invite_token}"
     subject = f"Приглашение в организацию: {org_name}"
     body = (
-        f"Вас пригласили в организацию \"{org_name}\".\n\n"
+        f'Вас пригласили в организацию "{org_name}".\n\n'
         f"Ссылка для принятия приглашения:\n{url}\n\n"
         "Если вы не ожидали это письмо, просто проигнорируйте его.\n"
     )

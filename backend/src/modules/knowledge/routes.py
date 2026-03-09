@@ -8,8 +8,8 @@ from src.common.schemas import ApiResponse
 from src.infrastructure.uow import UnitOfWork
 from src.modules.access.dependencies import require_access
 from src.modules.auth.dependencies import CurrentUser, require_roles
-from src.modules.knowledge.schemas import CreatePageRequest, PageOut, UpdatePageRequest
 from src.modules.knowledge.errors import KnowledgeModuleError
+from src.modules.knowledge.schemas import CreatePageRequest, PageOut, UpdatePageRequest
 from src.modules.knowledge.service import KnowledgeService
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])

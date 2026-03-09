@@ -896,10 +896,14 @@ async def test_docs_audit_events_for_upload_and_scan(client: AsyncClient, monkey
 
     async with UnitOfWork() as uow:
         rows = (
-            await uow.session.execute(
-                select(AuditLog).where(AuditLog.entity_type == "docs_file", AuditLog.entity_id == file_id)
+            (
+                await uow.session.execute(
+                    select(AuditLog).where(AuditLog.entity_type == "docs_file", AuditLog.entity_id == file_id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         events = {
             str((row.meta or {}).get("event"))
             for row in rows
@@ -969,12 +973,16 @@ async def test_docs_save_text_creates_new_version_and_updates_usage_and_audit(
 
     async with UnitOfWork() as uow:
         audit_rows = (
-            await uow.session.execute(
-                select(AuditLog).where(
-                    AuditLog.entity_id.in_([str(file_id), str(save.json()["data"]["current_version_id"])]),
+            (
+                await uow.session.execute(
+                    select(AuditLog).where(
+                        AuditLog.entity_id.in_([str(file_id), str(save.json()["data"]["current_version_id"])]),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     events = {
         str((row.meta or {}).get("event"))
         for row in audit_rows
@@ -1372,6 +1380,7 @@ async def test_docs_onlyoffice_callback_creates_new_version(client: AsyncClient,
     monkeypatch.setattr("src.modules.docs.tasks.DEFAULT_STORAGE_PROVIDER.get_object_bytes", _get_object_bytes)
     monkeypatch.setattr("src.modules.docs.tasks.sync_session_factory", _build_test_sync_session_factory())
     monkeypatch.setattr("src.modules.docs.routes.scan_version.delay", lambda *_args, **_kwargs: None)
+
     async def _download_onlyoffice_file(*_args, **_kwargs):
         return updated_docx
 
@@ -1816,12 +1825,16 @@ async def test_docs_retention_cleanup_deletes_old_versions(client: AsyncClient, 
 
     async with UnitOfWork() as uow:
         versions_before = (
-            await uow.session.execute(
-                select(FileVersion)
-                .where(FileVersion.file_id == uuid.UUID(file_id))
-                .order_by(FileVersion.created_at.desc())
+            (
+                await uow.session.execute(
+                    select(FileVersion)
+                    .where(FileVersion.file_id == uuid.UUID(file_id))
+                    .order_by(FileVersion.created_at.desc())
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         current_version_id = str(
             (
                 await uow.session.execute(

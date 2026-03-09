@@ -4,7 +4,12 @@ import uuid
 
 from src.modules.auth.models import User
 from src.modules.auth.schemas import RegisterRequest, TokenResponse, UpdateMeRequest
-from src.modules.auth.services import AuthProfileService, AuthRegistrationService, AuthSessionService, AuthPasswordService
+from src.modules.auth.services import (
+    AuthPasswordService,
+    AuthProfileService,
+    AuthRegistrationService,
+    AuthSessionService,
+)
 from src.modules.org.models import Organization
 
 
@@ -24,7 +29,9 @@ class AuthService:
         self._profile = profile_service or AuthProfileService()
         self._password = password_service or AuthPasswordService()
 
-    async def register(self, data: RegisterRequest, ip_address: str | None = None) -> tuple[User, Organization, TokenResponse]:
+    async def register(
+        self, data: RegisterRequest, ip_address: str | None = None
+    ) -> tuple[User, Organization, TokenResponse]:
         return await self._registration.register(data, ip_address=ip_address)
 
     async def login(

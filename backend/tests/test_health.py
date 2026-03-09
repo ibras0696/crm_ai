@@ -1,6 +1,6 @@
 """Health and readiness endpoint tests."""
+
 import pytest
-import pytest_asyncio
 
 
 @pytest.mark.asyncio

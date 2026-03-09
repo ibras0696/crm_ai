@@ -364,10 +364,10 @@ async def test_token_purchase_webhook_adds_tokens_once(client: AsyncClient):
 
     async with UnitOfWork() as uow:
         purchases = (
-            await uow.session.execute(
-                select(TokenPurchase).where(TokenPurchase.payment_id == payment_id)
-            )
-        ).scalars().all()
+            (await uow.session.execute(select(TokenPurchase).where(TokenPurchase.payment_id == payment_id)))
+            .scalars()
+            .all()
+        )
         assert len(purchases) == 1
         assert purchases[0].package_code == "pack_50k"
         assert purchases[0].tokens_total == 50_000
@@ -415,9 +415,7 @@ async def test_subscription_lifecycle_grace_downgrade_and_purge(client: AsyncCli
     assert first["post_expiry_notifications"] >= 1
 
     async with UnitOfWork() as uow:
-        sub = (
-            await uow.session.execute(select(Subscription).where(Subscription.org_id == org_id))
-        ).scalar_one()
+        sub = (await uow.session.execute(select(Subscription).where(Subscription.org_id == org_id))).scalar_one()
         assert sub.status == SubscriptionStatus.PAST_DUE
         assert sub.grace_period_end is not None
         await uow.commit()
@@ -428,9 +426,7 @@ async def test_subscription_lifecycle_grace_downgrade_and_purge(client: AsyncCli
     assert second["downgraded_orgs"] >= 1
 
     async with UnitOfWork() as uow:
-        sub = (
-            await uow.session.execute(select(Subscription).where(Subscription.org_id == org_id))
-        ).scalar_one()
+        sub = (await uow.session.execute(select(Subscription).where(Subscription.org_id == org_id))).scalar_one()
         assert sub.status == SubscriptionStatus.CANCELLED
         assert sub.plan == PlanTier.FREE
         await uow.commit()
@@ -441,13 +437,9 @@ async def test_subscription_lifecycle_grace_downgrade_and_purge(client: AsyncCli
     assert third["purged_orgs"] >= 1
 
     async with UnitOfWork() as uow:
-        table_count = (
-            await uow.session.execute(select(Table).where(Table.org_id == org_id))
-        ).scalars().all()
+        table_count = (await uow.session.execute(select(Table).where(Table.org_id == org_id))).scalars().all()
         assert len(table_count) == 0
-        members = (
-            await uow.session.execute(select(Membership).where(Membership.org_id == org_id))
-        ).scalars().all()
+        members = (await uow.session.execute(select(Membership).where(Membership.org_id == org_id))).scalars().all()
         # org + memberships are still present, only business data is purged.
         assert len(members) >= 1
         await uow.commit()
@@ -489,8 +481,10 @@ async def test_billing_webhook_upgrades_subscription_and_org_plan(client: AsyncC
 
     async with UnitOfWork() as uow:
         membership = (
-            await uow.session.execute(select(Membership).where(Membership.org_id == uuid.UUID(org_id)))
-        ).scalars().first()
+            (await uow.session.execute(select(Membership).where(Membership.org_id == uuid.UUID(org_id))))
+            .scalars()
+            .first()
+        )
         assert membership is not None
         org = await uow.session.get(Organization, uuid.UUID(org_id))
         assert org is not None
@@ -570,13 +564,17 @@ async def test_subscription_lifecycle_notifications_are_idempotent(client: Async
 
     async with UnitOfWork() as uow:
         notifications = (
-            await uow.session.execute(
-                select(Notification).where(
-                    Notification.org_id == org_id,
-                    Notification.type == NotificationType.IN_APP,
+            (
+                await uow.session.execute(
+                    select(Notification).where(
+                        Notification.org_id == org_id,
+                        Notification.type == NotificationType.IN_APP,
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         kinds = [(n.meta or {}).get("kind") for n in notifications]
         assert kinds.count("subscription_pre_expiry") >= 1
         assert kinds.count("subscription_post_expiry") >= 1

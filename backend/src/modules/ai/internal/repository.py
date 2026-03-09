@@ -8,7 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.common.enums import SubscriptionStatus
-from src.modules.ai.models import AIChatMessage, AIChatSession, AIRuntimeAudit, AIRuntimeSecret, AIRuntimeSettings, AIUsageLog
+from src.modules.ai.models import (
+    AIChatMessage,
+    AIChatSession,
+    AIRuntimeAudit,
+    AIRuntimeSecret,
+    AIRuntimeSettings,
+    AIUsageLog,
+)
 from src.modules.auth.models import User
 from src.modules.billing.models import Plan
 from src.modules.knowledge.models import KBPage
@@ -171,12 +178,12 @@ class AIRepository:
             for user_id, email, first_name, last_name in users:
                 full_name = f"{first_name} {last_name}".strip().lower()
                 rev_full_name = f"{last_name} {first_name}".strip().lower()
-                if (
-                    ref == email.lower()
-                    or ref == full_name
-                    or ref == rev_full_name
-                    or ref == first_name.lower()
-                    or ref == last_name.lower()
+                if ref in (
+                    email.lower(),
+                    full_name,
+                    rev_full_name,
+                    first_name.lower(),
+                    last_name.lower(),
                 ):
                     if user_id not in seen:
                         seen.add(user_id)
@@ -194,12 +201,16 @@ class AIRepository:
             Список моделей Table с предзагруженными `columns`.
         """
         return (
-            await self.session.execute(
-                select(Table)
-                .where(Table.org_id == org_id, Table.is_archived.is_(False))
-                .options(selectinload(Table.columns))
+            (
+                await self.session.execute(
+                    select(Table)
+                    .where(Table.org_id == org_id, Table.is_archived.is_(False))
+                    .options(selectinload(Table.columns))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     async def lock_table(self, *, table_id: uuid.UUID) -> None:
         """Взять блокировку строки таблицы (`FOR UPDATE`).
@@ -355,7 +366,9 @@ class AIRepository:
             return None
         return await self.get_session(org_id=org_id, user_id=user_id, session_id=session_id)
 
-    async def get_session(self, *, org_id: uuid.UUID, user_id: uuid.UUID, session_id: uuid.UUID) -> AIChatSession | None:
+    async def get_session(
+        self, *, org_id: uuid.UUID, user_id: uuid.UUID, session_id: uuid.UUID
+    ) -> AIChatSession | None:
         """Получить сессию по id, проверив принадлежность org/user.
 
         Args:
@@ -453,17 +466,21 @@ class AIRepository:
             Список сообщений по возрастанию `created_at`.
         """
         return (
-            await self.session.execute(
-                select(AIChatMessage)
-                .where(
-                    AIChatMessage.session_id == session_id,
-                    AIChatMessage.org_id == org_id,
-                    AIChatMessage.user_id == user_id,
+            (
+                await self.session.execute(
+                    select(AIChatMessage)
+                    .where(
+                        AIChatMessage.session_id == session_id,
+                        AIChatMessage.org_id == org_id,
+                        AIChatMessage.user_id == user_id,
+                    )
+                    .order_by(AIChatMessage.created_at.asc())
+                    .limit(limit)
                 )
-                .order_by(AIChatMessage.created_at.asc())
-                .limit(limit)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     async def get_last_assistant_message_by_request_id(
         self,
@@ -485,20 +502,24 @@ class AIRepository:
             Сообщение ассистента или None.
         """
         return (
-            await self.session.execute(
-                select(AIChatMessage)
-                .where(
-                    AIChatMessage.session_id == session_id,
-                    AIChatMessage.org_id == org_id,
-                    AIChatMessage.user_id == user_id,
-                    AIChatMessage.role == "assistant",
-                    AIChatMessage.meta.is_not(None),
-                    AIChatMessage.meta["request_id"].astext == request_id,
+            (
+                await self.session.execute(
+                    select(AIChatMessage)
+                    .where(
+                        AIChatMessage.session_id == session_id,
+                        AIChatMessage.org_id == org_id,
+                        AIChatMessage.user_id == user_id,
+                        AIChatMessage.role == "assistant",
+                        AIChatMessage.meta.is_not(None),
+                        AIChatMessage.meta["request_id"].astext == request_id,
+                    )
+                    .order_by(AIChatMessage.created_at.desc())
+                    .limit(1)
                 )
-                .order_by(AIChatMessage.created_at.desc())
-                .limit(1)
             )
-        ).scalars().first()
+            .scalars()
+            .first()
+        )
 
     async def get_runtime_settings(self) -> AIRuntimeSettings | None:
         """Получить глобальные runtime-настройки AI.
@@ -516,8 +537,14 @@ class AIRepository:
         """Получить последние аудиты изменения runtime-настроек AI."""
         safe_limit = max(1, min(int(limit), 100))
         return (
-            await self.session.execute(select(AIRuntimeAudit).order_by(AIRuntimeAudit.created_at.desc()).limit(safe_limit))
-        ).scalars().all()
+            (
+                await self.session.execute(
+                    select(AIRuntimeAudit).order_by(AIRuntimeAudit.created_at.desc()).limit(safe_limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
 
     async def list_kb_pages(self, *, org_id: uuid.UUID, limit: int = 300) -> list[KBPage]:
         """Получить опубликованные страницы базы знаний.
@@ -530,13 +557,17 @@ class AIRepository:
             Список моделей KBPage.
         """
         return (
-            await self.session.execute(
-                select(KBPage)
-                .where(KBPage.org_id == org_id, KBPage.is_published.is_(True))
-                .order_by(KBPage.position.asc())
-                .limit(limit)
+            (
+                await self.session.execute(
+                    select(KBPage)
+                    .where(KBPage.org_id == org_id, KBPage.is_published.is_(True))
+                    .order_by(KBPage.position.asc())
+                    .limit(limit)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     async def get_kb_page_for_org(self, *, org_id: uuid.UUID, page_id: uuid.UUID) -> KBPage | None:
         """Получить страницу базы знаний по ID в рамках организации.
@@ -549,10 +580,10 @@ class AIRepository:
             Объект KBPage или None.
         """
         return (
-            await self.session.execute(
-                select(KBPage).where(KBPage.org_id == org_id, KBPage.id == page_id).limit(1)
-            )
-        ).scalars().first()
+            (await self.session.execute(select(KBPage).where(KBPage.org_id == org_id, KBPage.id == page_id).limit(1)))
+            .scalars()
+            .first()
+        )
 
     async def list_tables_with_columns(self, *, org_id: uuid.UUID, limit: int = 200) -> list[Table]:
         """Получить таблицы организации вместе с колонками.
@@ -565,14 +596,18 @@ class AIRepository:
             Список моделей Table с предзагруженными columns.
         """
         return (
-            await self.session.execute(
-                select(Table)
-                .where(Table.org_id == org_id, Table.is_archived.is_(False))
-                .options(selectinload(Table.columns))
-                .order_by(Table.created_at.desc())
-                .limit(limit)
+            (
+                await self.session.execute(
+                    select(Table)
+                    .where(Table.org_id == org_id, Table.is_archived.is_(False))
+                    .options(selectinload(Table.columns))
+                    .order_by(Table.created_at.desc())
+                    .limit(limit)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     async def list_schedule_events(self, *, org_id: uuid.UUID, limit: int = 100) -> list[Event]:
         """Получить события расписания организации.
@@ -585,13 +620,14 @@ class AIRepository:
             Список моделей Event.
         """
         return (
-            await self.session.execute(
-                select(Event)
-                .where(Event.org_id == org_id)
-                .order_by(Event.start_at.desc())
-                .limit(limit)
+            (
+                await self.session.execute(
+                    select(Event).where(Event.org_id == org_id).order_by(Event.start_at.desc()).limit(limit)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     async def resolve_org_user_ids(self, *, org_id: uuid.UUID, refs: list[str]) -> tuple[list[uuid.UUID], list[str]]:
         """Resolve org user ids by UUID/email/full-name/first-name/last-name."""
@@ -612,10 +648,14 @@ class AIRepository:
                 continue
         if uuid_refs:
             rows = (
-                await self.session.execute(
-                    select(Membership.user_id).where(Membership.org_id == org_id, Membership.user_id.in_(uuid_refs))
+                (
+                    await self.session.execute(
+                        select(Membership.user_id).where(Membership.org_id == org_id, Membership.user_id.in_(uuid_refs))
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             for uid in rows:
                 if uid not in resolved:
                     resolved.append(uid)

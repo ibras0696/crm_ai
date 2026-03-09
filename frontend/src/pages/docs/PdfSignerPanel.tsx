@@ -52,7 +52,7 @@ export function PdfSignerPanel({
             }
             onClose()
             await pollFileStatus([file.id])
-        } catch (err: any) {
+        } catch {
             onError('Ошибка при подписании PDF')
             setLoading(false)
         }

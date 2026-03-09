@@ -54,20 +54,12 @@ class MembershipRepository:
         return result.scalar_one_or_none()
 
     async def get_user_memberships(self, user_id: uuid.UUID) -> list[Membership]:
-        stmt = (
-            select(Membership)
-            .options(selectinload(Membership.organization))
-            .where(Membership.user_id == user_id)
-        )
+        stmt = select(Membership).options(selectinload(Membership.organization)).where(Membership.user_id == user_id)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
     async def get_org_members(self, org_id: uuid.UUID) -> list[Membership]:
-        stmt = (
-            select(Membership)
-            .options(selectinload(Membership.user))
-            .where(Membership.org_id == org_id)
-        )
+        stmt = select(Membership).options(selectinload(Membership.user)).where(Membership.org_id == org_id)
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 

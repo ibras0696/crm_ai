@@ -5,8 +5,8 @@ from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
-from src.modules.files.errors import FilesModuleError
 from src.modules.files import storage
+from src.modules.files.errors import FilesModuleError
 from src.modules.files.models import File
 from src.modules.files.repository import FileRepository
 

@@ -146,7 +146,9 @@ async def superadmin_update_profile(
                 data=None,
                 error={"code": code, "message": "Текущий пароль введён неверно."},
             )
-        return ApiResponse(ok=False, data=None, error={"code": "VALIDATION_ERROR", "message": "Некорректные данные профиля"})
+        return ApiResponse(
+            ok=False, data=None, error={"code": "VALIDATION_ERROR", "message": "Некорректные данные профиля"}
+        )
 
     _set_superadmin_cookie(response, create_superadmin_access_token(email=str(data.get("email") or "")))
     return ApiResponse(data=SuperadminProfileResponse.model_validate(data))

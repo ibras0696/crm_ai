@@ -1,8 +1,8 @@
 import asyncio
 import logging
-import sentry_sdk
 from contextlib import asynccontextmanager
 
+import sentry_sdk
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,7 +15,12 @@ from src.infrastructure.logging import setup_logging
 from src.infrastructure.metrics import setup_metrics
 from src.infrastructure.redis_client import RedisClient, ping_with_timeout
 from src.middleware.correlation import CorrelationIdMiddleware
-from src.middleware.error_handler import app_error_handler, generic_error_handler, http_error_handler, validation_error_handler
+from src.middleware.error_handler import (
+    app_error_handler,
+    generic_error_handler,
+    http_error_handler,
+    validation_error_handler,
+)
 from src.middleware.request_size_limit import RequestSizeLimitMiddleware
 
 setup_logging(debug=settings.DEBUG)

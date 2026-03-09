@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-import uuid
 import re
+import uuid
 from collections import Counter
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from src.modules.ai.internal.repository import AIRepository
 from src.infrastructure.uow import UnitOfWork
+from src.modules.ai.internal.repository import AIRepository
 from src.modules.knowledge.models import KBPage
 from src.modules.schedule.models import Event
 from src.modules.schedule.schemas import CreateEventRequest
@@ -53,7 +53,7 @@ def _parse_dt(value: Any | None) -> datetime | None:
     if dt is None:
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt
 
 
@@ -198,19 +198,13 @@ def _extract_start_end(payload: dict[str, Any]) -> tuple[datetime | None, dateti
     # human-friendly aliases
     if start_raw is None:
         start_raw = (
-            payload.get("дата_начала")
-            or payload.get("начало")
-            or payload.get("start_date")
-            or payload.get("дата")
+            payload.get("дата_начала") or payload.get("начало") or payload.get("start_date") or payload.get("дата")
         )
     if end_raw is None:
         end_raw = payload.get("дата_конца") or payload.get("конец") or payload.get("end_date")
 
     start_time = (
-        payload.get("время_начала")
-        or payload.get("start_time")
-        or payload.get("time_start")
-        or payload.get("время")
+        payload.get("время_начала") or payload.get("start_time") or payload.get("time_start") or payload.get("время")
     )
     end_time = payload.get("время_конца") or payload.get("end_time") or payload.get("time_end")
 
@@ -409,10 +403,7 @@ async def handle_create_schedule_event_action(
             reminders = _extract_reminders({"напомнить_за": user_message})
 
         assigned_to_raw = (
-            item.get("assigned_to")
-            or item.get("assignedTo")
-            or item.get("assignee_id")
-            or item.get("исполнитель")
+            item.get("assigned_to") or item.get("assignedTo") or item.get("assignee_id") or item.get("исполнитель")
         )
         assigned_to: uuid.UUID | None = None
         try:
@@ -433,12 +424,12 @@ async def handle_create_schedule_event_action(
                 for candidate_id, email, first_name, last_name in org_users:
                     full_name = f"{first_name} {last_name}".strip().lower()
                     rev_name = f"{last_name} {first_name}".strip().lower()
-                    if (
-                        clean_ref == email.lower()
-                        or clean_ref == first_name.lower()
-                        or clean_ref == last_name.lower()
-                        or clean_ref == full_name
-                        or clean_ref == rev_name
+                    if clean_ref in (
+                        email.lower(),
+                        first_name.lower(),
+                        last_name.lower(),
+                        full_name,
+                        rev_name,
                     ):
                         matched_id = candidate_id
                         break
@@ -617,7 +608,7 @@ async def handle_create_kb_page_action(
         created_pages.append(page)
         remaining_slots -= 1
 
-        for child in (node.get("children") or []):
+        for child in node.get("children") or []:
             await _create_node(child, page.id)
 
     for node in nodes:
@@ -663,7 +654,7 @@ async def handle_edit_kb_page_action(
     page_id_raw = action_payload.get("page_id") or action_payload.get("id")
     if not page_id_raw:
         return {"action": "edit_kb_page", "ok": False, "error": "page_id_required"}
-    
+
     try:
         page_id = uuid.UUID(str(page_id_raw))
     except Exception:
@@ -680,19 +671,19 @@ async def handle_edit_kb_page_action(
             page.title = title_str
             page.slug = _build_kb_slug(title_str)
             updated = True
-            
+
     if "content" in action_payload:
         content_str = str(action_payload["content"]) if action_payload.get("content") is not None else None
         if page.content != content_str:
             page.content = content_str
             updated = True
-            
+
     if "icon" in action_payload:
         icon_str = str(action_payload["icon"]).strip()[:50] if action_payload.get("icon") else None
         if page.icon != icon_str:
             page.icon = icon_str
             updated = True
-            
+
     if updated:
         await uow.session.flush()
 
@@ -700,7 +691,7 @@ async def handle_edit_kb_page_action(
         "action": "edit_kb_page",
         "ok": True,
         "page": {"id": str(page.id), "title": page.title, "slug": page.slug},
-        "updated": updated
+        "updated": updated,
     }
 
 

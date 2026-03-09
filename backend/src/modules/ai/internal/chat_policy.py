@@ -65,9 +65,7 @@ def should_attach_context(
     if intent_decision.is_action or intent_decision.is_context_query:
         return True
     # Явный выбор источников в UI должен уважаться даже для коротких запросов.
-    if has_selected_context(context_options):
-        return True
-    return False
+    return has_selected_context(context_options)
 
 
 def resolve_provider_max_tokens(

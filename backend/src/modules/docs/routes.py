@@ -334,10 +334,16 @@ async def save_text(
                 file_id=file_id,
                 content=body.content,
                 title=body.title,
+                expected_updated_at=body.expected_updated_at,
             )
             await uow.session.refresh(file_obj)
             await uow.commit()
         except DocsModuleError as error:
+            if error.status_code == 409:
+                return JSONResponse(
+                    status_code=error.status_code,
+                    content={"ok": False, "data": None, "error": {"code": error.code, "message": error.message}},
+                )
             return _error_response(error)
         item = FileOut.model_validate(file_obj)
     return ApiResponse(data=item)
@@ -559,22 +565,23 @@ async def create_file_via_ai(
             return _error_response(error)
 
     task_id: str | None = None
-    try:
-        task = ai_generate.delay(str(result.job.id))
-        task_id = str(getattr(task, "id", "") or "")
-    except Exception:
-        logger.exception("docs_ai_generate_enqueue_failed", extra={"job_id": str(result.job.id)})
-        await run_ai_generate_inline(job_id=str(result.job.id), task_id="inline-route-fallback")
+    if result.should_enqueue_task:
+        try:
+            task = ai_generate.delay(str(result.job.id))
+            task_id = str(getattr(task, "id", "") or "")
+        except Exception:
+            logger.exception("docs_ai_generate_enqueue_failed", extra={"job_id": str(result.job.id)})
+            await run_ai_generate_inline(job_id=str(result.job.id), task_id="inline-route-fallback")
 
-    if task_id:
-        async with UnitOfWork() as uow:
-            service = DocsService(uow.session)
-            try:
-                job = await service.get_ai_generation_job(org_id=current_user.org_id, job_id=result.job.id)
-                job.task_id = task_id
-                await uow.commit()
-            except Exception:
-                await uow.rollback()
+        if task_id:
+            async with UnitOfWork() as uow:
+                service = DocsService(uow.session)
+                try:
+                    job = await service.get_ai_generation_job(org_id=current_user.org_id, job_id=result.job.id)
+                    job.task_id = task_id
+                    await uow.commit()
+                except Exception:
+                    await uow.rollback()
 
     payload = AIGenerateOut(
         job_id=result.job.id,
@@ -618,6 +625,54 @@ async def list_ai_generation_jobs(
         jobs = await service.list_ai_generation_jobs(org_id=current_user.org_id, limit=limit)
         payload = [AIGenerationJobOut.model_validate(item) for item in jobs]
     return ApiResponse(data=payload)
+
+
+@router.post("/files/ai/jobs/{job_id}/stop", response_model=ApiResponse[AIGenerationJobOut])
+async def stop_ai_generation_job(
+    job_id: uuid.UUID,
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE),
+    ),
+    _: None = Depends(require_access(resource_type="files", permission="can_write")),
+):
+    """Остановить активную AI-задачу генерации документа."""
+    async with UnitOfWork() as uow:
+        service = DocsService(uow.session)
+        try:
+            job = await service.stop_ai_generation_job(
+                org_id=current_user.org_id,
+                actor_id=current_user.user_id,
+                job_id=job_id,
+            )
+        except DocsModuleError as error:
+            return _error_response(error)
+        await uow.session.refresh(job)
+        await uow.commit()
+        payload = AIGenerationJobOut.model_validate(job)
+    return ApiResponse(data=payload)
+
+
+@router.delete("/files/ai/jobs/{job_id}", response_model=ApiResponse[None])
+async def delete_ai_generation_job(
+    job_id: uuid.UUID,
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE),
+    ),
+    _: None = Depends(require_access(resource_type="files", permission="can_write")),
+):
+    """Удалить AI-задачу из истории."""
+    async with UnitOfWork() as uow:
+        service = DocsService(uow.session)
+        try:
+            await service.delete_ai_generation_job(
+                org_id=current_user.org_id,
+                actor_id=current_user.user_id,
+                job_id=job_id,
+            )
+        except DocsModuleError as error:
+            return _error_response(error)
+        await uow.commit()
+    return ApiResponse(data=None)
 
 
 @router.get("/files/{file_id}/download", response_model=ApiResponse[DownloadOut])

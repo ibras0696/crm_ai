@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type DragEvent as ReactDragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
 import {
   docsApi,
@@ -44,6 +44,54 @@ const STATUS_POLL_TIMEOUT_MS = 120000
 const AI_JOB_POLL_INTERVAL_MS = 2000
 const AI_JOB_POLL_TIMEOUT_MS = 180000
 const AI_JOB_HISTORY_LIMIT = 30
+const AI_DOCUMENT_PRESETS: Array<{
+  id: string
+  title: string
+  template: string
+  prompt: string
+  summary: string
+}> = [
+  {
+    id: 'commercial-offer',
+    title: 'Коммерческое предложение',
+    template: 'Коммерческое предложение',
+    summary: 'Короткое предложение с этапами, выгодой и стоимостью.',
+    prompt:
+      'Подготовь понятное коммерческое предложение. Нужны краткое описание задачи клиента, этапы запуска, сроки, ожидаемый результат, блок с выгодами и место под стоимость и реквизиты.',
+  },
+  {
+    id: 'service-agreement',
+    title: 'Договор на услуги',
+    template: 'Договор',
+    summary: 'Базовая структура договора с обязанностями сторон.',
+    prompt:
+      'Составь базовый договор на оказание услуг. Нужны разделы: предмет договора, обязанности сторон, сроки, стоимость, порядок оплаты, ответственность, реквизиты и подписи.',
+  },
+  {
+    id: 'internal-regulation',
+    title: 'Регламент работы',
+    template: 'Регламент',
+    summary: 'Внутренний документ с этапами и ответственными.',
+    prompt:
+      'Подготовь внутренний регламент работы. Нужны цель документа, роли участников, пошаговый порядок действий, сроки реакции, контроль качества и финальный чек-лист.',
+  },
+  {
+    id: 'instruction',
+    title: 'Инструкция для сотрудников',
+    template: 'Инструкция',
+    summary: 'Пошаговая инструкция простым языком.',
+    prompt:
+      'Сделай краткую инструкцию для сотрудников простым языком. Нужны шаги по порядку, частые ошибки, полезные советы и короткий итоговый список действий.',
+  },
+  {
+    id: 'meeting-summary',
+    title: 'Итоги встречи',
+    template: 'Протокол встречи',
+    summary: 'Сводка договоренностей, задач и сроков.',
+    prompt:
+      'Оформи итоги встречи в виде делового документа. Нужны участники, краткая повестка, принятые решения, список задач с ответственными и сроками, а также блок следующих шагов.',
+  },
+]
 
 type DocsVisualStatus =
   | DocsFile['status']
@@ -123,6 +171,25 @@ function aiJobStatusClass(status: DocsAIGenerationJobStatus): string {
   return 'text-destructive'
 }
 
+function isStoppedAiJob(job: DocsAIGenerationJob): boolean {
+  if (job.error_message?.trim() === 'Остановлено пользователем') return true
+  return Boolean(job.meta_json && typeof job.meta_json === 'object' && job.meta_json.stopped_by_user === true)
+}
+
+function aiJobDisplayLabel(job: DocsAIGenerationJob): string {
+  if (isStoppedAiJob(job)) return 'Остановлено'
+  return aiJobStatusLabel(job.status)
+}
+
+function aiJobDisplayClass(job: DocsAIGenerationJob): string {
+  if (isStoppedAiJob(job)) return 'text-muted-foreground'
+  return aiJobStatusClass(job.status)
+}
+
+function isActiveAiJob(job: DocsAIGenerationJob): boolean {
+  return job.status === 'queued' || job.status === 'running'
+}
+
 function visualStatusLabel(status: DocsVisualStatus): string {
   if (status === 'ai_queued') return 'В очереди'
   if (status === 'ai_running') return 'Генерация'
@@ -191,6 +258,16 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function resolveDraggedDocsPayload(
+  event: ReactDragEvent<HTMLElement>,
+  draggedFileId: string | null,
+  draggedFolderId: string | null,
+): { fileId: string | null; folderId: string | null } {
+  const fileId = draggedFileId?.trim() || event.dataTransfer.getData('application/x-docs-file-id').trim() || null
+  const folderId = draggedFolderId?.trim() || event.dataTransfer.getData('application/x-docs-folder-id').trim() || null
+  return { fileId, folderId }
+}
+
 export default function DocsPage() {
   const [folderDialog, setFolderDialog] = useState<{
     mode: 'create' | 'rename'
@@ -231,6 +308,8 @@ export default function DocsPage() {
   const [aiTitle, setAiTitle] = useState('')
   const [aiGenerating, setAiGenerating] = useState(false)
   const [aiJobs, setAiJobs] = useState<DocsAIGenerationJob[]>([])
+  const [stoppingAiJobId, setStoppingAiJobId] = useState<string | null>(null)
+  const [deletingAiJobId, setDeletingAiJobId] = useState<string | null>(null)
   const [emptyType, setEmptyType] = useState<DocsFileType>('docx')
   const [emptyTitle, setEmptyTitle] = useState('')
   const [creatingEmpty, setCreatingEmpty] = useState(false)
@@ -240,6 +319,8 @@ export default function DocsPage() {
   const [dropTargetFolderId, setDropTargetFolderId] = useState<string | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const structureActionClass =
+    'h-8 w-8 rounded-md p-0 text-muted-foreground shadow-none hover:bg-secondary/40 hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0'
 
 
   const folderMap = useMemo(() => {
@@ -650,11 +731,16 @@ export default function DocsPage() {
     setDropTargetFolderId(null)
   }
 
-  const handleDropToFolder = async (folderId: string | null) => {
-    if (draggedFileId) {
-      await moveFileToFolder(draggedFileId, folderId)
-    } else if (draggedFolderId) {
-      await moveFolderToParent(draggedFolderId, folderId)
+  const handleDropToFolder = async (
+    folderId: string | null,
+    payload?: { fileId: string | null; folderId: string | null },
+  ) => {
+    const activeFileId = payload?.fileId ?? draggedFileId
+    const activeFolderId = payload?.folderId ?? draggedFolderId
+    if (activeFileId) {
+      await moveFileToFolder(activeFileId, folderId)
+    } else if (activeFolderId) {
+      await moveFolderToParent(activeFolderId, folderId)
     } else {
       return
     }
@@ -733,7 +819,9 @@ export default function DocsPage() {
           const job = response.data.data
           upsertAiJob(job)
           if (job.status === 'failed') {
-            setErrorText(job.error_message || 'AI-генерация завершилась ошибкой')
+            if (!isStoppedAiJob(job)) {
+              setErrorText(job.error_message || 'AI-генерация завершилась ошибкой')
+            }
             await Promise.all([loadTree(), loadUsage(), loadAiJobs()])
             return
           }
@@ -762,6 +850,49 @@ export default function DocsPage() {
       setErrorText('AI-генерация заняла слишком много времени. Обновите раздел позже.')
     },
     [loadAiJobs, loadTree, loadUsage, pollFilesStatus, upsertAiJob],
+  )
+
+  const stopAiJob = useCallback(
+    async (job: DocsAIGenerationJob) => {
+      if (!isActiveAiJob(job)) return
+      setStoppingAiJobId(job.id)
+      setErrorText('')
+      try {
+        const response = await docsApi.stopAIGenerationJob(job.id)
+        if (!response.data.ok || !response.data.data) {
+          setErrorText(response.data.error?.message || 'Не удалось остановить AI-задачу')
+          return
+        }
+        upsertAiJob(response.data.data)
+        await Promise.all([loadTree(), loadUsage(), loadAiJobs()])
+      } catch (error) {
+        setErrorText(extractError(error, 'Не удалось остановить AI-задачу'))
+      } finally {
+        setStoppingAiJobId(null)
+      }
+    },
+    [loadAiJobs, loadTree, loadUsage, upsertAiJob],
+  )
+
+  const deleteAiJob = useCallback(
+    async (job: DocsAIGenerationJob) => {
+      if (isActiveAiJob(job) || job.status === 'scanning') return
+      setDeletingAiJobId(job.id)
+      setErrorText('')
+      try {
+        const response = await docsApi.deleteAIGenerationJob(job.id)
+        if (!response.data.ok) {
+          setErrorText(response.data.error?.message || 'Не удалось удалить AI-задачу')
+          return
+        }
+        setAiJobs((prev) => prev.filter((item) => item.id !== job.id))
+      } catch (error) {
+        setErrorText(extractError(error, 'Не удалось удалить AI-задачу'))
+      } finally {
+        setDeletingAiJobId(null)
+      }
+    },
+    [],
   )
 
   const createAIDocument = async () => {
@@ -808,6 +939,15 @@ export default function DocsPage() {
     } finally {
       setAiGenerating(false)
     }
+  }
+
+  const applyAiPreset = (presetId: string) => {
+    const preset = AI_DOCUMENT_PRESETS.find((item) => item.id === presetId)
+    if (!preset) return
+    setAiTitle(preset.title)
+    setAiTemplate(preset.template)
+    setAiPrompt(preset.prompt)
+    setErrorText('')
   }
 
   const downloadFile = async (file: DocsFile) => {
@@ -901,22 +1041,36 @@ export default function DocsPage() {
     return (
       <div
         key={file.id}
-        className={`group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
+        className={`group flex cursor-grab select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
           draggedFileId === file.id ? 'opacity-50' : 'hover:bg-secondary/60'
         }`}
         style={{ paddingLeft: `${28 + depth * 16}px` }}
         draggable
-        onDragStart={() => handleDragStartFile(file.id)}
+        onDragStart={(event) => {
+          event.stopPropagation()
+          event.dataTransfer.effectAllowed = 'move'
+          event.dataTransfer.setData('application/x-docs-file-id', file.id)
+          event.dataTransfer.setData('text/plain', file.id)
+          handleDragStartFile(file.id)
+        }}
         onDragEnd={handleDragEndFile}
       >
-        <button
+        <div
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
           onClick={() => onSelectFolder(file.folder_id ?? null)}
           title={file.title || file.original_name}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              onSelectFolder(file.folder_id ?? null)
+            }
+          }}
         >
           <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
           <span className="truncate">{file.title || file.original_name}</span>
-        </button>
+        </div>
         <span className={`shrink-0 text-[11px] font-medium ${statusClass(visualState.status)}`}>
           {visualStatusLabel(visualState.status)}
         </span>
@@ -936,7 +1090,7 @@ export default function DocsPage() {
     return (
       <div key={folder.id}>
         <div
-          className={`group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${isDropActive
+          className={`group flex cursor-grab select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${isDropActive
             ? 'bg-primary/10 text-primary ring-1 ring-primary/40'
             : dropTargetFolderId === folder.id && isFolderDropInvalid
               ? 'bg-destructive/10 text-destructive ring-1 ring-destructive/30'
@@ -946,34 +1100,59 @@ export default function DocsPage() {
             }`}
           style={{ paddingLeft: `${8 + depth * 16}px` }}
           draggable
-          onDragStart={() => handleDragStartFolder(folder.id)}
+          onDragStart={(event) => {
+            event.stopPropagation()
+            event.dataTransfer.effectAllowed = 'move'
+            event.dataTransfer.setData('application/x-docs-folder-id', folder.id)
+            event.dataTransfer.setData('text/plain', folder.id)
+            handleDragStartFolder(folder.id)
+          }}
           onDragEnd={handleDragEndFolder}
-          onDragOver={(event) => {
-            if (!draggedFileId && !draggedFolderId) return
-            if (draggedFolderId && isFolderInOwnBranch(draggedFolderId, folder.id, folderMap)) return
+          onDragEnter={(event) => {
+            const payload = resolveDraggedDocsPayload(event, draggedFileId, draggedFolderId)
+            if (!payload.fileId && !payload.folderId) return
+            if (payload.folderId && isFolderInOwnBranch(payload.folderId, folder.id, folderMap)) return
             event.preventDefault()
             setDropTargetFolderId(folder.id)
           }}
-          onDragLeave={() => {
-            if (dropTargetFolderId === folder.id) setDropTargetFolderId(null)
+          onDragOver={(event) => {
+            const payload = resolveDraggedDocsPayload(event, draggedFileId, draggedFolderId)
+            if (!payload.fileId && !payload.folderId) return
+            if (payload.folderId && isFolderInOwnBranch(payload.folderId, folder.id, folderMap)) return
+            event.preventDefault()
+            setDropTargetFolderId(folder.id)
           }}
           onDrop={(event) => {
-            if (!draggedFileId && !draggedFolderId) return
-            if (draggedFolderId && isFolderInOwnBranch(draggedFolderId, folder.id, folderMap)) return
+            const payload = resolveDraggedDocsPayload(event, draggedFileId, draggedFolderId)
+            if (!payload.fileId && !payload.folderId) return
+            if (payload.folderId && isFolderInOwnBranch(payload.folderId, folder.id, folderMap)) return
             event.preventDefault()
-            void handleDropToFolder(folder.id)
+            event.stopPropagation()
+            void handleDropToFolder(folder.id, payload)
           }}
         >
           <button
             className="h-4 w-4 text-muted-foreground"
             onClick={() => setOpenFolders((prev) => ({ ...prev, [folder.id]: !isOpen }))}
+            draggable={false}
           >
             {children.length > 0 ? (isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />) : <span className="inline-block h-4 w-4" />}
           </button>
-          <button className="flex items-center gap-2 text-left" onClick={() => onSelectFolder(folder.id)}>
+          <div
+            className="flex items-center gap-2 text-left"
+            onClick={() => onSelectFolder(folder.id)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                onSelectFolder(folder.id)
+              }
+            }}
+          >
             <Folder className="h-4 w-4 text-amber-500" />
             <span className="truncate">{folder.name}</span>
-          </button>
+          </div>
           <div className="ml-auto hidden items-center gap-1 group-hover:flex">
             <button
               className="text-muted-foreground hover:text-foreground"
@@ -1068,58 +1247,136 @@ export default function DocsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-4">
-            <select
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-              value={aiType}
-              onChange={(event) => setAiType(event.target.value as DocsFileType)}
-              disabled={aiGenerating}
-            >
-              <option value="docx">DOCX</option>
-            </select>
-            <input
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm md:col-span-2"
-              placeholder="Название документа (опционально)"
-              value={aiTitle}
-              onChange={(event) => setAiTitle(event.target.value)}
-              disabled={aiGenerating}
-              maxLength={200}
-            />
-            <input
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-              placeholder="Шаблон/стиль (опционально)"
-              value={aiTemplate}
-              onChange={(event) => setAiTemplate(event.target.value)}
-              disabled={aiGenerating}
-              maxLength={120}
-            />
-          </div>
-          <textarea
-            className="min-h-[96px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            placeholder="Опишите, какой документ нужно сгенерировать..."
-            value={aiPrompt}
-            onChange={(event) => setAiPrompt(event.target.value)}
-            disabled={aiGenerating}
-            maxLength={12000}
-          />
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs text-muted-foreground">
-              Файл создается как новая версия через pipeline AI → SCANNING → READY/BLOCKED.
-            </p>
-            <Button onClick={() => void createAIDocument()} disabled={aiGenerating}>
-              {aiGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-              Сгенерировать
-            </Button>
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,1.55fr)_minmax(280px,0.95fr)]">
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-[120px_minmax(0,1fr)]">
+                <select
+                  className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  value={aiType}
+                  onChange={(event) => setAiType(event.target.value as DocsFileType)}
+                  disabled={aiGenerating}
+                >
+                  <option value="docx">DOCX</option>
+                </select>
+                <input
+                  className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  placeholder="Название документа"
+                  value={aiTitle}
+                  onChange={(event) => setAiTitle(event.target.value)}
+                  disabled={aiGenerating}
+                  maxLength={200}
+                />
+              </div>
+              <input
+                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                placeholder="Шаблон или стиль"
+                value={aiTemplate}
+                onChange={(event) => setAiTemplate(event.target.value)}
+                disabled={aiGenerating}
+                maxLength={120}
+              />
+              <textarea
+                className="min-h-[136px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                placeholder="Коротко опишите, какой документ нужен и что в нём должно быть."
+                value={aiPrompt}
+                onChange={(event) => setAiPrompt(event.target.value)}
+                disabled={aiGenerating}
+                maxLength={12000}
+              />
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-xs text-muted-foreground">
+                  Документ создаётся как новая версия и затем проходит проверку.
+                </p>
+                <Button onClick={() => void createAIDocument()} disabled={aiGenerating || !aiPrompt.trim()}>
+                  {aiGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                  Сгенерировать
+                </Button>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border/80 bg-muted/20 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium">Базовые шаблоны</p>
+                  <p className="text-xs text-muted-foreground">Можно взять за основу и быстро доработать под себя.</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setAiTitle('')
+                    setAiTemplate('')
+                    setAiPrompt('')
+                  }}
+                  disabled={aiGenerating}
+                >
+                  Очистить
+                </Button>
+              </div>
+              <div className="space-y-2">
+                {AI_DOCUMENT_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => applyAiPreset(preset.id)}
+                    disabled={aiGenerating}
+                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium">{preset.title}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{preset.summary}</p>
+                      </div>
+                      <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary/80" />
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
           {aiJobs.length > 0 && (
-            <div className="space-y-1 rounded-md border border-border p-2">
+            <div className="space-y-2 rounded-md border border-border p-2">
               <p className="text-xs font-medium text-muted-foreground">Последние AI-задачи</p>
               {aiJobs.slice(0, 5).map((job) => (
-                <div key={job.id} className="flex items-center justify-between gap-2 text-xs">
-                  <span className="truncate">
-                    {job.title || 'Документ'} · {job.file_type.toUpperCase()}
-                  </span>
-                  <span className={aiJobStatusClass(job.status)}>{aiJobStatusLabel(job.status)}</span>
+                <div key={job.id} className="flex items-center justify-between gap-2 rounded-md border border-border/70 px-2 py-1.5 text-xs">
+                  <div className="min-w-0">
+                    <div className="truncate">
+                      {job.title || 'Документ'} · {job.file_type.toUpperCase()}
+                    </div>
+                    {job.error_message && (
+                      <div className="truncate text-[11px] text-muted-foreground">
+                        {job.error_message}
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className={aiJobDisplayClass(job)}>{aiJobDisplayLabel(job)}</span>
+                    {isActiveAiJob(job) && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => void stopAiJob(job)}
+                        disabled={stoppingAiJobId === job.id || deletingAiJobId === job.id}
+                        title="Остановить задачу"
+                      >
+                        {stoppingAiJobId === job.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <X className="h-3.5 w-3.5" />}
+                      </Button>
+                    )}
+                    {!isActiveAiJob(job) && job.status !== 'scanning' && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive hover:text-destructive"
+                        onClick={() => void deleteAiJob(job)}
+                        disabled={deletingAiJobId === job.id || stoppingAiJobId === job.id}
+                        title="Удалить из истории"
+                      >
+                        {deletingAiJobId === job.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
@@ -1135,14 +1392,14 @@ export default function DocsPage() {
             <CardTitle className="text-base flex items-center justify-between">
               <span>Структура</span>
               <div className="flex items-center gap-1">
-                <Button variant="ghost" size="sm" onClick={() => openCreateFileDialog(selectedFolderId)} title="Создать файл">
-                  <FilePlus2 className="mr-1 h-4 w-4" /> Файл
+                <Button variant="ghost" size="sm" className={structureActionClass} onClick={() => openCreateFileDialog(selectedFolderId)} title="Создать файл" aria-label="Создать файл">
+                  <FilePlus2 className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => triggerUploadToFolder(selectedFolderId)} title="Загрузить файл" disabled={uploading}>
-                  <Upload className="mr-1 h-4 w-4" /> Загрузить
+                <Button variant="ghost" size="sm" className={structureActionClass} onClick={() => triggerUploadToFolder(selectedFolderId)} title="Загрузить файл" aria-label="Загрузить файл" disabled={uploading}>
+                  <Upload className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="sm" onClick={() => void createFolder(selectedFolderId)} disabled={creatingEmpty || fileDialogSubmitting}>
-                  <FolderPlus className="mr-1 h-4 w-4" /> Папка
+                <Button variant="ghost" size="sm" className={structureActionClass} onClick={() => void createFolder(selectedFolderId)} title="Создать папку" aria-label="Создать папку" disabled={creatingEmpty || fileDialogSubmitting}>
+                  <FolderPlus className="h-4 w-4" />
                 </Button>
               </div>
             </CardTitle>
@@ -1157,18 +1414,24 @@ export default function DocsPage() {
                     : 'hover:bg-secondary/60'
                   }`}
                 onClick={() => onSelectFolder(null)}
-                onDragOver={(event) => {
-                  if (!draggedFileId && !draggedFolderId) return
+                onDragEnter={(event) => {
+                  const payload = resolveDraggedDocsPayload(event, draggedFileId, draggedFolderId)
+                  if (!payload.fileId && !payload.folderId) return
                   event.preventDefault()
                   setDropTargetFolderId('root')
                 }}
-                onDragLeave={() => {
-                  if (dropTargetFolderId === 'root') setDropTargetFolderId(null)
+                onDragOver={(event) => {
+                  const payload = resolveDraggedDocsPayload(event, draggedFileId, draggedFolderId)
+                  if (!payload.fileId && !payload.folderId) return
+                  event.preventDefault()
+                  setDropTargetFolderId('root')
                 }}
                 onDrop={(event) => {
-                  if (!draggedFileId && !draggedFolderId) return
+                  const payload = resolveDraggedDocsPayload(event, draggedFileId, draggedFolderId)
+                  if (!payload.fileId && !payload.folderId) return
                   event.preventDefault()
-                  void handleDropToFolder(null)
+                  event.stopPropagation()
+                  void handleDropToFolder(null, payload)
                 }}
               >
                 <Folder className="h-4 w-4 text-amber-500" />
@@ -1202,7 +1465,12 @@ export default function DocsPage() {
                       key={file.id}
                       className={`flex items-center gap-3 rounded-lg border border-border px-3 py-2 ${draggedFileId === file.id ? 'opacity-50' : ''}`}
                       draggable
-                      onDragStart={() => handleDragStartFile(file.id)}
+                      onDragStart={(event) => {
+                        event.dataTransfer.effectAllowed = 'move'
+                        event.dataTransfer.setData('application/x-docs-file-id', file.id)
+                        event.dataTransfer.setData('text/plain', file.id)
+                        handleDragStartFile(file.id)
+                      }}
                       onDragEnd={handleDragEndFile}
                     >
                       <div className="rounded-md bg-secondary p-2">

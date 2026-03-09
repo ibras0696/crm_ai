@@ -6,13 +6,15 @@ import os
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from hashlib import sha256
 from typing import TYPE_CHECKING
 
 import httpx
+import jwt
 
 from src.common.enums import AuditAction
+from src.common.optimistic_lock import optimistic_lock_matches
 from src.config import settings
 from src.infrastructure.metrics_custom import (
     DOCS_AI_GENERATE_TOTAL,
@@ -76,6 +78,7 @@ class AIGenerateRequestResult:
     job: DocsAIGenerationJob
     file: File
     estimated_request_tokens: int
+    should_enqueue_task: bool = True
 
 
 def _inc_upload_metric(status: str) -> None:
@@ -568,9 +571,16 @@ class DocsService:
         file_id: uuid.UUID,
         content: str,
         title: str | None,
+        expected_updated_at: datetime,
     ) -> File:
         """Сохранить новое текстовое содержимое TXT-файла как новую версию."""
         file_obj = await self.get_file(org_id=org_id, file_id=file_id)
+        if not optimistic_lock_matches(current=file_obj.updated_at, expected=expected_updated_at):
+            raise DocsModuleError(
+                code="CONFLICT",
+                message="Файл уже изменён другим сотрудником. Обновите данные и повторите сохранение.",
+                status_code=409,
+            )
         if file_obj.type != FileType.TXT.value:
             raise InvalidTypeError("Сохранение текста доступно только для TXT-файлов")
         if file_obj.status != FileStatus.READY.value or file_obj.current_version_id is None:
@@ -747,8 +757,6 @@ class DocsService:
         if version is None:
             raise DocsModuleError(code="FILE_VERSION_NOT_FOUND", message="Текущая версия файла не найдена")
 
-        import jwt
-        from datetime import datetime, timezone, timedelta
         token_payload = {
             "sub": str(version.id),
             "action": "internal_download",
@@ -817,6 +825,12 @@ class DocsService:
         file_obj = await self.get_file(org_id=org_id, file_id=file_id)
         if file_obj.type != FileType.DOCX.value:
             raise InvalidTypeError("Callback разрешен только для DOCX")
+        if file_obj.current_version_id != source_version_id:
+            raise DocsModuleError(
+                code="CONFLICT",
+                message="Документ уже изменён в другой сессии. Откройте актуальную версию и повторите редактирование.",
+                status_code=409,
+            )
 
         source_version = await self.repo.get_file_version(version_id=source_version_id, file_id=file_obj.id)
         if source_version is None:
@@ -920,10 +934,26 @@ class DocsService:
             raise DocsModuleError(code="PROMPT_TOO_LARGE", message="Слишком длинный prompt для генерации документа")
 
         normalized_type = self._resolve_generated_file_type(file_type)
+        normalized_template = (str(template).strip() if template else None)
+        normalized_language = (str(language).strip() if language else "ru")
+        doc_title = (str(title or "").strip() or f"AI {normalized_type.value.upper()} документ")[:500]
         if folder_id is not None:
             folder = await self.repo.get_folder(folder_id=folder_id, org_id=org_id)
             if folder is None:
                 raise DocsModuleError(code="FOLDER_NOT_FOUND", message="Папка не найдена", status_code=404)
+
+        duplicate = await self._find_recent_duplicate_ai_request(
+            org_id=org_id,
+            user_id=user_id,
+            file_type=normalized_type,
+            prompt=normalized_prompt,
+            template=normalized_template,
+            title=doc_title,
+            language=normalized_language,
+            folder_id=folder_id,
+        )
+        if duplicate is not None:
+            return duplicate
 
         ai_repo = AIRepository(self.session)
         runtime = await DEFAULT_AI_DOCUMENT_GENERATOR.resolve_runtime(ai_repo)
@@ -932,9 +962,9 @@ class DocsService:
             max_tokens_per_request=runtime.max_tokens,
             file_type=normalized_type,
             prompt=normalized_prompt,
-            template=template,
-            title=title,
-            language=language,
+            template=normalized_template,
+            title=doc_title,
+            language=normalized_language,
         )
         if generation_budget.completion_tokens < 256:
             raise DocsModuleError(
@@ -969,7 +999,6 @@ class DocsService:
         placeholder_version = uuid.uuid4()
         pending_key = f"org/{org_id}/files/{file_id}/pending/{placeholder_version}"
         content_type, extension = self._resolve_mime_and_ext(normalized_type)
-        doc_title = (str(title or "").strip() or f"AI {normalized_type.value.upper()} документ")[:500]
         filename = f"{doc_title[:200]}.{extension}"
 
         file_obj = File(
@@ -997,9 +1026,9 @@ class DocsService:
             file_type=normalized_type.value,
             status="queued",
             prompt=normalized_prompt,
-            template=(str(template).strip() if template else None),
+            template=normalized_template,
             title=doc_title,
-            language=(str(language).strip() if language else "ru"),
+            language=normalized_language,
             provider_model=runtime.model,
             prompt_tokens=0,
             completion_tokens=0,
@@ -1029,6 +1058,62 @@ class DocsService:
         _inc_ai_generate_metric("queued", normalized_type.value)
         return AIGenerateRequestResult(job=job, file=file_obj, estimated_request_tokens=estimated_request_tokens)
 
+    async def _find_recent_duplicate_ai_request(
+        self,
+        *,
+        org_id: uuid.UUID,
+        user_id: uuid.UUID,
+        file_type: FileType,
+        prompt: str,
+        template: str | None,
+        title: str,
+        language: str,
+        folder_id: uuid.UUID | None,
+    ) -> AIGenerateRequestResult | None:
+        """Вернуть недавний идентичный job вместо создания дубля."""
+        dedupe_window_seconds = int(getattr(settings, "DOCS_AI_DEDUPE_WINDOW_SECONDS", 120) or 120)
+        if dedupe_window_seconds <= 0:
+            return None
+
+        cutoff = datetime.now(UTC) - timedelta(seconds=dedupe_window_seconds)
+        recent_jobs = await self.repo.list_recent_ai_generation_jobs(org_id=org_id, limit=50)
+
+        for job in recent_jobs:
+            if job.created_at < cutoff:
+                break
+            if job.user_id != user_id:
+                continue
+            if job.file_type != file_type.value:
+                continue
+            if job.status not in {"queued", "running", "scanning", "ready"}:
+                continue
+            if (job.prompt or "").strip() != prompt:
+                continue
+            if ((job.template or "").strip() or None) != template:
+                continue
+            if ((job.title or "").strip() or "") != title:
+                continue
+            if ((job.language or "").strip() or "ru") != language:
+                continue
+            if job.file_id is None:
+                continue
+
+            existing_file = await self.repo.get_doc_file(file_id=job.file_id, org_id=org_id)
+            if existing_file is None:
+                continue
+            if existing_file.folder_id != folder_id:
+                continue
+
+            estimated_tokens = int(job.total_tokens or job.prompt_tokens or 0)
+            return AIGenerateRequestResult(
+                job=job,
+                file=existing_file,
+                estimated_request_tokens=estimated_tokens,
+                should_enqueue_task=False,
+            )
+
+        return None
+
     async def get_ai_generation_job(self, *, org_id: uuid.UUID, job_id: uuid.UUID) -> DocsAIGenerationJob:
         """Получить статус AI-job генерации документа."""
         job = await self.repo.get_ai_generation_job(job_id=job_id, org_id=org_id)
@@ -1039,6 +1124,82 @@ class DocsService:
     async def list_ai_generation_jobs(self, *, org_id: uuid.UUID, limit: int = 20) -> list[DocsAIGenerationJob]:
         """Получить последние AI-job генерации документов по организации."""
         return await self.repo.list_recent_ai_generation_jobs(org_id=org_id, limit=limit)
+
+    async def stop_ai_generation_job(
+        self,
+        *,
+        org_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        job_id: uuid.UUID,
+    ) -> DocsAIGenerationJob:
+        """Остановить AI-задачу, пока она не ушла в этап AV-сканирования."""
+        job = await self.repo.get_ai_generation_job_for_update(job_id=job_id)
+        if job is None or job.org_id != org_id:
+            raise DocsModuleError(code="NOT_FOUND", message="AI job не найден", status_code=404)
+        if job.status in {"ready", "blocked", "failed"}:
+            return job
+        if job.status == "scanning":
+            raise DocsModuleError(
+                code="JOB_CANNOT_BE_STOPPED",
+                message="Задача уже передана на проверку файла и не может быть остановлена.",
+                status_code=409,
+            )
+
+        usage = await self.repo.get_storage_usage_for_update(org_id=org_id)
+        usage.reserved_bytes = max(0, int(usage.reserved_bytes) - self._extract_reserved_bytes(job.meta_json))
+        await self.repo.update_storage_usage(usage)
+
+        if job.file_id is not None:
+            file_obj = await self.repo.get_doc_file(file_id=job.file_id, org_id=org_id)
+            if file_obj is not None and file_obj.status in {FileStatus.DRAFT.value, FileStatus.UPLOADING.value}:
+                file_obj.status = FileStatus.BLOCKED.value
+                await self.repo.update_file(file_obj)
+
+        stopped_at = datetime.now(UTC)
+        meta_json = dict(job.meta_json or {})
+        meta_json["stopped_by_user"] = True
+        meta_json["stopped_at"] = stopped_at.isoformat()
+        job.meta_json = meta_json
+        job.status = "failed"
+        job.error_message = "Остановлено пользователем"
+        job.finished_at = stopped_at
+        await self.repo.update_ai_generation_job(job)
+        await self.audit_repo.log(
+            org_id=org_id,
+            actor_id=actor_id,
+            action=AuditAction.UPDATE,
+            entity_type="docs_ai_generation_job",
+            entity_id=str(job.id),
+            meta={"event": "ai_generate_stopped", "file_id": str(job.file_id) if job.file_id else None},
+        )
+        return job
+
+    async def delete_ai_generation_job(
+        self,
+        *,
+        org_id: uuid.UUID,
+        actor_id: uuid.UUID,
+        job_id: uuid.UUID,
+    ) -> None:
+        """Удалить запись AI-задачи из истории."""
+        job = await self.repo.get_ai_generation_job_for_update(job_id=job_id)
+        if job is None or job.org_id != org_id:
+            raise DocsModuleError(code="NOT_FOUND", message="AI job не найден", status_code=404)
+        if job.status in {"queued", "running", "scanning"}:
+            raise DocsModuleError(
+                code="JOB_STILL_ACTIVE",
+                message="Сначала остановите задачу или дождитесь завершения.",
+                status_code=409,
+            )
+        await self.repo.delete_ai_generation_job(job)
+        await self.audit_repo.log(
+            org_id=org_id,
+            actor_id=actor_id,
+            action=AuditAction.DELETE,
+            entity_type="docs_ai_generation_job",
+            entity_id=str(job_id),
+            meta={"event": "ai_generate_job_deleted"},
+        )
 
     async def build_download(
         self,
@@ -1186,6 +1347,16 @@ class DocsService:
         if resolved is None:
             raise InvalidTypeError()
         return resolved
+
+    @staticmethod
+    def _extract_reserved_bytes(meta_json: dict | None) -> int:
+        """Извлечь reserved_bytes из AI-job meta."""
+        if not isinstance(meta_json, dict):
+            return 0
+        try:
+            return max(0, int(meta_json.get("reserved_bytes") or 0))
+        except Exception:
+            return 0
 
     async def export_pdf(self, *, org_id: uuid.UUID, file_id: uuid.UUID) -> dict[str, object]:
         """Экспортировать TXT или DOCX файл в формат PDF и вернуть ссылку на скачивание."""

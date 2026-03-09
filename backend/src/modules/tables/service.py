@@ -6,6 +6,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.common.optimistic_lock import optimistic_lock_matches
 from src.modules.tables.models import Column, FieldType, Table, TableFolder, TableView
 from src.modules.tables.errors import TablesModuleError
 from src.modules.tables.records import Record, RecordRepository
@@ -33,8 +34,8 @@ from src.modules.tables.schemas import (
 class TableServiceError(TablesModuleError):
     """Domain error for tables module operations."""
 
-    def __init__(self, *, code: str, message: str):
-        super().__init__(code=code, message=message, status_code=422)
+    def __init__(self, *, code: str, message: str, status_code: int = 422):
+        super().__init__(code=code, message=message, status_code=status_code)
 
 
 class TablesService:
@@ -364,6 +365,12 @@ class TableRecordsService:
         body: UpdateRecordRequest,
     ) -> Record:
         record = await self.get_record(table_id=table_id, record_id=record_id, org_id=org_id)
+        if not optimistic_lock_matches(current=record.updated_at, expected=body.expected_updated_at):
+            raise TableServiceError(
+                code="CONFLICT",
+                message="Запись уже изменена другим сотрудником. Обновите таблицу и повторите изменение.",
+                status_code=409,
+            )
         record.data = {**record.data, **body.data}
         await self.record_repo.update(record)
         return record

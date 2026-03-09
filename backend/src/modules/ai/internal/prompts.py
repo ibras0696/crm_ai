@@ -40,6 +40,10 @@ ACTION_INSTRUCTIONS_PROMPT = (
     "```crm_action\n"
     '{"action":"create_kb_page","title":"Курс Python","content":"Описание курса","pages":[{"title":"Урок 1","content":"..."},{"title":"Урок 2","content":"..."}]}\n'
     "```"
+    "\nIf user asks to create a document, append final block:\n"
+    "```crm_action\n"
+    '{"action":"create_document","type":"docx","title":"Коммерческое предложение","template":"business","prompt":"Подготовь коммерческое предложение для клиента..."}\n'
+    "```"
 )
 
 JSON_REPAIR_SYSTEM_PROMPT = (
@@ -60,7 +64,7 @@ ACTION_SYNTH_SYSTEM_PROMPT = (
 ACTION_NOT_EXECUTED_MESSAGE = (
     "Действие не выполнено: модель не сформировала структурированную команду для системы. "
     "Повторите запрос в явном виде, например: "
-    "«создай таблицу ...», «добавь N записей в таблицу ...» или "
+    "«создай таблицу ...», «создай документ ...», «добавь N записей в таблицу ...» или "
     "«создай событие в расписании на ...»."
 )
 

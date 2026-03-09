@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 
-IntentDomain = Literal["table", "schedule", "knowledge", "dashboard", "general"]
+IntentDomain = Literal["table", "schedule", "knowledge", "dashboard", "document", "general"]
 IntentMode = Literal["read", "create", "update", "delete", "unknown"]
 
 
@@ -51,6 +51,7 @@ _DOMAIN_MARKERS: dict[IntentDomain, tuple[str, ...]] = {
     # Добавляем основы слов, чтобы ловить формы вроде "в базе знаний".
     "knowledge": ("база знаний", "баз", "знан", "курс", "урок", "kb", "страниц", "knowledge", "wiki", "документац"),
     "dashboard": ("дашборд", "график", "виджет", "отчет", "отчёт", "dashboard", "chart", "widget", "report"),
+    "document": ("документ", "docx", "pdf", "файл", "document", "file", "договор", "кп", "коммерческ"),
     "general": (),
 }
 
@@ -61,6 +62,7 @@ _UI_INTENT_TO_DOMAIN: dict[str, IntentDomain] = {
     "create_schedule_event": "schedule",
     "create_kb_page": "knowledge",
     "create_dashboard": "dashboard",
+    "create_document": "document",
 }
 
 
@@ -90,7 +92,7 @@ def _detect_mode(text: str, *, ui_intent: str | None) -> tuple[IntentMode, list[
 
 def _detect_domain(text: str, *, ui_intent: str | None) -> tuple[IntentDomain, list[str]]:
     reasons: list[str] = []
-    scores: dict[IntentDomain, int] = {"table": 0, "schedule": 0, "knowledge": 0, "dashboard": 0, "general": 0}
+    scores: dict[IntentDomain, int] = {"table": 0, "schedule": 0, "knowledge": 0, "dashboard": 0, "document": 0, "general": 0}
 
     for domain, markers in _DOMAIN_MARKERS.items():
         if domain == "general":
@@ -108,7 +110,7 @@ def _detect_domain(text: str, *, ui_intent: str | None) -> tuple[IntentDomain, l
 
     best_domain = "general"
     best_score = 0
-    for domain in ("table", "schedule", "knowledge", "dashboard"):
+    for domain in ("table", "schedule", "knowledge", "dashboard", "document"):
         score = scores[domain]
         if score > best_score:
             best_domain = domain

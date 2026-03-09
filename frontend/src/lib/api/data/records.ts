@@ -20,7 +20,8 @@ export const recordsApi = {
   list: (tableId: string, limit = 100, offset = 0) => api.get<ApiResponse<RecordListResponse>>(`/tables/${tableId}/records/?limit=${limit}&offset=${offset}`),
   get: (tableId: string, recordId: string) => api.get<ApiResponse<RecordInfo>>(`/tables/${tableId}/records/${recordId}`),
   create: (tableId: string, data: Record<string, unknown>) => api.post<ApiResponse<RecordInfo>>(`/tables/${tableId}/records/`, { data }),
-  update: (tableId: string, recordId: string, data: Record<string, unknown>) => api.patch<ApiResponse<RecordInfo>>(`/tables/${tableId}/records/${recordId}`, { data }),
+  update: (tableId: string, recordId: string, data: Record<string, unknown>, expectedUpdatedAt: string) =>
+    api.patch<ApiResponse<RecordInfo>>(`/tables/${tableId}/records/${recordId}`, { data, expected_updated_at: expectedUpdatedAt }),
   delete: (tableId: string, recordId: string) => api.delete<ApiResponse<null>>(`/tables/${tableId}/records/${recordId}`),
   move: (tableId: string, recordId: string, direction: 'up' | 'down') => api.post<ApiResponse<RecordInfo>>(`/tables/${tableId}/records/${recordId}/move`, { direction }),
   filter: (tableId: string, filters?: Record<string, unknown>, sorts?: Array<{ col_id: string; dir: string }>, limit = 100, offset = 0) =>

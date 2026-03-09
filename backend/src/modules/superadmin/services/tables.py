@@ -1,4 +1,6 @@
 import uuid
+import csv
+import io
 from io import BytesIO
 
 from openpyxl import Workbook
@@ -120,9 +122,6 @@ class SuperadminTablesService:
         return {"items": items, "total": total, "limit": int(limit), "offset": int(offset)}
 
     async def export_table_csv(self, *, org_id: str, table_id: str) -> tuple[bytes, str]:
-        import csv
-        import io
-
         async with UnitOfWork() as uow:
             t_repo = TableRepository(uow.session)
             table_uuid = self._parse_uuid(table_id, field_name="table_id")

@@ -84,13 +84,54 @@ async def test_create_column_and_record(client: AsyncClient):
 
     upd = await client.patch(
         f"/api/v1/tables/{table_id}/records/{rec_id}",
-        json={"data": {col_id: "Ivan Updated"}},
+        json={"data": {col_id: "Ivan Updated"}, "expected_updated_at": get_resp.json()["data"]["updated_at"]},
         headers=_headers(token),
     )
     assert upd.status_code == 200
 
     dele = await client.delete(f"/api/v1/tables/{table_id}/records/{rec_id}", headers=_headers(token))
     assert dele.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_update_record_conflict_returns_409(client: AsyncClient):
+    token = await _register_owner(client)
+
+    resp = await client.post("/api/v1/tables/", json={"name": f"Table-{uuid.uuid4().hex[:6]}"}, headers=_headers(token))
+    assert resp.status_code == 200
+    table_id = resp.json()["data"]["id"]
+
+    col_resp = await client.post(
+        f"/api/v1/tables/{table_id}/columns",
+        json={"name": "Client name", "field_type": "text"},
+        headers=_headers(token),
+    )
+    assert col_resp.status_code == 200
+    col_id = col_resp.json()["data"]["id"]
+
+    rec_resp = await client.post(
+        f"/api/v1/tables/{table_id}/records/",
+        json={"data": {col_id: "Ivan Petrov"}},
+        headers=_headers(token),
+    )
+    assert rec_resp.status_code == 200
+    rec_id = rec_resp.json()["data"]["id"]
+    stale_updated_at = rec_resp.json()["data"]["updated_at"]
+
+    first_update = await client.patch(
+        f"/api/v1/tables/{table_id}/records/{rec_id}",
+        json={"data": {col_id: "First"}, "expected_updated_at": stale_updated_at},
+        headers=_headers(token),
+    )
+    assert first_update.status_code == 200
+
+    conflict = await client.patch(
+        f"/api/v1/tables/{table_id}/records/{rec_id}",
+        json={"data": {col_id: "Second"}, "expected_updated_at": stale_updated_at},
+        headers=_headers(token),
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "CONFLICT"
 
 
 @pytest.mark.asyncio

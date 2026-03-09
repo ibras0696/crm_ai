@@ -8,6 +8,7 @@ from src.modules.ai.models import AIChatMessage
 from src.modules.ai.service import (
     handle_create_columns_action,
     handle_create_dashboard_action,
+    handle_create_document_action,
     handle_create_kb_page_action,
     handle_create_records_action,
     handle_create_schedule_event_action,
@@ -18,6 +19,7 @@ from src.modules.auth.dependencies import CurrentUser
 
 ACTION_HANDLERS = {
     "create_dashboard": handle_create_dashboard_action,
+    "create_document": handle_create_document_action,
     "create_table": handle_create_table_action,
     "create_columns": handle_create_columns_action,
     "create_records": handle_create_records_action,
@@ -27,6 +29,10 @@ ACTION_HANDLERS = {
 }
 
 ACTION_ALIASES = {
+    "create_doc": "create_document",
+    "create_file": "create_document",
+    "create_docs_file": "create_document",
+    "create_document_file": "create_document",
     "create_kb": "create_kb_page",
     "create_kb_pages": "create_kb_page",
     "create_knowledge_page": "create_kb_page",
@@ -43,6 +49,7 @@ ACTION_ALIASES = {
 
 ACTION_ALLOWED_ROLES = {
     "create_dashboard": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value},
+    "create_document": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value, UserRole.EMPLOYEE.value},
     "create_table": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value},
     "create_columns": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value},
     "create_records": {UserRole.OWNER.value, UserRole.ADMIN.value, UserRole.MANAGER.value},
@@ -236,6 +243,9 @@ def _normalize_action_payload_for_execution(
         if action_payload.get("entity_type") in {"dashboard", "report"}:
             action_payload["action"] = "create_dashboard"
             return action_payload
+        if action_payload.get("entity_type") in {"document", "doc", "file", "docx_file", "pdf_file"}:
+            action_payload["action"] = "create_document"
+            return action_payload
 
     has_kb_shape = bool(
         action_payload.get("title")
@@ -342,6 +352,30 @@ def _build_dashboard_fallback_action(
     if preferred_widget_type in {"metric", "bar", "line", "area", "pie", "donut", "table"}:
         payload["preferred_widget_type"] = preferred_widget_type
     return payload
+
+
+def _build_document_fallback_action(
+    *,
+    user_message: str,
+    ui_intent: str | None,
+    ui_params: dict | None,
+) -> dict | None:
+    """Build a minimal create_document action from UI intent when the model skipped crm_action."""
+    if (ui_intent or "").strip().lower() != "create_document":
+        return None
+
+    params = ui_params if isinstance(ui_params, dict) else {}
+    file_type = str(params.get("file_type") or params.get("type") or "docx").strip().lower() or "docx"
+    title = str(params.get("title") or "").strip() or None
+    template = str(params.get("template") or params.get("style") or "").strip() or None
+
+    return {
+        "action": "create_document",
+        "type": file_type,
+        "prompt": str(user_message or "").strip(),
+        "title": title,
+        "template": template,
+    }
 
 
 async def _execute_action(

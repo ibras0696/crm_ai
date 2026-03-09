@@ -166,6 +166,7 @@ class SaveTextRequest(BaseModel):
 
     content: str = Field(default="")
     title: str | None = Field(default=None, max_length=500)
+    expected_updated_at: datetime
 
     @field_validator("title", mode="before")
     @classmethod

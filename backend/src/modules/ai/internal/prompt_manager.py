@@ -35,6 +35,11 @@ def _tools_hint_for_domain(domain: str) -> str:
             "- База знаний: create_kb_page.\n"
             "- Для чтения/поиска по KB не добавляй crm_action."
         )
+    if domain == "document":
+        return (
+            "- Документы: create_document.\n"
+            "- Для анализа уже существующих документов не добавляй crm_action."
+        )
     return (
         "- Если пользователь явно просит изменение сущностей CRM, добавь один crm_action.\n"
         "- Если явного запроса на изменение нет, отвечай без crm_action."

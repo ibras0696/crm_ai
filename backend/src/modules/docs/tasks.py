@@ -483,6 +483,8 @@ async def run_ai_generate_inline(*, job_id: str, task_id: str = "inline") -> dic
         if job is None:
             _inc_ai_generate_error_metric("job_not_found_after_generate")
             return {"status": "failed", "reason": "job_not_found_after_generate"}
+        if job.status not in {"queued", "running"}:
+            return {"status": "skipped", "reason": f"job_stopped:{job.status}"}
         file_obj = await repo.get_doc_file(file_id=snapshot["file_id"], org_id=snapshot["org_id"])
         if file_obj is None:
             await _mark_ai_job_failed(

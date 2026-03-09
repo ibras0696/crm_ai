@@ -1,4 +1,5 @@
-﻿import { useState, useEffect, useCallback, useRef, useMemo, Component, type ErrorInfo, type ReactNode } from 'react'
+﻿import { isAxiosError } from 'axios'
+import { useState, useEffect, useCallback, useRef, useMemo, Component, type ErrorInfo, type ReactNode } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -89,6 +90,14 @@ function fmtVal(v: unknown, ft: string) {
   if (ft === 'date') { try { return new Date(value).toLocaleDateString('ru') } catch { return value } }
   if (ft === 'datetime') { try { return new Date(value).toLocaleString('ru') } catch { return value } }
   return value
+}
+
+function getRequestErrorMessage(error: unknown, fallback: string) {
+  if (isAxiosError(error)) {
+    return error.response?.data?.error?.message || fallback
+  }
+  if (error instanceof Error && error.message) return error.message
+  return fallback
 }
 
 function OptionConfigEditor({
@@ -492,6 +501,7 @@ function TableDetailPageContent() {
   const [filterCol, setFilterCol] = useState<string>('')
   const [filterVal, setFilterVal] = useState<string>('')
   const [showFilter, setShowFilter] = useState(false)
+  const [saveError, setSaveError] = useState('')
   const [page, setPage] = useState(0)
   const [columnDialog, setColumnDialog] = useState<{ mode: 'create' } | { mode: 'edit'; columnId: string } | null>(null)
   const [columnDraft, setColumnDraft] = useState<ColumnSettingsDraft>({ name: '', type: 'text', optionsText: '' })
@@ -629,6 +639,9 @@ function TableDetailPageContent() {
   const handleCellSave = async (recordId: string, colId: string, value: CellValue) => {
     if (!tableId) return
     const key = `${recordId}-${colId}`
+    const previousRecord = records.find((r) => r.id === recordId) || null
+    if (!previousRecord) return
+    setSaveError('')
     // Optimistic update — immediately reflect in UI
     setRecords(prev =>
       prev.map(r =>
@@ -637,11 +650,23 @@ function TableDetailPageContent() {
     )
     setSavingCells(prev => new Set(prev).add(key))
     try {
-      const resp = await recordsApi.update(tableId, recordId, { [colId]: value })
+      const resp = await recordsApi.update(tableId, recordId, { [colId]: value }, previousRecord.updated_at)
       if (resp.data.ok && resp.data.data) {
         setRecords(prev => prev.map(r => r.id === recordId ? resp.data.data! : r))
       }
-    } catch { /* ignore */ }
+    } catch (error) {
+      setRecords(prev => prev.map(r => r.id === recordId ? previousRecord : r))
+      setSaveError(getRequestErrorMessage(error, 'Не удалось сохранить ячейку'))
+      try {
+        const sync = await recordsApi.list(tableId, 500)
+        if (sync.data.ok && sync.data.data) {
+          setRecords(sync.data.data.records)
+          setTotal(sync.data.data.total)
+        }
+      } catch {
+        // leave local rollback state if refresh fails
+      }
+    }
     setSavingCells(prev => { const n = new Set(prev); n.delete(key); return n })
   }
 
@@ -795,6 +820,12 @@ function TableDetailPageContent() {
           {showNewRow ? <><X className="h-4 w-4 mr-1" />Отмена</> : <><Plus className="h-4 w-4 mr-1" />Добавить запись</>}
         </Button>
       </div>
+
+      {saveError && (
+        <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          {saveError}
+        </div>
+      )}
 
       {/* Search + Filter toolbar */}
       <div className="flex items-center gap-2 flex-wrap">

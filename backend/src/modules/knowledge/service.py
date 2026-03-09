@@ -3,6 +3,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.common.optimistic_lock import optimistic_lock_matches
 from src.modules.knowledge.errors import KnowledgeModuleError
 from src.modules.knowledge.models import KBPage
 from src.modules.knowledge.repository import KnowledgeRepository
@@ -46,7 +47,14 @@ class KnowledgeService:
         page = await self.repo.get_by_id_for_org(page_id=page_id, org_id=org_id)
         if page is None:
             return None
+        if not optimistic_lock_matches(current=page.updated_at, expected=body.expected_updated_at):
+            raise KnowledgeModuleError(
+                code="CONFLICT",
+                message="Страница уже изменена другим сотрудником. Обновите данные и повторите сохранение.",
+                status_code=409,
+            )
         updates = body.model_dump(exclude_unset=True)
+        updates.pop("expected_updated_at", None)
         parent_changed = "parent_id" in updates
         if parent_changed:
             updates["parent_id"] = await self._validate_parent(
@@ -95,7 +103,11 @@ class KnowledgeService:
             return parent_id
 
         if parent_id == current_page_id:
-            raise KnowledgeModuleError(code="INVALID_PARENT", message="Нельзя сделать страницу родителем самой себя")
+            raise KnowledgeModuleError(
+                code="INVALID_PARENT",
+                message="Нельзя сделать страницу родителем самой себя",
+                status_code=400,
+            )
 
         pages = await self.repo.list_by_org(org_id=org_id)
         by_id = {page.id: page for page in pages}
@@ -105,6 +117,7 @@ class KnowledgeService:
                 raise KnowledgeModuleError(
                     code="INVALID_PARENT",
                     message="Нельзя переместить страницу внутрь своей дочерней ветки",
+                    status_code=400,
                 )
             next_cursor = by_id.get(cursor.parent_id)
             if next_cursor is None:

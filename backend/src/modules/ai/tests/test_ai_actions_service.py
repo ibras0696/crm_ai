@@ -1,4 +1,5 @@
 import uuid
+from types import SimpleNamespace
 
 import pytest
 from httpx import AsyncClient
@@ -120,6 +121,81 @@ def test_build_dashboard_fallback_action_uses_ui_intent_and_table_hint():
     assert payload["table_name"] == "Сделки"
     assert payload["preferred_widget_type"] == "line"
     assert payload["widgets"] == []
+
+
+def test_build_document_fallback_action_uses_ui_intent_and_file_type():
+    from src.modules.ai.internal.chat_controller_parts.actions import _build_document_fallback_action
+
+    payload = _build_document_fallback_action(
+        user_message="сделай коммерческое предложение для клиента",
+        ui_intent="create_document",
+        ui_params={"file_type": "docx", "template": "business"},
+    )
+
+    assert isinstance(payload, dict)
+    assert payload["action"] == "create_document"
+    assert payload["type"] == "docx"
+    assert payload["template"] == "business"
+    assert payload["prompt"] == "сделай коммерческое предложение для клиента"
+
+
+@pytest.mark.asyncio
+async def test_ai_service_can_create_document_job(client: AsyncClient, monkeypatch):
+    token, email = await _register_owner(client)
+    assert token
+
+    from src.infrastructure.uow import UnitOfWork
+    from src.modules.ai.service import handle_create_document_action
+    from src.modules.auth.models import User
+    from src.modules.docs.service import DocsService
+    from src.modules.org.models import Membership
+
+    async def _fake_request_ai_generate(self, **kwargs):
+        return SimpleNamespace(
+            job=SimpleNamespace(
+                id=uuid.uuid4(),
+                status="queued",
+                file_type=kwargs["file_type"],
+                title=kwargs.get("title") or "AI документ",
+            ),
+            file=SimpleNamespace(
+                id=uuid.uuid4(),
+                title=kwargs.get("title") or "AI документ",
+                type=kwargs["file_type"],
+                status="draft",
+            ),
+            estimated_request_tokens=512,
+        )
+
+    monkeypatch.setattr(DocsService, "request_ai_generate", _fake_request_ai_generate)
+
+    async with UnitOfWork() as uow:
+        user = (await uow.session.execute(select(User).where(User.email == email))).scalars().first()
+        assert user is not None
+        membership = (await uow.session.execute(select(Membership).where(Membership.user_id == user.id))).scalars().first()
+        assert membership is not None
+        org_id = membership.org_id
+        user_id = user.id
+
+        result = await handle_create_document_action(
+            uow,
+            org_id,
+            user_id,
+            {
+                "action": "create_document",
+                "type": "docx",
+                "title": "Коммерческое предложение",
+                "template": "business",
+                "prompt": "Подготовь коммерческое предложение для нового клиента.",
+            },
+            user_message="создай документ",
+        )
+
+        assert result["ok"] is True
+        assert result["action"] == "create_document"
+        assert result["file"]["type"] == "docx"
+        assert result["job"]["status"] == "queued"
+        assert result["_post_commit_docs_ai_job_id"]
 
 
 @pytest.mark.asyncio

@@ -11,7 +11,7 @@ import {
   type TableInfo,
 } from '@/lib/api'
 import CapabilitiesMenu from '@/components/ai/CapabilitiesMenu'
-import { ActionErrorPreview, DashboardPreview, KnowledgePreview, PendingActionPreview, SchedulePreview, TablePreview } from '@/components/ai/ActionPreviews'
+import { ActionErrorPreview, DashboardPreview, DocumentPreview, KnowledgePreview, PendingActionPreview, SchedulePreview, TablePreview } from '@/components/ai/ActionPreviews'
 import StatsTab from '@/components/ai/StatsTab'
 import ChatHistory from '@/components/ai/ChatHistory'
 import ContextHoverPickers from '@/components/ai/ContextHoverPickers'
@@ -60,6 +60,13 @@ interface AIStatus {
     daily_tokens: number
     rpm_per_user: number
     max_tokens_per_request: number
+  }
+  token_wallet?: {
+    cycle_key: string
+    plan_tokens_monthly_quota: number
+    plan_tokens_remaining: number
+    addon_tokens_remaining: number
+    total_tokens_remaining: number
   }
 }
 
@@ -413,6 +420,7 @@ export default function AIPage() {
                           <>
                             <TablePreview result={msg.actionResult} />
                             <DashboardPreview result={msg.actionResult} />
+                            <DocumentPreview result={msg.actionResult} />
                             <SchedulePreview result={msg.actionResult} />
                             <KnowledgePreview result={msg.actionResult} />
                             <PendingActionPreview
@@ -467,13 +475,19 @@ export default function AIPage() {
                           ? 'Создание таблицы'
                           : uiIntent.type === 'create_dashboard'
                             ? `Создание дашборда${(uiIntent.params as any)?.widget_type ? ` (${String((uiIntent.params as any).widget_type)})` : ''}`
+                            : uiIntent.type === 'create_document'
+                              ? `Создание документа${(uiIntent.params as any)?.file_type ? ` (${String((uiIntent.params as any).file_type).toUpperCase()})` : ''}`
                             : uiIntent.type === 'create_schedule_event'
                               ? 'Создание события в расписании'
                               : uiIntent.type === 'create_kb_page'
                                 ? 'Создание страницы базы знаний'
                                 : uiIntent.type}
                       </p>
-                      <p className="text-xs text-muted-foreground truncate">Опишите, что нужно сделать (например: "придумай 10 тестовых товаров").</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {uiIntent.type === 'create_document'
+                          ? 'Опишите документ, который нужно подготовить (например: "сделай коммерческое предложение для клиента").'
+                          : 'Опишите, что нужно сделать (например: "придумай 10 тестовых товаров").'}
+                      </p>
                     </div>
                     <button
                       type="button"

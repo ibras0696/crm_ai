@@ -3,6 +3,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import JSONResponse
 
 from src.common.enums import UserRole
 from src.common.schemas import ApiResponse
@@ -27,6 +28,13 @@ def _error_response(error: TableServiceError) -> ApiResponse[None]:
         ok=False,
         data=None,
         error={"code": error.code, "message": error.message},
+    )
+
+
+def _error_json_response(error: TableServiceError) -> JSONResponse:
+    return JSONResponse(
+        status_code=error.status_code,
+        content={"ok": False, "data": None, "error": {"code": error.code, "message": error.message}},
     )
 
 
@@ -120,6 +128,8 @@ async def update_record(
                 body=body,
             )
         except TableServiceError as error:
+            if error.status_code == 409:
+                return _error_json_response(error)
             return _error_response(error)
         await uow.commit()
         await uow.session.refresh(record)

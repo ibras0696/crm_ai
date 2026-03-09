@@ -784,6 +784,75 @@ async def test_ai_chat_prechecks_kb_limit_by_ui_intent(client: AsyncClient, monk
         settings.OPENAI_BEARER_TOKEN = old_token
 
 
+@pytest.mark.asyncio
+async def test_ai_chat_create_document_via_ui_intent_fallback(client: AsyncClient, monkeypatch):
+    token = await _register_owner(client)
+
+    from src.config import settings
+    from src.modules.ai.internal import chat_controller as ai_chat_controller
+    from src.modules.ai.internal.chat_controller_parts import actions as ai_actions
+
+    old_token = settings.OPENAI_BEARER_TOKEN
+    settings.OPENAI_BEARER_TOKEN = "test-token"
+
+    async def _fake_call(*args, **kwargs):
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": "Подготовлю документ и сохраню его в документах."
+                    }
+                }
+            ],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 15, "total_tokens": 25},
+        }
+
+    async def _fake_handler(uow, org_id, user_id, action_payload, user_message=None):
+        return {
+            "action": "create_document",
+            "ok": True,
+            "file": {
+                "id": str(uuid.uuid4()),
+                "title": "Коммерческое предложение",
+                "type": str(action_payload.get("type") or "docx"),
+                "status": "draft",
+            },
+            "job": {
+                "id": str(uuid.uuid4()),
+                "status": "queued",
+                "file_type": str(action_payload.get("type") or "docx"),
+                "title": "Коммерческое предложение",
+                "estimated_request_tokens": 320,
+            },
+        }
+
+    monkeypatch.setattr(ai_chat_controller, "call_openai_compatible_api", _fake_call)
+    monkeypatch.setitem(ai_actions.ACTION_HANDLERS, "create_document", _fake_handler)
+
+    try:
+        resp = await client.post(
+            "/api/v1/ai/chat",
+            json={
+                "message": "сделай коммерческое предложение для клиента",
+                "include_context": False,
+                "ui_intent": "create_document",
+                "ui_intent_params": {"file_type": "docx", "template": "business"},
+            },
+            headers=_headers(token),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        action_result = body["data"]["action_result"]
+        assert action_result is not None
+        assert action_result["action"] == "create_document"
+        assert action_result["ok"] is True
+        assert action_result["file"]["type"] == "docx"
+        assert action_result["job"]["status"] == "queued"
+    finally:
+        settings.OPENAI_BEARER_TOKEN = old_token
+
+
 
 
 @pytest.mark.asyncio

@@ -17,10 +17,10 @@ from src.modules.ai.internal.widget_inference import (
     pick_time_column_for_widget,
     should_use_inferred_widgets,
 )
+from src.modules.reports.analytics_engine import build_widget_data
 from src.modules.reports.models import ReportDashboard, ReportWidget
 from src.modules.reports.repository import ReportsRepository
 from src.modules.reports.schemas import WidgetConfig
-from src.modules.reports.service import build_widget_data
 from src.modules.tables.models import Table
 
 

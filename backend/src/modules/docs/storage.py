@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import uuid
+from urllib.parse import quote
 
 from src.config import settings
 from src.modules.files.storage import ensure_bucket, get_s3_client, get_s3_presign_client
@@ -40,7 +41,6 @@ class StorageProvider:
         s3 = get_s3_presign_client()
         params = {"Bucket": bucket, "Key": key}
         if filename:
-            from urllib.parse import quote
             safe_filename = quote(filename.encode("utf-8"))
             params["ResponseContentDisposition"] = f"attachment; filename*=UTF-8''{safe_filename}"
             
@@ -53,7 +53,6 @@ class StorageProvider:
     def generate_internal_presigned_get_url(self, *, bucket: str, key: str, expires_in: int = 900) -> str:
         """Сформировать внутренний URL (доступен только из Docker) для скачивания объекта OnlyOffice сервером."""
         ensure_bucket()
-        from src.modules.files.storage import get_s3_client
         s3 = get_s3_client()
         return s3.generate_presigned_url(
             "get_object",

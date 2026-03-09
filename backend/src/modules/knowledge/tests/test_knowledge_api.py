@@ -76,7 +76,11 @@ async def test_knowledge_pages_crud_flow(client: AsyncClient):
 
     updated = await client.patch(
         f"/api/v1/knowledge/pages/{page_id}",
-        json={"title": "Обновленная страница", "is_published": False},
+        json={
+            "title": "Обновленная страница",
+            "is_published": False,
+            "expected_updated_at": loaded.json()["data"]["updated_at"],
+        },
         headers=_headers(token),
     )
     assert updated.status_code == 200
@@ -222,7 +226,7 @@ async def test_move_page_to_another_parent_and_prevent_cycles(client: AsyncClien
 
     moved = await client.patch(
         f"/api/v1/knowledge/pages/{child_id}",
-        json={"parent_id": root_b_id},
+        json={"parent_id": root_b_id, "expected_updated_at": child.json()["data"]["updated_at"]},
         headers=_headers(token),
     )
     assert moved.status_code == 200
@@ -231,10 +235,52 @@ async def test_move_page_to_another_parent_and_prevent_cycles(client: AsyncClien
 
     invalid = await client.patch(
         f"/api/v1/knowledge/pages/{root_b_id}",
-        json={"parent_id": child_id},
+        json={"parent_id": child_id, "expected_updated_at": root_b.json()["data"]["updated_at"]},
         headers=_headers(token),
     )
     assert invalid.status_code == 400
     body = invalid.json()
     assert body["ok"] is False
     assert body["error"]["code"] == "INVALID_PARENT"
+
+
+@pytest.mark.asyncio
+async def test_knowledge_page_conflict_returns_409(client: AsyncClient):
+    email = f"kb-conflict-{uuid.uuid4().hex[:8]}@example.com"
+    reg = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "StrongPass123!",
+            "first_name": "KB",
+            "last_name": "Conflict",
+            "org_name": "Knowledge Conflict Org",
+            "accepted_privacy_policy": True,
+        },
+    )
+    assert reg.status_code == 201
+    token = reg.json()["data"]["access_token"]
+
+    created = await client.post(
+        "/api/v1/knowledge/pages",
+        json={"title": "Страница", "content": "v1"},
+        headers=_headers(token),
+    )
+    assert created.status_code == 200
+    page_id = created.json()["data"]["id"]
+    stale_updated_at = created.json()["data"]["updated_at"]
+
+    first = await client.patch(
+        f"/api/v1/knowledge/pages/{page_id}",
+        json={"title": "v2", "expected_updated_at": stale_updated_at},
+        headers=_headers(token),
+    )
+    assert first.status_code == 200
+
+    conflict = await client.patch(
+        f"/api/v1/knowledge/pages/{page_id}",
+        json={"title": "v3", "expected_updated_at": stale_updated_at},
+        headers=_headers(token),
+    )
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "CONFLICT"

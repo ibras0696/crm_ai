@@ -29,6 +29,7 @@ from src.modules.ai.internal.chat_controller_parts.action_repair import (
 from src.modules.ai.internal.chat_controller_parts.actions import (
     CONFIRMABLE_ACTIONS,
     _build_dashboard_fallback_action,
+    _build_document_fallback_action,
     _build_kb_fallback_action,
     _build_pending_action_result,
     _claims_action_completed,
@@ -629,6 +630,17 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 ui_intent=body.ui_intent,
                 user_message=body.message,
             )
+        if action_payload is None and (body.ui_intent or "").strip().lower() == "create_document":
+            document_fallback = _build_document_fallback_action(
+                user_message=body.message,
+                ui_intent=body.ui_intent,
+                ui_params=body.ui_intent_params,
+            )
+            action_payload = _normalize_action_payload_for_execution(
+                document_fallback,
+                ui_intent=body.ui_intent,
+                user_message=body.message,
+            )
         if action_payload is None and _claims_action_completed(reply):
             reply = ACTION_NOT_EXECUTED_MESSAGE
         action_payload = apply_ui_intent_overrides(action_payload, body.ui_intent, body.ui_intent_params)
@@ -784,6 +796,7 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
             )
 
             action_result = None
+            post_commit_docs_ai_job_id: str | None = None
             assistant_meta = {
                 **(assistant_msg.meta or {}),
                 "action_requested": bool(action_payload),
@@ -821,6 +834,10 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                             "message": "Действие не выполнено: неподдерживаемый формат crm_action.",
                         }
                 if action_result is not None:
+                    if isinstance(action_result, dict):
+                        raw_job_id = action_result.pop("_post_commit_docs_ai_job_id", None)
+                        if raw_job_id:
+                            post_commit_docs_ai_job_id = str(raw_job_id)
                     assistant_meta["action_result"] = action_result
             assistant_msg.meta = assistant_meta
 
@@ -833,6 +850,32 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 "wallet_idempotent_replay": token_spend.idempotent_replay,
             }
             await uow.commit()
+
+        if post_commit_docs_ai_job_id:
+            from src.modules.docs.tasks import ai_generate, run_ai_generate_inline
+
+            task_id: str | None = None
+            try:
+                task = ai_generate.delay(post_commit_docs_ai_job_id)
+                task_id = str(getattr(task, "id", "") or "")
+            except Exception:
+                logger.exception("ai_chat_docs_ai_generate_enqueue_failed", extra={"job_id": post_commit_docs_ai_job_id})
+                await run_ai_generate_inline(job_id=post_commit_docs_ai_job_id, task_id="inline-chat-fallback")
+
+            if task_id:
+                async with UnitOfWork() as uow:
+                    from src.modules.docs.service import DocsService
+
+                    try:
+                        service = DocsService(uow.session)
+                        job = await service.get_ai_generation_job(
+                            org_id=current_user.org_id,
+                            job_id=uuid.UUID(post_commit_docs_ai_job_id),
+                        )
+                        job.task_id = task_id
+                        await uow.commit()
+                    except Exception:
+                        await uow.rollback()
 
         _record_metric("ok", int(usage.get("total_tokens", 0) or 0))
 

@@ -40,4 +40,16 @@ def apply_ui_intent_overrides(action_payload: dict[str, Any] | None, ui_intent: 
         if forced in {"metric", "bar", "line", "pie", "table"}:
             action_payload["preferred_widget_type"] = forced
 
+    if intent == "create_document" and action_name == "create_document":
+        file_type = str(params.get("file_type") or params.get("type") or "").strip().lower()
+        template = str(params.get("template") or params.get("style") or "").strip()
+        title = str(params.get("title") or "").strip()
+
+        if file_type and not action_payload.get("type") and not action_payload.get("file_type"):
+            action_payload["type"] = file_type
+        if template and not action_payload.get("template"):
+            action_payload["template"] = template
+        if title and not action_payload.get("title") and not action_payload.get("name"):
+            action_payload["title"] = title
+
     return action_payload

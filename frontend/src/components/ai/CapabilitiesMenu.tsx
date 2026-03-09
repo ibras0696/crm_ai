@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { BarChart3, BookOpen, Calendar, LayoutGrid, Sparkles, Table2, X } from 'lucide-react'
+import { BarChart3, BookOpen, Calendar, FileText, LayoutGrid, Sparkles, Table2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { AIContextSourceTable } from '@/lib/api'
 
 type DashboardWidgetType = 'metric' | 'bar' | 'line' | 'pie' | 'table'
-export type UiIntentType = 'create_table' | 'create_dashboard' | 'create_schedule_event' | 'create_kb_page'
+export type UiIntentType = 'create_table' | 'create_dashboard' | 'create_schedule_event' | 'create_kb_page' | 'create_document'
 
 function pickFirstSelectedTableName(tables: AIContextSourceTable[], selectedIds: string[]): string | undefined {
   if (!selectedIds?.length) return undefined
@@ -58,6 +58,9 @@ export default function CapabilitiesMenu(props: {
 
   const chooseCreateKb = () => select({ type: 'create_kb_page' })
 
+  const chooseCreateDocument = () =>
+    select({ type: 'create_document', params: { file_type: 'docx' } })
+
   return (
     <div className="relative" ref={rootRef}>
       <Button
@@ -109,6 +112,17 @@ export default function CapabilitiesMenu(props: {
                 <div className="h-9 rounded-md border border-border/60 bg-secondary/20 text-xs flex items-center justify-center text-muted-foreground">
                   <BarChart3 className="h-4 w-4" />
                 </div>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-border p-3">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-cyan-400" />
+                <span className="text-sm font-medium">Создать документ</span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">Подготовит документ по вашему описанию и сохранит его в модуле документов.</p>
+              <div className="mt-2 grid grid-cols-1 gap-2">
+                <button type="button" onClick={chooseCreateDocument} className="h-9 rounded-md border border-border hover:bg-secondary/50 text-xs">DOCX</button>
               </div>
             </div>
 

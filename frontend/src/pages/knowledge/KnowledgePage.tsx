@@ -1,4 +1,4 @@
-﻿import { type ReactNode, useState, useEffect, useCallback, useRef, useMemo } from 'react'
+﻿import { type DragEvent as ReactDragEvent, type ReactNode, useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { isAxiosError } from 'axios'
 import { knowledgeApi, type KBPageInfo } from '@/lib/api'
 import { cn } from '@/lib/utils'
@@ -54,6 +54,17 @@ function collectDescendants(pages: KBPage[], rootId: string): Set<string> {
   return descendants
 }
 
+function resolveDraggedPageId(
+  event: Pick<ReactDragEvent<HTMLElement>, 'dataTransfer'> | ReactDragEvent<HTMLElement>,
+  draggedPageId: string | null,
+): string | null {
+  if (draggedPageId?.trim()) return draggedPageId
+  const direct = event.dataTransfer?.getData('application/x-kb-page-id')?.trim()
+  if (direct) return direct
+  const fallback = event.dataTransfer?.getData('text/plain')?.trim()
+  return fallback || null
+}
+
 function TreeNode({ page, pages, selected, onSelect, onDelete, onMove, draggedPageId, dropTargetId, onDragStartPage, onDragEndPage, onDropTargetChange, depth = 0 }: {
   page: KBPage; pages: KBPage[]; selected: string | null
   onSelect: (p: KBPage) => void
@@ -76,7 +87,9 @@ function TreeNode({ page, pages, selected, onSelect, onDelete, onMove, draggedPa
       <div
         draggable
         onDragStart={(e) => {
+          e.stopPropagation()
           e.dataTransfer.effectAllowed = 'move'
+          e.dataTransfer.setData('application/x-kb-page-id', page.id)
           e.dataTransfer.setData('text/plain', page.id)
           onDragStartPage(page.id)
         }}
@@ -84,23 +97,29 @@ function TreeNode({ page, pages, selected, onSelect, onDelete, onMove, draggedPa
           onDropTargetChange(null)
           onDragEndPage()
         }}
+        onDragEnter={(e) => {
+          const activeDraggedPageId = resolveDraggedPageId(e, draggedPageId)
+          if (!activeDraggedPageId || activeDraggedPageId === page.id) return
+          e.preventDefault()
+          onDropTargetChange(page.id)
+        }}
         onDragOver={(e) => {
-          if (!draggedPageId || draggedPageId === page.id) return
+          const activeDraggedPageId = resolveDraggedPageId(e, draggedPageId)
+          if (!activeDraggedPageId || activeDraggedPageId === page.id) return
           e.preventDefault()
           e.dataTransfer.dropEffect = 'move'
           onDropTargetChange(page.id)
         }}
-        onDragLeave={() => {
-          if (dropTargetId === page.id) onDropTargetChange(null)
-        }}
         onDrop={async (e) => {
           e.preventDefault()
-          if (!draggedPageId || draggedPageId === page.id) return
-          await onMove(draggedPageId, page.id)
+          e.stopPropagation()
+          const activeDraggedPageId = resolveDraggedPageId(e, draggedPageId)
+          if (!activeDraggedPageId || activeDraggedPageId === page.id) return
+          await onMove(activeDraggedPageId, page.id)
           onDropTargetChange(null)
         }}
         onClick={() => onSelect(page)}
-        className={`flex cursor-grab items-center gap-1 px-2 py-1.5 rounded-lg group transition-colors border ${isSelected ? 'bg-primary/10 text-primary border-primary/20' : 'hover:bg-secondary/50 border-transparent'} ${isDragging ? 'opacity-50' : ''} ${isDropActive ? 'bg-primary/10 border-primary/40' : ''}`}
+        className={`flex cursor-grab select-none items-center gap-1 px-2 py-1.5 rounded-lg group transition-colors border ${isSelected ? 'bg-primary/10 text-primary border-primary/20' : 'hover:bg-secondary/50 border-transparent'} ${isDragging ? 'opacity-50' : ''} ${isDropActive ? 'bg-primary/10 border-primary/40' : ''}`}
         style={{ paddingLeft: `${8 + depth * 16}px` }}
       >
         <button
@@ -130,6 +149,14 @@ function TreeNode({ page, pages, selected, onSelect, onDelete, onMove, draggedPa
           <Trash2 className="h-3 w-3" />
         </button>
       </div>
+      {isDropActive && draggedPageId !== page.id && (
+        <div
+          className="ml-2 mr-2 rounded-md border border-dashed border-primary/40 bg-primary/5 px-3 py-1.5 text-[11px] text-primary"
+          style={{ marginLeft: `${24 + depth * 16}px` }}
+        >
+          Отпустите, чтобы вложить страницу в «{page.title}»
+        </div>
+      )}
       {open && children.map(child => (
         <TreeNode
           key={child.id}
@@ -203,7 +230,10 @@ export default function KnowledgePage() {
     setErrorText('')
     setSaving(true)
     try {
-      const r = await knowledgeApi.update(selected.id, draft)
+      const r = await knowledgeApi.update(selected.id, {
+        ...draft,
+        expected_updated_at: selected.updated_at || new Date().toISOString(),
+      })
       if (r.data.ok && r.data.data) {
         const updated = normalizePage(r.data.data)
         setPages(prev => prev.map(p => p.id === updated.id ? updated : p))
@@ -213,6 +243,7 @@ export default function KnowledgePage() {
         setErrorText(r.data.error?.message || 'Не удалось сохранить страницу')
       }
     } catch (e) {
+      await load()
       setErrorText(getErrorMessage(e, 'Не удалось сохранить страницу'))
     }
     setSaving(false)
@@ -272,7 +303,10 @@ export default function KnowledgePage() {
     }
     setErrorText('')
     try {
-      const response = await knowledgeApi.update(pageId, { parent_id: parentId })
+      const response = await knowledgeApi.update(pageId, {
+        parent_id: parentId,
+        expected_updated_at: page.updated_at || new Date().toISOString(),
+      })
       if (response.data.ok && response.data.data) {
         const updated = normalizePage(response.data.data)
         setPages(prev => prev.map(p => (p.id === pageId ? updated : p)))
@@ -283,6 +317,7 @@ export default function KnowledgePage() {
         setErrorText(response.data.error?.message || 'Не удалось переместить страницу')
       }
     } catch (e) {
+      await load()
       setErrorText(getErrorMessage(e, 'Не удалось переместить страницу'))
     } finally {
       setDraggedPageId(null)
@@ -318,16 +353,23 @@ export default function KnowledgePage() {
         <div className="flex-1 overflow-y-auto p-2 min-w-[256px]">
           {draggedPageId && (
             <div
-              onDragOver={(e) => {
+              onDragEnter={(e) => {
+                const activeDraggedPageId = resolveDraggedPageId(e, draggedPageId)
+                if (!activeDraggedPageId) return
                 e.preventDefault()
                 setDropTargetId('__root__')
               }}
-              onDragLeave={() => {
-                if (dropTargetId === '__root__') setDropTargetId(null)
+              onDragOver={(e) => {
+                const activeDraggedPageId = resolveDraggedPageId(e, draggedPageId)
+                if (!activeDraggedPageId) return
+                e.preventDefault()
+                setDropTargetId('__root__')
               }}
               onDrop={async (e) => {
                 e.preventDefault()
-                await handleMove(draggedPageId, null)
+                const activeDraggedPageId = resolveDraggedPageId(e, draggedPageId)
+                if (!activeDraggedPageId) return
+                await handleMove(activeDraggedPageId, null)
               }}
               className={`mb-2 rounded-lg border border-dashed px-3 py-2 text-xs transition-colors ${
                 dropTargetId === '__root__'

@@ -1,4 +1,4 @@
-﻿import api from '../core/client'
+import api from '../core/client'
 import type { ApiResponse } from '../core/types'
 
 export interface TableSummary {
@@ -40,17 +40,77 @@ export interface TimeSeriesPoint {
   count: number
 }
 
+export interface AnalyticsMetric {
+  key: string
+  aggregation: 'count' | 'sum' | 'avg' | 'min' | 'max'
+  column_id: string | null
+  label: string | null
+}
+
+export interface AnalyticsFilter {
+  column_id: string
+  op: 'eq' | 'neq' | 'contains' | 'gt' | 'lt' | 'gte' | 'lte' | 'in' | 'not_in' | 'is_empty' | 'not_empty' | 'between'
+  value?: string | number | boolean | null
+  values?: Array<string | number | boolean>
+  from_value?: string | number | null
+  to_value?: string | number | null
+}
+
+export type DashboardFilter = AnalyticsFilter
+
+export interface AnalyticsSort {
+  by: 'label' | 'metric'
+  metric_key?: string | null
+  direction: 'asc' | 'desc'
+}
+
+export interface AnalyticsField {
+  id: string
+  name: string
+  field_type: string
+  analytics_type: 'number' | 'date' | 'list' | 'boolean' | 'text'
+  position: number
+  is_primary: boolean
+  supported_aggregations: Array<'count' | 'sum' | 'avg' | 'min' | 'max'>
+  supported_filter_ops: AnalyticsFilter['op'][]
+}
+
+export interface AnalyticsTableSchema {
+  table_id: string
+  table_name: string
+  total_records: number
+  fields: AnalyticsField[]
+  default_metric_column_id: string | null
+  default_group_by_column_id: string | null
+  default_time_column_id: string | null
+}
+
+export interface AnalyticsQueryRequest {
+  table_id: string
+  widget_type: 'metric' | 'bar' | 'line' | 'donut' | 'table' | 'pie' | 'area'
+  title?: string | null
+  metrics: AnalyticsMetric[]
+  group_by_column_id?: string | null
+  time_column_id?: string | null
+  date_bucket?: 'day' | 'week' | 'month'
+  filters?: AnalyticsFilter[]
+  sort?: AnalyticsSort | null
+  limit?: number
+  selected_column_ids?: string[]
+}
+
+export interface AnalyticsPreviewResponse {
+  table_id: string
+  table_name: string
+  query: AnalyticsQueryRequest
+  data: Record<string, unknown>
+}
+
 export interface DashboardInfo {
   id: string
   name: string
   description: string | null
   created_at: string
-}
-
-export interface DashboardFilter {
-  column_id: string
-  op: 'eq' | 'neq' | 'contains' | 'gt' | 'lt' | 'gte' | 'lte'
-  value: string | number | boolean
 }
 
 export interface DashboardWidgetConfig {
@@ -59,9 +119,13 @@ export interface DashboardWidgetConfig {
   group_by_column_id: string | null
   time_column_id: string | null
   time_granularity: 'day' | 'week' | 'month'
-  filters: DashboardFilter[]
+  filters: AnalyticsFilter[]
   limit: number
   selected_column_ids: string[]
+  metrics?: AnalyticsMetric[]
+  sort_by?: 'label' | 'metric'
+  sort_direction?: 'asc' | 'desc'
+  sort_metric_key?: string | null
 }
 
 export interface DashboardWidget {
@@ -94,6 +158,8 @@ export interface DashboardDataResponse {
 export const reportsApi = {
   summary: () => api.get<ApiResponse<OrgReport>>('/reports/summary'),
   tableAnalytics: (table_id: string, column_ids: string[] = []) => api.post<ApiResponse<TableAggResponse>>('/reports/table-analytics', { table_id, column_ids }),
+  tableSchema: (tableId: string) => api.get<ApiResponse<AnalyticsTableSchema>>(`/reports/tables/${tableId}/schema`),
+  queryPreview: (data: AnalyticsQueryRequest) => api.post<ApiResponse<AnalyticsPreviewResponse>>('/reports/query-preview', data),
   timeline: (days = 30) => api.get<ApiResponse<TimeSeriesPoint[]>>(`/reports/timeline?days=${days}`),
   listDashboards: () => api.get<ApiResponse<DashboardInfo[]>>('/reports/dashboards'),
   createDashboard: (data: { name: string; description?: string }) => api.post<ApiResponse<DashboardInfo>>('/reports/dashboards', data),
@@ -101,6 +167,8 @@ export const reportsApi = {
   deleteDashboard: (id: string) => api.delete<ApiResponse<null>>(`/reports/dashboards/${id}`),
   getDashboard: (id: string) => api.get<ApiResponse<DashboardDetail>>(`/reports/dashboards/${id}`),
   getDashboardData: (id: string) => api.get<ApiResponse<DashboardDataResponse>>(`/reports/dashboards/${id}/data`),
+  previewDashboard: (id: string, data: { table_id?: string | null; filters?: AnalyticsFilter[] }) =>
+    api.post<ApiResponse<DashboardDataResponse>>(`/reports/dashboards/${id}/preview`, data),
   createWidget: (
     dashboardId: string,
     data: { title: string; widget_type: string; table_id?: string | null; config?: Partial<DashboardWidgetConfig>; position?: number },

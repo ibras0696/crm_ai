@@ -937,11 +937,12 @@ async def test_docs_save_text_creates_new_version_and_updates_usage_and_audit(
     old_file = await client.get(f"/api/v1/docs/files/{file_id}", headers=_headers(token))
     assert old_file.status_code == 200
     old_version_id = old_file.json()["data"]["current_version_id"]
+    old_updated_at = old_file.json()["data"]["updated_at"]
 
     text_payload = "новая версия текста для проверки sprint3"
     save = await client.post(
         f"/api/v1/docs/files/{file_id}/save-text",
-        json={"content": text_payload, "title": "Editable TXT"},
+        json={"content": text_payload, "title": "Editable TXT", "expected_updated_at": old_updated_at},
         headers=_headers(token),
     )
     assert save.status_code == 200
@@ -984,6 +985,46 @@ async def test_docs_save_text_creates_new_version_and_updates_usage_and_audit(
 
 
 @pytest.mark.asyncio
+async def test_docs_save_text_conflict_returns_409(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    token = await _register_owner(client)
+    file_id = await _create_ready_txt_file(client, token, monkeypatch, size_bytes=9)
+
+    storage_map: dict[str, bytes] = {}
+
+    def _fake_put_object_bytes(*, bucket: str, key: str, payload: bytes, content_type: str) -> None:
+        _ = bucket, content_type
+        storage_map[key] = payload
+
+    def _fake_get_object_bytes(*, bucket: str, key: str) -> bytes:
+        _ = bucket
+        return storage_map.get(key, b"seed text")
+
+    monkeypatch.setattr("src.modules.docs.service.DEFAULT_STORAGE_PROVIDER.put_object_bytes", _fake_put_object_bytes)
+    monkeypatch.setattr("src.modules.docs.service.DEFAULT_STORAGE_PROVIDER.get_object_bytes", _fake_get_object_bytes)
+
+    file_before = await client.get(f"/api/v1/docs/files/{file_id}", headers=_headers(token))
+    assert file_before.status_code == 200
+    stale_updated_at = file_before.json()["data"]["updated_at"]
+
+    first_save = await client.post(
+        f"/api/v1/docs/files/{file_id}/save-text",
+        json={"content": "first update", "expected_updated_at": stale_updated_at},
+        headers=_headers(token),
+    )
+    assert first_save.status_code == 200
+
+    second_save = await client.post(
+        f"/api/v1/docs/files/{file_id}/save-text",
+        json={"content": "stale update", "expected_updated_at": stale_updated_at},
+        headers=_headers(token),
+    )
+    assert second_save.status_code == 409
+    body = second_save.json()
+    assert body["ok"] is False
+    assert body["error"]["code"] == "CONFLICT"
+
+
+@pytest.mark.asyncio
 async def test_docs_save_text_rate_limit(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
     token = await _register_owner(client)
     file_id = await _create_ready_txt_file(client, token, monkeypatch, size_bytes=9)
@@ -1002,25 +1043,31 @@ async def test_docs_save_text_rate_limit(client: AsyncClient, monkeypatch: pytes
     monkeypatch.setattr("src.modules.docs.service.DEFAULT_STORAGE_PROVIDER.get_object_bytes", _fake_get_object_bytes)
     monkeypatch.setattr(settings, "DOCS_TEXT_SAVE_RPM", 2)
 
+    file_before = await client.get(f"/api/v1/docs/files/{file_id}", headers=_headers(token))
+    assert file_before.status_code == 200
+    expected_updated_at = file_before.json()["data"]["updated_at"]
+
     first = await client.post(
         f"/api/v1/docs/files/{file_id}/save-text",
-        json={"content": "v1"},
+        json={"content": "v1", "expected_updated_at": expected_updated_at},
         headers=_headers(token),
     )
     assert first.status_code == 200
     assert first.json()["ok"] is True
+    expected_updated_at = first.json()["data"]["updated_at"]
 
     second = await client.post(
         f"/api/v1/docs/files/{file_id}/save-text",
-        json={"content": "v2"},
+        json={"content": "v2", "expected_updated_at": expected_updated_at},
         headers=_headers(token),
     )
     assert second.status_code == 200
     assert second.json()["ok"] is True
+    expected_updated_at = second.json()["data"]["updated_at"]
 
     third = await client.post(
         f"/api/v1/docs/files/{file_id}/save-text",
-        json={"content": "v3"},
+        json={"content": "v3", "expected_updated_at": expected_updated_at},
         headers=_headers(token),
     )
     assert third.status_code == 200
@@ -1371,6 +1418,52 @@ async def test_docs_onlyoffice_callback_creates_new_version(client: AsyncClient,
 
 
 @pytest.mark.asyncio
+async def test_docs_onlyoffice_callback_stale_session_rejected(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    token = await _register_owner(client)
+    original_docx = _make_docx_bytes("Original DOCX")
+    updated_docx = _make_docx_bytes("Updated DOCX")
+    file_id, _source_version_id = await _create_ready_docx_file(client, token, monkeypatch, docx_bytes=original_docx)
+
+    monkeypatch.setattr(settings, "DOCS_ONLYOFFICE_ENABLED", True)
+    monkeypatch.setattr(settings, "DOCS_ONLYOFFICE_DOCUMENT_SERVER_URL", "http://onlyoffice:80")
+    monkeypatch.setattr(
+        settings,
+        "DOCS_ONLYOFFICE_CALLBACK_URL",
+        "http://api:8000/api/v1/docs/integrations/onlyoffice/callback",
+    )
+    monkeypatch.setattr(settings, "DOCS_ONLYOFFICE_JWT_SECRET", "")
+
+    monkeypatch.setattr("src.modules.docs.routes.scan_version.delay", lambda *_args, **_kwargs: None)
+
+    async def _download_onlyoffice_file(*_args, **_kwargs):
+        return updated_docx
+
+    monkeypatch.setattr(
+        "src.modules.docs.service.DocsService._download_onlyoffice_file",
+        _download_onlyoffice_file,
+    )
+
+    open_docx = await client.post(f"/api/v1/docs/files/{file_id}/open-docx", headers=_headers(token))
+    assert open_docx.status_code == 200
+    callback_url = open_docx.json()["data"]["config"]["editorConfig"]["callbackUrl"]
+    state_token = parse_qs(urlparse(callback_url).query).get("state", [""])[0]
+    assert state_token
+
+    first_callback = await client.post(
+        f"/api/v1/docs/integrations/onlyoffice/callback?state={state_token}",
+        json={"status": 2, "url": "http://onlyoffice.local/updated.docx"},
+    )
+    assert first_callback.status_code == 200
+
+    stale_callback = await client.post(
+        f"/api/v1/docs/integrations/onlyoffice/callback?state={state_token}",
+        json={"status": 2, "url": "http://onlyoffice.local/updated.docx"},
+    )
+    assert stale_callback.status_code == 409
+    assert stale_callback.json()["code"] == "CONFLICT"
+
+
+@pytest.mark.asyncio
 async def test_docs_onlyoffice_callback_without_signature_rejected(
     client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
@@ -1542,6 +1635,127 @@ async def test_docs_ai_generate_docx_allows_regular_prompt_with_free_request_lim
 
 
 @pytest.mark.asyncio
+async def test_docs_ai_generate_deduplicates_same_recent_request(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    token = await _register_owner(client)
+
+    async def _fake_runtime(*_args, **_kwargs):
+        from src.modules.docs.ai_generator import AIGenerationRuntime
+
+        return AIGenerationRuntime(
+            base_url="https://example.local",
+            bearer_token="test-token",
+            provider_mode="openai_compatible",
+            model="gpt-test",
+            temperature=0.2,
+            max_tokens=3000,
+        )
+
+    async def _allow_limits(*_args, **_kwargs):
+        return True, None
+
+    monkeypatch.setattr("src.modules.docs.service.DEFAULT_AI_DOCUMENT_GENERATOR.resolve_runtime", _fake_runtime)
+    monkeypatch.setattr("src.modules.docs.service.check_ai_limits", _allow_limits)
+    monkeypatch.setattr("src.modules.docs.routes.ai_generate.delay", lambda *_args, **_kwargs: None)
+
+    payload = {
+        "type": "docx",
+        "prompt": "Подготовь базовый договор на услуги с типовыми разделами и местом под реквизиты.",
+        "title": "Договор на услуги",
+        "template": "Договор",
+    }
+
+    first = await client.post("/api/v1/docs/files/ai/generate", json=payload, headers=_headers(token))
+    assert first.status_code == 200
+    assert first.json()["ok"] is True
+
+    second = await client.post("/api/v1/docs/files/ai/generate", json=payload, headers=_headers(token))
+    assert second.status_code == 200
+    assert second.json()["ok"] is True
+
+    first_data = first.json()["data"]
+    second_data = second.json()["data"]
+    assert second_data["job_id"] == first_data["job_id"]
+    assert second_data["file_id"] == first_data["file_id"]
+
+    jobs_list = await client.get("/api/v1/docs/files/ai/jobs?limit=10", headers=_headers(token))
+    assert jobs_list.status_code == 200
+    assert jobs_list.json()["ok"] is True
+    matching_jobs = [item for item in jobs_list.json()["data"] if item["title"] == "Договор на услуги"]
+    assert len(matching_jobs) == 1
+
+
+@pytest.mark.asyncio
+async def test_docs_ai_job_can_be_stopped_and_deleted(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    token = await _register_owner(client)
+    _patch_ai_generation_stubs(monkeypatch, text="stub")
+
+    async def _allow_limits(*_args, **_kwargs):
+        return True, None
+
+    monkeypatch.setattr("src.modules.docs.service.check_ai_limits", _allow_limits)
+    monkeypatch.setattr("src.modules.docs.routes.ai_generate.delay", lambda *_args, **_kwargs: None)
+
+    create_resp = await client.post(
+        "/api/v1/docs/files/ai/generate",
+        json={"type": "docx", "prompt": "Подготовь тестовый документ", "title": "Остановить меня"},
+        headers=_headers(token),
+    )
+    assert create_resp.status_code == 200
+    assert create_resp.json()["ok"] is True
+    job_id = str(create_resp.json()["data"]["job_id"])
+    file_id = str(create_resp.json()["data"]["file_id"])
+
+    stop_resp = await client.post(f"/api/v1/docs/files/ai/jobs/{job_id}/stop", headers=_headers(token))
+    assert stop_resp.status_code == 200
+    assert stop_resp.json()["ok"] is True
+    assert stop_resp.json()["data"]["status"] == "failed"
+    assert stop_resp.json()["data"]["error_message"] == "Остановлено пользователем"
+
+    file_resp = await client.get(f"/api/v1/docs/files/{file_id}", headers=_headers(token))
+    assert file_resp.status_code == 200
+    assert file_resp.json()["ok"] is True
+    assert file_resp.json()["data"]["status"] == "blocked"
+
+    delete_resp = await client.delete(f"/api/v1/docs/files/ai/jobs/{job_id}", headers=_headers(token))
+    assert delete_resp.status_code == 200
+    assert delete_resp.json()["ok"] is True
+
+    get_deleted = await client.get(f"/api/v1/docs/files/ai/jobs/{job_id}", headers=_headers(token))
+    assert get_deleted.status_code == 200
+    assert get_deleted.json()["ok"] is False
+    assert get_deleted.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_docs_ai_job_cannot_be_deleted_while_active(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    token = await _register_owner(client)
+    _patch_ai_generation_stubs(monkeypatch, text="stub")
+
+    async def _allow_limits(*_args, **_kwargs):
+        return True, None
+
+    monkeypatch.setattr("src.modules.docs.service.check_ai_limits", _allow_limits)
+    monkeypatch.setattr("src.modules.docs.routes.ai_generate.delay", lambda *_args, **_kwargs: None)
+
+    create_resp = await client.post(
+        "/api/v1/docs/files/ai/generate",
+        json={"type": "docx", "prompt": "Подготовь тестовый документ", "title": "Активная задача"},
+        headers=_headers(token),
+    )
+    assert create_resp.status_code == 200
+    assert create_resp.json()["ok"] is True
+    job_id = str(create_resp.json()["data"]["job_id"])
+
+    delete_resp = await client.delete(f"/api/v1/docs/files/ai/jobs/{job_id}", headers=_headers(token))
+    assert delete_resp.status_code == 200
+    assert delete_resp.json()["ok"] is False
+    assert delete_resp.json()["error"]["code"] == "JOB_STILL_ACTIVE"
+
+
+@pytest.mark.asyncio
 async def test_docs_upload_smoke_20_init_finish(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
     token = await _register_owner(client)
     _disable_scan_queue(monkeypatch)
@@ -1586,15 +1800,19 @@ async def test_docs_upload_smoke_20_init_finish(client: AsyncClient, monkeypatch
 async def test_docs_retention_cleanup_deletes_old_versions(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
     token = await _register_owner(client)
     file_id = await _create_ready_txt_file(client, token, monkeypatch, size_bytes=9)
+    file_before = await client.get(f"/api/v1/docs/files/{file_id}", headers=_headers(token))
+    assert file_before.status_code == 200
+    expected_updated_at = file_before.json()["data"]["updated_at"]
 
     for idx in range(3):
         save = await client.post(
             f"/api/v1/docs/files/{file_id}/save-text",
-            json={"content": f"version {idx}"},
+            json={"content": f"version {idx}", "expected_updated_at": expected_updated_at},
             headers=_headers(token),
         )
         assert save.status_code == 200
         assert save.json()["ok"] is True
+        expected_updated_at = save.json()["data"]["updated_at"]
 
     async with UnitOfWork() as uow:
         versions_before = (

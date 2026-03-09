@@ -1,7 +1,45 @@
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+
+import { docsApi, type DocsAIGenerationJobStatus } from '@/lib/api/features/docs'
 
 function asString(v: unknown): string {
   return typeof v === 'string' ? v : v == null ? '' : String(v)
+}
+
+function docsJobStatusLabel(status: DocsAIGenerationJobStatus | string): string {
+  switch (status) {
+    case 'queued':
+      return 'В очереди'
+    case 'running':
+      return 'Генерируется'
+    case 'scanning':
+      return 'Проверяется'
+    case 'ready':
+      return 'Готово'
+    case 'blocked':
+      return 'Заблокировано'
+    case 'failed':
+      return 'Ошибка'
+    default:
+      return status || 'Неизвестно'
+  }
+}
+
+function docsJobStatusClass(status: DocsAIGenerationJobStatus | string): string {
+  switch (status) {
+    case 'ready':
+      return 'text-emerald-600'
+    case 'failed':
+    case 'blocked':
+      return 'text-destructive'
+    case 'queued':
+    case 'running':
+    case 'scanning':
+      return 'text-amber-600'
+    default:
+      return 'text-muted-foreground'
+  }
 }
 
 export function DashboardPreview({ result }: { result: Record<string, unknown> }) {
@@ -130,6 +168,88 @@ export function SchedulePreview({ result }: { result: Record<string, unknown> })
       </div>
       <Link to="/schedule" className="text-xs rounded-md border border-border px-2 py-1 hover:bg-secondary">
         Открыть
+      </Link>
+    </div>
+  )
+}
+
+export function DocumentPreview({ result }: { result: Record<string, unknown> }) {
+  if (result.ok !== true) return null
+  if (asString(result.action) !== 'create_document') return null
+  const file = (result.file || {}) as Record<string, unknown>
+  const initialJob = useMemo(
+    () => ({ ...(result.job || {}) } as Record<string, unknown>),
+    [result.job],
+  )
+  const [job, setJob] = useState<Record<string, unknown>>(initialJob)
+  const jobId = asString(job.id || initialJob.id)
+  const status = asString(job.status || initialJob.status)
+  const title = asString(file.title || job.title || initialJob.title)
+
+  useEffect(() => {
+    setJob(initialJob)
+  }, [initialJob])
+
+  useEffect(() => {
+    if (!jobId) return
+    if (status === 'ready' || status === 'failed' || status === 'blocked') return
+
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const res = await docsApi.getAIGenerationJob(jobId)
+        if (cancelled) return
+        if (res.data.ok && res.data.data) {
+          setJob(res.data.data as unknown as Record<string, unknown>)
+        }
+      } catch {
+        // preview should stay quiet if status polling fails
+      }
+    }
+
+    void poll()
+    const timer = window.setInterval(() => {
+      void poll()
+    }, 2500)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [jobId, status])
+
+  if (!title) return null
+
+  const statusText = docsJobStatusLabel(status)
+  const subtitle =
+    status === 'ready'
+      ? 'Документ готов'
+      : status === 'failed'
+        ? 'Документ не удалось создать'
+        : status === 'blocked'
+          ? 'Документ заблокирован'
+          : 'Документ в работе'
+
+  return (
+    <div className="mt-3 rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-3 flex items-center justify-between gap-2">
+      <div className="min-w-0">
+        <p className="text-xs text-muted-foreground">{subtitle}</p>
+        <p className="text-sm font-semibold truncate">{title}</p>
+        <p className="text-xs text-muted-foreground mt-1">
+          {asString(file.type || job.file_type || initialJob.file_type).toUpperCase() || 'DOCX'}
+          {status ? (
+            <>
+              {' · '}
+              <span className={docsJobStatusClass(status)}>{statusText}</span>
+            </>
+          ) : null}
+        </p>
+        {status === 'failed' && asString(job.error_message) ? (
+          <p className="text-xs text-destructive mt-1 line-clamp-2">{asString(job.error_message)}</p>
+        ) : null}
+      </div>
+      <Link to="/docs" className="text-xs rounded-md border border-border px-2 py-1 hover:bg-secondary">
+        {status === 'ready' ? 'Открыть документ' : 'Открыть в документах'}
       </Link>
     </div>
   )

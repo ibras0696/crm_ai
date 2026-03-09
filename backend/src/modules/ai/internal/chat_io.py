@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any
 
@@ -108,19 +109,26 @@ async def call_openai_compatible_api(
     if clean_base.endswith("/v1"):
         clean_base = clean_base[:-3]
     timeout_s = float(getattr(settings, "AI_PROVIDER_TIMEOUT_S", 35.0) or 35.0)
-    async with httpx.AsyncClient(timeout=timeout_s) as client:
-        resp = await client.post(
-            f"{clean_base}/v1/chat/completions",
-            headers={"Authorization": f"Bearer {bearer_token}", "Content-Type": "application/json"},
-            json={
-                "model": model,
-                "messages": messages,
-                "max_tokens": max(256, int(max_tokens)),
-                "temperature": float(max(0.0, min(2.0, temperature))),
-            },
-        )
-        resp.raise_for_status()
-        return resp.json()
+    attempts = max(1, int(getattr(settings, "AI_PROVIDER_RETRY_ATTEMPTS", 2) or 2))
+    for attempt in range(1, attempts + 1):
+        try:
+            async with httpx.AsyncClient(timeout=timeout_s) as client:
+                resp = await client.post(
+                    f"{clean_base}/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {bearer_token}", "Content-Type": "application/json"},
+                    json={
+                        "model": model,
+                        "messages": messages,
+                        "max_tokens": max(256, int(max_tokens)),
+                        "temperature": float(max(0.0, min(2.0, temperature))),
+                    },
+                )
+                resp.raise_for_status()
+                return resp.json()
+        except (httpx.TimeoutException, httpx.RequestError):
+            if attempt >= attempts:
+                raise
+            await asyncio.sleep(min(2.0, 0.5 * attempt))
 
 
 def resolve_timeweb_agent_id(base_url: str) -> str | None:
@@ -169,11 +177,18 @@ async def call_timeweb_native_api(
     if parent_message_id:
         payload["parent_message_id"] = parent_message_id
     timeout_s = float(getattr(settings, "AI_PROVIDER_TIMEOUT_S", 35.0) or 35.0)
-    async with httpx.AsyncClient(timeout=timeout_s) as client:
-        resp = await client.post(
-            f"https://api.timeweb.cloud/api/v1/cloud-ai/agents/{agent_id}/call",
-            headers={"Authorization": f"Bearer {bearer_token}", "Content-Type": "application/json"},
-            json=payload,
-        )
-        resp.raise_for_status()
-        return resp.json()
+    attempts = max(1, int(getattr(settings, "AI_PROVIDER_RETRY_ATTEMPTS", 2) or 2))
+    for attempt in range(1, attempts + 1):
+        try:
+            async with httpx.AsyncClient(timeout=timeout_s) as client:
+                resp = await client.post(
+                    f"https://api.timeweb.cloud/api/v1/cloud-ai/agents/{agent_id}/call",
+                    headers={"Authorization": f"Bearer {bearer_token}", "Content-Type": "application/json"},
+                    json=payload,
+                )
+                resp.raise_for_status()
+                return resp.json()
+        except (httpx.TimeoutException, httpx.RequestError):
+            if attempt >= attempts:
+                raise
+            await asyncio.sleep(min(2.0, 0.5 * attempt))

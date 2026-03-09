@@ -1,7 +1,7 @@
 import api from '../core/client'
 import type { ApiResponse } from '../core/types'
 
-export type DocsFileType = 'pdf' | 'docx'
+export type DocsFileType = 'txt' | 'pdf' | 'docx'
 export type DocsFileStatus = 'draft' | 'uploading' | 'scanning' | 'ready' | 'blocked' | 'deleted'
 
 export interface DocsFolder {
@@ -155,6 +155,10 @@ export const docsApi = {
     api.get<ApiResponse<DocsAIGenerationJob[]>>('/docs/files/ai/jobs', { params: { limit } }),
   getAIGenerationJob: (jobId: string) =>
     api.get<ApiResponse<DocsAIGenerationJob>>(`/docs/files/ai/jobs/${jobId}`),
+  stopAIGenerationJob: (jobId: string) =>
+    api.post<ApiResponse<DocsAIGenerationJob>>(`/docs/files/ai/jobs/${jobId}/stop`, {}),
+  deleteAIGenerationJob: (jobId: string) =>
+    api.delete<ApiResponse<null>>(`/docs/files/ai/jobs/${jobId}`),
   getDownload: (fileId: string) => api.get<ApiResponse<{ url: string; expires_in: number }>>(`/docs/files/${fileId}/download`),
   exportPdf: (fileId: string) => api.get<ApiResponse<{ url: string; expires_in: number, filename?: string }>>(`/docs/files/${fileId}/export-pdf`),
   getUsage: () => api.get<ApiResponse<DocsUsageInfo>>('/docs/usage'),

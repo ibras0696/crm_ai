@@ -24,10 +24,15 @@ export const FILTER_OPERATORS = [
   { value: 'eq', label: 'Равно' },
   { value: 'neq', label: 'Не равно' },
   { value: 'contains', label: 'Содержит' },
+  { value: 'in', label: 'В списке' },
+  { value: 'not_in', label: 'Не в списке' },
   { value: 'gt', label: 'Больше' },
   { value: 'lt', label: 'Меньше' },
   { value: 'gte', label: '≥ (не менее)' },
   { value: 'lte', label: '≤ (не более)' },
+  { value: 'between', label: 'Диапазон' },
+  { value: 'is_empty', label: 'Пусто' },
+  { value: 'not_empty', label: 'Не пусто' },
 ] as const
 
 export const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#14b8a6', '#f97316']

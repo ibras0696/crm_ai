@@ -16,6 +16,7 @@ class PageOut(BaseModel):
     position: int
     is_published: bool
     created_at: datetime
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -34,6 +35,7 @@ class CreatePageRequest(BaseModel):
 class UpdatePageRequest(BaseModel):
     """Schema for partial update of knowledge base page."""
 
+    expected_updated_at: datetime
     title: str | None = None
     content: str | None = None
     parent_id: uuid.UUID | None = None

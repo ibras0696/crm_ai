@@ -10,6 +10,15 @@ export default function ChartCard({ item }: { item: DashboardDataItem }) {
   const d = item.data
   const type = String(d.type ?? item.widget.widget_type)
 
+  if (typeof d.error === 'string' && d.error) {
+    return (
+      <div className="rounded-xl border border-destructive/25 bg-destructive/5 p-5">
+        <p className="text-sm font-medium">{item.widget.title}</p>
+        <p className="mt-3 text-sm text-destructive">{d.error}</p>
+      </div>
+    )
+  }
+
   if (type === 'metric') {
     return (
       <div className="rounded-xl border border-border bg-card p-5">

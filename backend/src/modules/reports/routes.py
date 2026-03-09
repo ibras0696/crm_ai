@@ -10,11 +10,15 @@ from src.infrastructure.uow import UnitOfWork
 from src.modules.access.dependencies import require_access
 from src.modules.auth.dependencies import CurrentUser, require_roles
 from src.modules.reports.schemas import (
+    AnalyticsPreviewOut,
+    AnalyticsQueryRequest,
+    AnalyticsTableSchemaOut,
     ColumnAggRequest,
     DashboardCreateRequest,
     DashboardDataOut,
     DashboardDetailOut,
     DashboardOut,
+    DashboardPreviewRequest,
     DashboardUpdateRequest,
     OrgReport,
     TableAggResponse,
@@ -52,6 +56,34 @@ async def table_analytics(
     async with UnitOfWork() as uow:
         service = ReportsService(uow.session)
         response = await service.table_analytics(org_id=current_user.org_id, body=body)
+        if response is None:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": TABLE_NOT_FOUND_MESSAGE})
+    return ApiResponse(data=response)
+
+
+@router.get("/tables/{table_id}/schema", response_model=ApiResponse[AnalyticsTableSchemaOut])
+async def table_schema(
+    table_id: uuid.UUID,
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="reports", permission="can_read")),
+):
+    async with UnitOfWork() as uow:
+        service = ReportsService(uow.session)
+        response = await service.table_schema(org_id=current_user.org_id, table_id=table_id)
+        if response is None:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": TABLE_NOT_FOUND_MESSAGE})
+    return ApiResponse(data=response)
+
+
+@router.post("/query-preview", response_model=ApiResponse[AnalyticsPreviewOut])
+async def query_preview(
+    body: AnalyticsQueryRequest,
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="reports", permission="can_read")),
+):
+    async with UnitOfWork() as uow:
+        service = ReportsService(uow.session)
+        response = await service.query_preview(org_id=current_user.org_id, body=body)
         if response is None:
             return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": TABLE_NOT_FOUND_MESSAGE})
     return ApiResponse(data=response)
@@ -269,6 +301,27 @@ async def dashboard_data(
     async with UnitOfWork() as uow:
         service = ReportsService(uow.session)
         data = await service.dashboard_data(org_id=current_user.org_id, dashboard_id=dashboard_id)
+        if data is None:
+            return ApiResponse(
+                ok=False,
+                data=None,
+                error={"code": "NOT_FOUND", "message": DASHBOARD_NOT_FOUND_MESSAGE},
+            )
+    return ApiResponse(data=data)
+
+
+@router.post("/dashboards/{dashboard_id}/preview", response_model=ApiResponse[DashboardDataOut])
+async def dashboard_preview(
+    dashboard_id: uuid.UUID,
+    body: DashboardPreviewRequest,
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE),
+    ),
+    _: None = Depends(require_access(resource_type="reports", permission="can_read", resource_id_param="dashboard_id")),
+):
+    async with UnitOfWork() as uow:
+        service = ReportsService(uow.session)
+        data = await service.dashboard_preview(org_id=current_user.org_id, dashboard_id=dashboard_id, body=body)
         if data is None:
             return ApiResponse(
                 ok=False,

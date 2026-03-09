@@ -24,6 +24,13 @@ interface AIStatus {
     rpm_per_user: number
     max_tokens_per_request: number
   }
+  token_wallet?: {
+    cycle_key: string
+    plan_tokens_monthly_quota: number
+    plan_tokens_remaining: number
+    addon_tokens_remaining: number
+    total_tokens_remaining: number
+  }
 }
 
 interface StatsTabProps {
@@ -32,6 +39,13 @@ interface StatsTabProps {
 }
 
 export default function StatsTab({ status, onRefresh }: StatsTabProps) {
+  const todaySpent = status?.today?.total_tokens ?? 0
+  const dailyLimit = status?.limits?.daily_tokens ?? 0
+  const tokenWallet = status?.token_wallet
+  const monthQuota = tokenWallet?.plan_tokens_monthly_quota ?? 0
+  const monthRemaining = tokenWallet?.total_tokens_remaining ?? 0
+  const monthUsed = Math.max(monthQuota - (tokenWallet?.plan_tokens_remaining ?? 0), 0)
+
   return (
     <div className="flex-1 overflow-y-auto space-y-4">
       {status?.limits && (
@@ -53,20 +67,47 @@ export default function StatsTab({ status, onRefresh }: StatsTabProps) {
             </button>
           </div>
 
+          {tokenWallet && (
+            <div className="rounded-xl border border-border bg-muted/40 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">Осталось на месяц</p>
+                  <div className="mt-2 text-3xl font-bold tracking-tight">{monthRemaining.toLocaleString('ru')}</div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Цикл: {tokenWallet.cycle_key} • Купленных отдельно: {tokenWallet.addon_tokens_remaining.toLocaleString('ru')}
+                  </p>
+                </div>
+                {monthQuota > 0 && (
+                  <div className="text-right text-xs text-muted-foreground shrink-0">
+                    <div>По тарифу</div>
+                    <div className="mt-1 font-medium text-foreground">
+                      {tokenWallet.plan_tokens_remaining.toLocaleString('ru')} / {monthQuota.toLocaleString('ru')}
+                    </div>
+                  </div>
+                )}
+              </div>
+              {monthQuota > 0 && (
+                <div className="mt-3">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                    <span>Использовано из месячного лимита</span>
+                    <span>
+                      {monthUsed.toLocaleString('ru')} / {monthQuota.toLocaleString('ru')}
+                    </span>
+                  </div>
+                  <Progress value={Math.min(100, (monthUsed / monthQuota) * 100)} />
+                </div>
+              )}
+            </div>
+          )}
+
           <div>
             <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
-              <span>Токены сегодня</span>
+              <span>Потрачено сегодня</span>
               <span>
-                {(status.today?.total_tokens ?? 0).toLocaleString('ru')} / {status.limits.daily_tokens.toLocaleString('ru')}
+                {todaySpent.toLocaleString('ru')} / {dailyLimit.toLocaleString('ru')}
               </span>
             </div>
-            <Progress
-              value={
-                status.limits.daily_tokens > 0
-                  ? Math.min(100, ((status.today?.total_tokens ?? 0) / status.limits.daily_tokens) * 100)
-                  : 0
-              }
-            />
+            <Progress value={dailyLimit > 0 ? Math.min(100, (todaySpent / dailyLimit) * 100) : 0} />
           </div>
         </div>
       )}
@@ -74,7 +115,7 @@ export default function StatsTab({ status, onRefresh }: StatsTabProps) {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {[
           { label: 'Запросов (сегодня)', value: status?.today?.requests ?? 0, icon: BarChart3, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-          { label: 'Токенов (сегодня)', value: status?.today?.total_tokens ?? 0, icon: Zap, color: 'text-amber-500', bg: 'bg-amber-500/10' },
+          { label: 'Потрачено токенов (сегодня)', value: status?.today?.total_tokens ?? 0, icon: Zap, color: 'text-amber-500', bg: 'bg-amber-500/10' },
           { label: 'Входящих (сегодня)', value: status?.today?.prompt_tokens ?? 0, icon: User, color: 'text-violet-500', bg: 'bg-violet-500/10' },
           { label: 'Исходящих (сегодня)', value: status?.today?.completion_tokens ?? 0, icon: Bot, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
         ].map((card) => (

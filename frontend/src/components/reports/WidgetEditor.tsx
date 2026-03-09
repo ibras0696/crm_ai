@@ -61,7 +61,7 @@ export default function WidgetEditor({ widget, tables, onSave, onDelete }: Widge
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
-      <div className="sticky top-0 z-10 flex flex-col gap-3 border-b border-border/70 bg-card px-4 py-4 lg:flex-row lg:items-start lg:justify-between">
+      <div className="sticky top-0 z-10 flex flex-col gap-3 border-b border-border/70 bg-card px-4 py-4">
         <div>
           <div className="text-base font-semibold">Настройки виджета</div>
           <div className="mt-1 text-sm text-muted-foreground">
@@ -86,7 +86,7 @@ export default function WidgetEditor({ widget, tables, onSave, onDelete }: Widge
       </div>
       <div className="max-h-[min(72vh,820px)] overflow-y-auto px-4 py-4 scrollbar-thin">
         <div className="space-y-5 pr-1">
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4">
             {field(
               'Название',
               'Как виджет будет называться на дашборде.',
@@ -130,7 +130,7 @@ export default function WidgetEditor({ widget, tables, onSave, onDelete }: Widge
                   Выберите способ расчёта, поле значения и группировку.
                 </div>
               </div>
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-4">
+              <div className="grid grid-cols-1 gap-4">
                 {field(
                   'Расчёт',
                   'Например: количество, сумма или среднее.',
@@ -196,7 +196,7 @@ export default function WidgetEditor({ widget, tables, onSave, onDelete }: Widge
                   Нужен только для графиков, если хотите показать динамику по датам.
                 </div>
               </div>
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-4">
                 {field(
                   'Поле даты',
                   'По какому полю строить ось времени.',
@@ -240,7 +240,7 @@ export default function WidgetEditor({ widget, tables, onSave, onDelete }: Widge
                   Настройте, какую колонку и сколько строк показывать.
                 </div>
               </div>
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4">
                 {field(
                   'Главная колонка',
                   'Основное поле, которое будет видно в таблице.',
@@ -282,7 +282,7 @@ export default function WidgetEditor({ widget, tables, onSave, onDelete }: Widge
             </div>
             {cfg.filters.length === 0 && <p className="text-sm text-muted-foreground">Фильтры не заданы.</p>}
             {cfg.filters.map((f, i) => (
-              <div key={i} className="grid grid-cols-1 gap-3 rounded-lg border border-border bg-background p-3 lg:grid-cols-4">
+              <div key={i} className="grid grid-cols-1 gap-3 rounded-lg border border-border bg-background p-3">
                 <select
                   value={f.column_id}
                   onChange={(e) => {

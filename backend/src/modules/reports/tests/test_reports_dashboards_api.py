@@ -217,3 +217,140 @@ async def test_reports_employee_read_only_access(client: AsyncClient):
         headers=_headers(employee_token),
     )
     assert create_forbidden.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_reports_schema_and_query_preview(client: AsyncClient):
+    token = await _register_owner(client)
+
+    t = await client.post("/api/v1/tables/", json={"name": "Sales"}, headers=_headers(token))
+    assert t.status_code == 200
+    table_id = t.json()["data"]["id"]
+
+    amount = await client.post(
+        f"/api/v1/tables/{table_id}/columns",
+        json={"name": "Amount", "field_type": "number"},
+        headers=_headers(token),
+    )
+    status = await client.post(
+        f"/api/v1/tables/{table_id}/columns",
+        json={"name": "Status", "field_type": "select", "config": {"options": ["new", "done"]}},
+        headers=_headers(token),
+    )
+    created = await client.post(
+        f"/api/v1/tables/{table_id}/columns",
+        json={"name": "Created", "field_type": "date"},
+        headers=_headers(token),
+    )
+    active = await client.post(
+        f"/api/v1/tables/{table_id}/columns",
+        json={"name": "Active", "field_type": "boolean"},
+        headers=_headers(token),
+    )
+    assert amount.status_code == status.status_code == created.status_code == active.status_code == 200
+    amount_col_id = amount.json()["data"]["id"]
+    status_col_id = status.json()["data"]["id"]
+    created_col_id = created.json()["data"]["id"]
+    active_col_id = active.json()["data"]["id"]
+
+    for payload in (
+        {amount_col_id: 100, status_col_id: "new", created_col_id: "2026-03-01", active_col_id: True},
+        {amount_col_id: 150, status_col_id: "done", created_col_id: "2026-03-03", active_col_id: False},
+        {amount_col_id: 200, status_col_id: "done", created_col_id: "2026-03-05", active_col_id: True},
+    ):
+        resp = await client.post(f"/api/v1/tables/{table_id}/records/", json={"data": payload}, headers=_headers(token))
+        assert resp.status_code == 200
+
+    schema = await client.get(f"/api/v1/reports/tables/{table_id}/schema", headers=_headers(token))
+    assert schema.status_code == 200
+    assert schema.json()["ok"] is True
+    assert schema.json()["data"]["default_metric_column_id"] == amount_col_id
+    assert schema.json()["data"]["default_time_column_id"] == created_col_id
+
+    preview = await client.post(
+        "/api/v1/reports/query-preview",
+        json={
+            "table_id": table_id,
+            "widget_type": "bar",
+            "metrics": [{"key": "sum_amount", "aggregation": "sum", "column_id": amount_col_id, "label": "Сумма"}],
+            "group_by_column_id": status_col_id,
+            "filters": [{"column_id": active_col_id, "op": "eq", "value": True}],
+            "sort": {"by": "metric", "metric_key": "sum_amount", "direction": "desc"},
+            "limit": 10,
+        },
+        headers=_headers(token),
+    )
+    assert preview.status_code == 200
+    body = preview.json()
+    assert body["ok"] is True
+    points = body["data"]["data"]["points"]
+    assert points[0]["x"] == "done"
+    assert points[0]["y"] == 200
+    assert points[1]["x"] == "new"
+    assert points[1]["y"] == 100
+
+
+@pytest.mark.asyncio
+async def test_reports_dashboard_preview_applies_global_filters(client: AsyncClient):
+    token = await _register_owner(client)
+
+    table = await client.post("/api/v1/tables/", json={"name": "Orders"}, headers=_headers(token))
+    assert table.status_code == 200
+    table_id = table.json()["data"]["id"]
+
+    amount = await client.post(
+        f"/api/v1/tables/{table_id}/columns",
+        json={"name": "Amount", "field_type": "number"},
+        headers=_headers(token),
+    )
+    status = await client.post(
+        f"/api/v1/tables/{table_id}/columns",
+        json={"name": "Status", "field_type": "select", "config": {"options": ["new", "done"]}},
+        headers=_headers(token),
+    )
+    assert amount.status_code == status.status_code == 200
+    amount_col_id = amount.json()["data"]["id"]
+    status_col_id = status.json()["data"]["id"]
+
+    for payload in (
+        {amount_col_id: 10, status_col_id: "new"},
+        {amount_col_id: 20, status_col_id: "done"},
+        {amount_col_id: 30, status_col_id: "done"},
+    ):
+        resp = await client.post(f"/api/v1/tables/{table_id}/records/", json={"data": payload}, headers=_headers(token))
+        assert resp.status_code == 200
+
+    dashboard = await client.post(
+        "/api/v1/reports/dashboards",
+        json={"name": "Orders dashboard"},
+        headers=_headers(token),
+    )
+    assert dashboard.status_code == 200
+    dash_id = dashboard.json()["data"]["id"]
+
+    widget = await client.post(
+        f"/api/v1/reports/dashboards/{dash_id}/widgets",
+        json={
+            "title": "Status totals",
+            "widget_type": "bar",
+            "table_id": table_id,
+            "config": {
+                "aggregation": "sum",
+                "value_column_id": amount_col_id,
+                "group_by_column_id": status_col_id,
+                "metrics": [{"key": "sum_amount", "aggregation": "sum", "column_id": amount_col_id, "label": "Сумма"}],
+            },
+            "position": 0,
+        },
+        headers=_headers(token),
+    )
+    assert widget.status_code == 200
+
+    preview = await client.post(
+        f"/api/v1/reports/dashboards/{dash_id}/preview",
+        json={"table_id": table_id, "filters": [{"column_id": status_col_id, "op": "eq", "value": "done"}]},
+        headers=_headers(token),
+    )
+    assert preview.status_code == 200
+    payload = preview.json()["data"]["items"][0]["data"]["points"]
+    assert payload == [{"x": "done", "y": 50}]

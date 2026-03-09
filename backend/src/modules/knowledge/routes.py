@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 
 from src.common.enums import UserRole
 from src.common.schemas import ApiResponse
@@ -8,6 +9,7 @@ from src.infrastructure.uow import UnitOfWork
 from src.modules.access.dependencies import require_access
 from src.modules.auth.dependencies import CurrentUser, require_roles
 from src.modules.knowledge.schemas import CreatePageRequest, PageOut, UpdatePageRequest
+from src.modules.knowledge.errors import KnowledgeModuleError
 from src.modules.knowledge.service import KnowledgeService
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -75,10 +77,17 @@ async def update_page(
 ):
     async with UnitOfWork() as uow:
         service = KnowledgeService(uow.session)
-        page = await service.update_page(org_id=current_user.org_id, page_id=page_id, body=body)
+        try:
+            page = await service.update_page(org_id=current_user.org_id, page_id=page_id, body=body)
+        except KnowledgeModuleError as error:
+            return JSONResponse(
+                status_code=error.status_code,
+                content={"ok": False, "data": None, "error": {"code": error.code, "message": error.message}},
+            )
         if page is None:
             return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": PAGE_NOT_FOUND_MESSAGE})
         await uow.commit()
+        await uow.session.refresh(page)
         item = PageOut.model_validate(page)
     return ApiResponse(data=item)
 

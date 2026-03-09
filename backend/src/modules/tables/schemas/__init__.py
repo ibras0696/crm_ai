@@ -153,6 +153,7 @@ class CreateRecordRequest(BaseModel):
 
 class UpdateRecordRequest(BaseModel):
     data: dict
+    expected_updated_at: datetime
 
 
 class MoveRecordRequest(BaseModel):

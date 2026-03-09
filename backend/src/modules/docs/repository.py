@@ -251,3 +251,8 @@ class DocsRepository:
         """Сохранить изменения AI job."""
         await self.session.flush()
         return job
+
+    async def delete_ai_generation_job(self, job: DocsAIGenerationJob) -> None:
+        """Удалить AI job."""
+        await self.session.delete(job)
+        await self.session.flush()

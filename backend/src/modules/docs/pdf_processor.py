@@ -7,7 +7,7 @@ import io
 from dataclasses import dataclass
 from typing import Any
 
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 from pypdf import PdfReader, PdfWriter
 from reportlab.lib.colors import HexColor
 from reportlab.pdfgen import canvas as pdf_canvas
@@ -152,7 +152,7 @@ class PDFProcessor:
                 preserveAspectRatio=True,
                 mask="auto",
             )
-        except Exception as e:
+        except (OSError, TypeError, ValueError, UnidentifiedImageError, base64.binascii.Error) as e:
             # Fallback: draw placeholder
             print(f"Failed to draw signature: {e}")
             self._draw_placeholder(canvas, annotation, page_height, "SIGNATURE")

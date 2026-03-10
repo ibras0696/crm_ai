@@ -40,16 +40,13 @@ async def get_or_create_session(
         Объект `AIChatSession`, существующий или только что созданный.
     """
     repo = AIRepository(uow.session)
-    try:
-        existing = await repo.get_session_for_user_by_chat_id(
-            org_id=org_id,
-            user_id=user_id,
-            chat_id=chat_id,
-        )
-        if existing is not None:
-            return existing
-    except Exception as exc:
-        logger.warning("ai_get_session_failed_fallback_to_new", exc_info=exc)
+    existing = await repo.get_session_for_user_by_chat_id(
+        org_id=org_id,
+        user_id=user_id,
+        chat_id=chat_id,
+    )
+    if existing is not None:
+        return existing
 
     title = (first_message or "Новый чат").strip()[:80] or "Новый чат"
     return await repo.create_session(org_id=org_id, user_id=user_id, title=title)

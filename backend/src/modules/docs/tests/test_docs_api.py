@@ -1109,7 +1109,7 @@ async def test_docs_minio_upload_scan_and_download_integration(client: AsyncClie
     try:
         async with httpx.AsyncClient(timeout=5.0) as http:
             put_resp = await http.put(upload_url, content=b"hello-docs!!", headers=upload_headers)
-    except Exception:
+    except httpx.HTTPError:
         pytest.skip("Presigned PUT endpoint is unavailable")
 
     if put_resp.status_code not in {200, 204}:

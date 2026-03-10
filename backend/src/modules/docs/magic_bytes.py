@@ -33,7 +33,7 @@ def validate_magic_bytes(file_type: FileType, payload: bytes) -> tuple[bool, str
                 names = set(archive.namelist())
                 if "[Content_Types].xml" not in names or "word/document.xml" not in names:
                     return False, "docx_structure_mismatch"
-        except Exception:
+        except (OSError, RuntimeError, ValueError, zipfile.BadZipFile, zipfile.LargeZipFile):
             return False, "docx_parse_error"
         return True, "docx_magic_ok"
 

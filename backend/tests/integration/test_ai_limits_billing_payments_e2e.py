@@ -230,6 +230,35 @@ async def test_e2e_ai_limits_billing_payments_flow(client: AsyncClient, monkeypa
                 },
             )
 
+        async def get(self, url: str, auth=None, headers=None):
+            assert auth == ("shop-e2e-1", "secret-e2e-1")
+            payment_id = url.rsplit("/", 1)[-1]
+            if payment_id == "pay-e2e-token-1":
+                return _MockYooResponse(
+                    200,
+                    {
+                        "id": payment_id,
+                        "status": "succeeded",
+                        "paid": True,
+                        "metadata": {
+                            "org_id": owner_org_id,
+                            "purchase_kind": "token_package",
+                            "package_code": "pack_50k",
+                        },
+                    },
+                )
+            if payment_id == "pay-e2e-webhook":
+                return _MockYooResponse(
+                    200,
+                    {
+                        "id": payment_id,
+                        "status": "succeeded",
+                        "paid": True,
+                        "metadata": {"org_id": owner_org_id, "plan_name": "team", "period": "monthly"},
+                    },
+                )
+            return _MockYooResponse(404, {"id": payment_id})
+
     monkeypatch.setattr(billing_service_module.httpx, "AsyncClient", _MockYooAsyncClient)
 
     # Billing: purchase addon tokens via payment + webhook.
@@ -382,6 +411,25 @@ async def test_e2e_token_limit_then_addon_purchase_unblocks_ai(client: AsyncClie
                     "confirmation": {"confirmation_url": "https://pay.example/token-unblock"},
                 },
             )
+
+        async def get(self, url: str, auth=None, headers=None):
+            assert auth == ("shop-e2e-token-2", "secret-e2e-token-2")
+            payment_id = url.rsplit("/", 1)[-1]
+            if payment_id == "pay-e2e-token-unblock":
+                return _MockYooResponse(
+                    200,
+                    {
+                        "id": payment_id,
+                        "status": "succeeded",
+                        "paid": True,
+                        "metadata": {
+                            "org_id": owner_org_id,
+                            "purchase_kind": "token_package",
+                            "package_code": "pack_50k",
+                        },
+                    },
+                )
+            return _MockYooResponse(404, {"id": payment_id})
 
     monkeypatch.setattr(billing_service_module.httpx, "AsyncClient", _MockYooAsyncClient)
 

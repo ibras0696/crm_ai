@@ -136,6 +136,9 @@ async def yookassa_webhook(request: Request):
         body = await request.json()
         await _billing_service.handle_yookassa_webhook(body)
         return {"status": "ok"}
+    except BillingOperationError as exc:
+        logger.warning("Rejected YooKassa webhook: code=%s message=%s", exc.code, exc.message)
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     except (ValueError, json.JSONDecodeError) as exc:
         logger.error("Webhook error: %s", exc)
         raise HTTPException(status_code=400, detail="Invalid webhook payload") from exc

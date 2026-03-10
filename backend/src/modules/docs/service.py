@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 
 import httpx
 import jwt
+from botocore.exceptions import BotoCoreError, ClientError
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.common.enums import AuditAction
 from src.common.optimistic_lock import optimistic_lock_matches
@@ -226,7 +228,7 @@ class DocsService:
                     job.status = "failed"
                     job.error_message = "Файл был удален пользователем во время генерации"
                     await self.repo.update_ai_generation_job(job)
-        except Exception:
+        except SQLAlchemyError:
             logger.exception("docs_delete_file_ai_cleanup_failed", extra={"file_id": str(file_id)})
 
         from src.modules.docs.tasks import docs_delete_file_background
@@ -487,7 +489,7 @@ class DocsService:
                 payload=payload,
                 content_type=content_type,
             )
-        except Exception as exc:
+        except (BotoCoreError, ClientError, KeyError, OSError, ValueError) as exc:
             raise DocsModuleError(
                 code="STORAGE_WRITE_ERROR",
                 message="Не удалось создать файл в хранилище",
@@ -612,7 +614,7 @@ class DocsService:
                 payload=payload,
                 content_type="text/plain",
             )
-        except Exception as exc:
+        except (BotoCoreError, ClientError, KeyError, OSError, ValueError) as exc:
             raise DocsModuleError(
                 code="STORAGE_WRITE_ERROR",
                 message="Не удалось сохранить текстовую версию файла",
@@ -690,7 +692,7 @@ class DocsService:
 
         try:
             payload = self.storage.get_object_bytes(bucket=version.s3_bucket, key=version.s3_key)
-        except Exception as exc:
+        except (BotoCoreError, ClientError, KeyError, OSError, ValueError) as exc:
             raise DocsModuleError(code="STORAGE_READ_ERROR", message="Не удалось прочитать файл из хранилища") from exc
 
         try:
@@ -1361,7 +1363,7 @@ class DocsService:
             return 0
         try:
             return max(0, int(meta_json.get("reserved_bytes") or 0))
-        except Exception:
+        except (TypeError, ValueError):
             return 0
 
     async def export_pdf(self, *, org_id: uuid.UUID, file_id: uuid.UUID) -> dict[str, object]:
@@ -1379,7 +1381,7 @@ class DocsService:
 
         try:
             payload = self.storage.get_object_bytes(bucket=version.s3_bucket, key=version.s3_key)
-        except Exception as exc:
+        except (BotoCoreError, ClientError, KeyError, OSError, ValueError) as exc:
             raise DocsModuleError(code="STORAGE_READ_ERROR", message="Не удалось прочитать файл из хранилища") from exc
 
         pdf_bytes = b""
@@ -1408,7 +1410,7 @@ class DocsService:
                 )
             except DocsModuleError:
                 raise
-            except Exception as exc:
+            except (httpx.HTTPError, RuntimeError, TypeError, ValueError) as exc:
                 raise DocsModuleError(
                     code="ONLYOFFICE_CONVERT_ERROR", message=f"Ошибка конвертации DOCX: {exc}"
                 ) from exc
@@ -1424,7 +1426,7 @@ class DocsService:
                 payload=pdf_bytes,
                 content_type="application/pdf",
             )
-        except Exception as exc:
+        except (BotoCoreError, ClientError, KeyError, OSError, ValueError) as exc:
             raise DocsModuleError(
                 code="STORAGE_WRITE_ERROR", message="Не удалось сохранить экспортированный PDF"
             ) from exc
@@ -1433,7 +1435,7 @@ class DocsService:
             url = self.storage.generate_presigned_get_url(
                 bucket=DEFAULT_BUCKET, key=export_key, expires_in=3600, filename=f"{file_obj.title or 'Документ'}.pdf"
             )
-        except Exception as exc:
+        except (BotoCoreError, ClientError, KeyError, OSError, ValueError) as exc:
             raise DocsModuleError(
                 code="STORAGE_URL_ERROR", message="Не удалось сформировать ссылку для экспортированного PDF"
             ) from exc
@@ -1528,5 +1530,5 @@ class DocsService:
         tail = str(key or "").strip().split("/")[-1]
         try:
             return uuid.UUID(tail)
-        except Exception as exc:
+        except (TypeError, ValueError, AttributeError) as exc:
             raise DocsModuleError(code="INVALID_STORAGE_KEY", message="Некорректный ключ версии файла") from exc

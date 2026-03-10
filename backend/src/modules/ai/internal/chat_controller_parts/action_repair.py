@@ -65,12 +65,12 @@ async def _repair_action_payload_with_model(
             if isinstance(obj, dict) and str(obj.get("action") or "").strip():
                 return obj, _extract_usage_dict(data)
             return None, _extract_usage_dict(data)
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             payload, _ = extract_action_payload(raw)
             if isinstance(payload, dict) and str(payload.get("action") or "").strip():
                 return payload, _extract_usage_dict(data)
             return None, _extract_usage_dict(data)
-    except Exception:
+    except (AttributeError, KeyError, RuntimeError, TypeError, ValueError, json.JSONDecodeError):
         return None, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
 
@@ -124,10 +124,10 @@ async def _synthesize_missing_action_with_model(
             if isinstance(obj, dict) and str(obj.get("action") or "").strip():
                 return obj, _extract_usage_dict(data)
             return None, _extract_usage_dict(data)
-        except Exception:
+        except (TypeError, ValueError, json.JSONDecodeError):
             payload, _ = extract_action_payload(raw)
             if isinstance(payload, dict) and str(payload.get("action") or "").strip():
                 return payload, _extract_usage_dict(data)
             return None, _extract_usage_dict(data)
-    except Exception:
+    except (AttributeError, KeyError, RuntimeError, TypeError, ValueError, json.JSONDecodeError):
         return None, {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}

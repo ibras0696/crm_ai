@@ -1,5 +1,6 @@
 import uuid
 
+import jwt
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from src.config import settings
@@ -31,7 +32,7 @@ class ConnectionManager:
             for connection in self.active_connections[user_id]:
                 try:
                     await connection.send_json(message)
-                except Exception:
+                except (RuntimeError, WebSocketDisconnect):
                     to_remove.add(connection)
             for connection in to_remove:
                 self.disconnect(connection, user_id)
@@ -42,7 +43,7 @@ class ConnectionManager:
             for connection in connections:
                 try:
                     await connection.send_json(message)
-                except Exception:
+                except (RuntimeError, WebSocketDisconnect):
                     to_remove.add(connection)
             for connection in to_remove:
                 self.disconnect(connection, user_id)
@@ -57,7 +58,7 @@ def extract_user_id(token: str | None) -> uuid.UUID | None:
     try:
         payload = decode_user_access_token(token)
         return uuid.UUID(payload["sub"])
-    except Exception:
+    except (jwt.InvalidTokenError, KeyError, TypeError, ValueError):
         return None
 
 

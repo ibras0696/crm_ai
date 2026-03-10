@@ -57,7 +57,7 @@ async def handle_create_document_action(
     if folder_id_raw:
         try:
             folder_id = uuid.UUID(str(folder_id_raw))
-        except Exception:
+        except (TypeError, ValueError, AttributeError):
             return {
                 "action": "create_document",
                 "ok": False,

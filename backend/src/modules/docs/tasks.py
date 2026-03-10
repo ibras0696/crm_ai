@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import binascii
 import logging
 import uuid
 from collections.abc import Iterable
@@ -13,7 +14,11 @@ from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import Any
 
+import httpx
+from botocore.exceptions import BotoCoreError, ClientError
+from kombu.exceptions import OperationalError
 from sqlalchemy import delete, func, select
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.common.enums import AuditAction
 from src.config import settings
@@ -67,7 +72,7 @@ def scan_version(version_id: str) -> dict[str, str]:
     """Проверить загруженную версию файла и выставить финальный статус."""
     try:
         version_uuid = uuid.UUID(str(version_id))
-    except Exception:
+    except (TypeError, ValueError, AttributeError):
         _inc_scan_metric("invalid_version_id")
         return {"status": "error", "reason": "invalid_version_id"}
 
@@ -170,7 +175,7 @@ def pdf_stamp_sign(version_id: str, payload: dict, requested_by: str | None = No
     """Наложить подпись на PDF, создать новую версию и прогнать AV-gating."""
     try:
         source_version_id = uuid.UUID(str(version_id))
-    except Exception:
+    except (TypeError, ValueError, AttributeError):
         _inc_scan_metric("invalid_version_id")
         return {"status": "error", "reason": "invalid_version_id"}
 
@@ -213,7 +218,7 @@ def pdf_stamp_sign(version_id: str, payload: dict, requested_by: str | None = No
                 signature_png=signature_png,
                 stamp=stamp_input,
             )
-        except Exception as exc:
+        except (BotoCoreError, ClientError, OSError, TypeError, ValueError, binascii.Error) as exc:
             file_obj.status = FileStatus.BLOCKED.value
             session.add(file_obj)
             session.add(
@@ -356,7 +361,16 @@ def ai_generate(self, job_id: str) -> dict[str, str]:
             "status": "failed",
             "reason": "empty_result",
         }
-    except Exception as exc:
+    except (
+        BotoCoreError,
+        ClientError,
+        SQLAlchemyError,
+        httpx.HTTPError,
+        OSError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+    ) as exc:
         with suppress(Exception):
             _run_async_on_worker_loop(_mark_ai_job_failed_unexpected(job_id=job_id, reason=str(exc)))
         _inc_ai_generate_error_metric("unexpected_exception")
@@ -660,7 +674,7 @@ async def run_ai_generate_inline(*, job_id: str, task_id: str = "inline") -> dic
     _inc_upload_metric(FileStatus.SCANNING.value)
     try:
         scan_version.delay(str(new_version_id))
-    except Exception:
+    except (OperationalError, OSError, RuntimeError):
         scan_version.run(str(new_version_id))
     return {"status": "scanning", "job_id": str(snapshot["job_id"]), "file_id": str(snapshot["file_id"])}
 
@@ -739,7 +753,7 @@ def cleanup_old_doc_versions() -> dict[str, int | str]:
                     from src.modules.files.storage import get_s3_client
 
                     get_s3_client().delete_object(Bucket=version.s3_bucket, Key=version.s3_key)
-                except Exception:
+                except (BotoCoreError, ClientError, OSError):
                     pass
                 session.execute(delete(FileVersion).where(FileVersion.id == version.id))
                 deleted_count += 1
@@ -771,12 +785,11 @@ def docs_cleanup_stale_files() -> dict[str, int | str]:
             .all()
         )
 
-        try:
+        s3_client = None
+        with suppress(ImportError, RuntimeError, ValueError, BotoCoreError, ClientError):
             from src.modules.files.storage import get_s3_client
 
             s3_client = get_s3_client()
-        except Exception:
-            s3_client = None
 
         for file_obj in files:
             # Освобождаем reserved квоту
@@ -838,7 +851,7 @@ async def _mark_ai_job_failed(
                 meta={"event": "ai_generate_failed", "reason": reason[:300], "code": code},
             )
         )
-    except Exception:
+    except SQLAlchemyError:
         logger.exception("docs_ai_generate_audit_log_failed", extra={"job_id": str(job.id)})
 
     await uow.commit()
@@ -854,7 +867,7 @@ def _extract_reserved_bytes(meta_json: dict | None) -> int:
         return 0
     try:
         return max(0, int(meta_json.get("reserved_bytes") or 0))
-    except Exception:
+    except (TypeError, ValueError):
         return 0
 
 
@@ -875,7 +888,7 @@ def _scan_payload(*, file_obj: File, version: FileVersion) -> AntivirusScanResul
 
     try:
         payload = DEFAULT_STORAGE_PROVIDER.get_object_bytes(bucket=version.s3_bucket, key=version.s3_key)
-    except Exception as exc:
+    except (BotoCoreError, ClientError, KeyError, OSError, ValueError) as exc:
         return AntivirusScanResult(result="error", details=f"storage_read_error: {exc}")
 
     return _scan_payload_bytes(file_type=declared_type, payload=payload)
@@ -912,7 +925,7 @@ def _decode_signature_png(raw: str) -> bytes:
         _, _, value = value.partition(",")
     try:
         decoded = base64.b64decode(value, validate=True)
-    except Exception as exc:
+    except (binascii.Error, TypeError, ValueError) as exc:
         raise ValueError("invalid_signature_base64") from exc
     if len(decoded) < 20:
         raise ValueError("signature_too_small")
@@ -925,7 +938,7 @@ def _safe_uuid(raw: str | None) -> uuid.UUID | None:
     """Безопасно распарсить UUID из строки."""
     try:
         return uuid.UUID(str(raw)) if raw else None
-    except Exception:
+    except (TypeError, ValueError, AttributeError):
         return None
 
 
@@ -983,7 +996,7 @@ def docs_delete_file_background(file_id: str) -> dict[str, int | str]:
     """Фоновое удаление файла и всех его версий из S3 и БД."""
     try:
         file_uuid = uuid.UUID(str(file_id))
-    except Exception:
+    except (TypeError, ValueError, AttributeError):
         return {"status": "error", "reason": "invalid_file_id"}
 
     deleted_versions = 0
@@ -992,12 +1005,11 @@ def docs_delete_file_background(file_id: str) -> dict[str, int | str]:
         if not file_obj:
             return {"status": "skipped", "reason": "file_not_found"}
 
-        try:
+        s3_client = None
+        with suppress(ImportError, RuntimeError, ValueError, BotoCoreError, ClientError):
             from src.modules.files.storage import get_s3_client
 
             s3_client = get_s3_client()
-        except Exception:
-            s3_client = None
 
         versions = session.execute(select(FileVersion).where(FileVersion.file_id == file_uuid)).scalars().all()
 

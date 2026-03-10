@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 from celery import shared_task
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.infrastructure.celery_base import BaseTaskWithRetry
 from src.infrastructure.database_sync import get_sync_session
@@ -20,7 +21,7 @@ def create_monthly_partition():
             session.execute(text("SELECT create_monthly_partition()"))
             session.commit()
             logger.info("Successfully created monthly partition")
-    except Exception as e:
+    except SQLAlchemyError as e:
         logger.error(f"Failed to create monthly partition: {e}")
         raise
 
@@ -33,7 +34,7 @@ def archive_old_records(months_old: int = 24):
             session.execute(text("SELECT archive_old_partition(:months)"), {"months": months_old})
             session.commit()
             logger.info(f"Successfully archived records older than {months_old} months")
-    except Exception as e:
+    except SQLAlchemyError as e:
         logger.error(f"Failed to archive old records: {e}")
         raise
 
@@ -59,6 +60,6 @@ def cleanup_soft_deleted_records(days_old: int = 90):
 
             logger.info(f"Cleaned up {deleted_count} soft-deleted records older than {days_old} days")
             return deleted_count
-    except Exception as e:
+    except SQLAlchemyError as e:
         logger.error(f"Failed to cleanup soft-deleted records: {e}")
         raise

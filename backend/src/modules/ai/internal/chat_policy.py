@@ -26,7 +26,7 @@ def extract_requested_record_count(text: str) -> int | None:
             continue
         try:
             value = int(match.group(1))
-        except Exception:
+        except (TypeError, ValueError):
             return None
         if 1 <= value <= 5000:
             return value

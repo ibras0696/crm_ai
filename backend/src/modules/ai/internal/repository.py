@@ -366,7 +366,7 @@ class AIRepository:
             return None
         try:
             session_id = uuid.UUID(chat_id)
-        except Exception:
+        except (TypeError, ValueError, AttributeError):
             return None
         return await self.get_session(org_id=org_id, user_id=user_id, session_id=session_id)
 
@@ -648,7 +648,7 @@ class AIRepository:
         for raw in normalized:
             try:
                 uuid_refs.append(uuid.UUID(raw))
-            except Exception:
+            except (TypeError, ValueError, AttributeError):
                 continue
         if uuid_refs:
             rows = (
@@ -700,7 +700,7 @@ class AIRepository:
                 # Mark unresolved only for non-uuid refs.
                 try:
                     uuid.UUID(raw)
-                except Exception:
+                except (TypeError, ValueError, AttributeError):
                     unresolved.append(raw)
 
         return resolved, unresolved

@@ -24,7 +24,7 @@ def _record_metric(status: str, tokens: int | None = None) -> None:
         AI_REQUESTS_TOTAL.labels(model=settings.OPENAI_MODEL, status=status).inc()
         if tokens is not None and tokens > 0:
             AI_TOKENS_TOTAL.labels(model=settings.OPENAI_MODEL).inc(float(tokens))
-    except Exception as exc:
+    except (TypeError, ValueError, RuntimeError) as exc:
         logger.warning("ai_metrics_record_failed", exc_info=exc)
 
 
@@ -39,5 +39,5 @@ def _record_limit_rejection(code: str) -> None:
     """
     try:
         AI_LIMIT_REJECTIONS_TOTAL.labels(code=code).inc()
-    except Exception as exc:
+    except (TypeError, ValueError, RuntimeError) as exc:
         logger.warning("ai_limit_rejection_metric_failed", exc_info=exc)

@@ -5,6 +5,8 @@ import secrets
 import string
 import uuid
 
+from redis.exceptions import RedisError
+
 from src.infrastructure.redis_client import redis_client
 from src.infrastructure.uow import UnitOfWork
 from src.modules.auth.repository import UserRepository
@@ -33,7 +35,7 @@ class AuthPasswordService:
             try:
                 # 30 minutes TTL
                 await redis.setex(cache_key, 1800, str(user.id))
-            except Exception as e:
+            except RedisError as e:
                 logger.error(f"Failed to set password reset token in Redis: {e}")
                 return
 
@@ -52,7 +54,7 @@ class AuthPasswordService:
                 return False
 
             user_id = uuid.UUID(user_id_str.decode(encoding="utf-8") if isinstance(user_id_str, bytes) else user_id_str)
-        except Exception as e:
+        except (RedisError, TypeError, ValueError, AttributeError) as e:
             logger.error(f"Failed to get or parse password reset token from Redis: {e}")
             return False
 
@@ -72,7 +74,7 @@ class AuthPasswordService:
         # Delete token after successful use
         try:
             await redis.delete(cache_key)
-        except Exception as e:
+        except RedisError as e:
             logger.error(f"Failed to delete password reset token from Redis: {e}")
 
         return True

@@ -34,6 +34,10 @@ class BillingOperationError(BillingModuleError):
             status = 402
         elif code in {"BILLING_STATE_CONFLICT"}:
             status = 409
+        elif code in {"WEBHOOK_INVALID_PAYLOAD"}:
+            status = 400
+        elif code in {"WEBHOOK_PAYMENT_NOT_CONFIRMED"}:
+            status = 403
         elif code in {"BILLING_NOT_CONFIGURED", "PAYMENT_ERROR"}:
             status = 503
         super().__init__(code=code, message=message, status_code=status)
@@ -101,6 +105,40 @@ class BillingService:
             ) from exc
         except (httpx.RequestError, httpx.TimeoutException) as exc:
             raise BillingOperationError("PAYMENT_ERROR", "Платежный шлюз недоступен") from exc
+
+    async def _confirm_yookassa_webhook_payment(self, payload: dict) -> dict:
+        obj = payload.get("object")
+        if not isinstance(obj, dict):
+            raise BillingOperationError("WEBHOOK_INVALID_PAYLOAD", "Webhook payload не содержит object")
+
+        payment_id = str(obj.get("id") or "").strip()
+        if not payment_id:
+            raise BillingOperationError("WEBHOOK_INVALID_PAYLOAD", "Webhook payload не содержит payment_id")
+
+        async with UnitOfWork() as uow:
+            yk = await resolve_yookassa_runtime_config(uow.session)
+        if not yk.shop_id or not yk.secret_key:
+            raise BillingOperationError(
+                "BILLING_NOT_CONFIGURED",
+                "Платежный шлюз не настроен. Укажите YooKassa shop_id и secret_key.",
+            )
+
+        confirmed_payment = await self._get_yookassa_payment(
+            shop_id=yk.shop_id,
+            secret_key=yk.secret_key,
+            payment_id=payment_id,
+        )
+        if str(confirmed_payment.get("id") or "").strip() != payment_id:
+            raise BillingOperationError(
+                "WEBHOOK_PAYMENT_NOT_CONFIRMED",
+                "Webhook payment_id не совпадает с платежом YooKassa",
+            )
+        if str(confirmed_payment.get("status") or "").strip() != "succeeded" or not bool(confirmed_payment.get("paid")):
+            raise BillingOperationError(
+                "WEBHOOK_PAYMENT_NOT_CONFIRMED",
+                "Webhook не подтвержден статусом succeeded в YooKassa",
+            )
+        return confirmed_payment
 
     async def list_plans(self):
         async with UnitOfWork() as uow:
@@ -328,10 +366,10 @@ class BillingService:
 
     async def handle_yookassa_webhook(self, payload: dict) -> None:
         event = payload.get("event", "")
-        obj = payload.get("object", {})
         if event != "payment.succeeded":
             return
 
+        obj = await self._confirm_yookassa_webhook_payment(payload)
         metadata = obj.get("metadata", {})
         org_id = metadata.get("org_id")
         plan_name = metadata.get("plan_name")
@@ -340,9 +378,12 @@ class BillingService:
         payment_id = obj.get("id")
         if not org_id:
             return
+        try:
+            org_uuid = uuid.UUID(str(org_id))
+        except ValueError as exc:
+            raise BillingOperationError("WEBHOOK_INVALID_PAYLOAD", "Webhook содержит некорректный org_id") from exc
 
         if purchase_kind == "token_package" and package_code:
-            org_uuid = uuid.UUID(org_id)
             user_id_raw = str(metadata.get("user_id") or "").strip()
             user_uuid: uuid.UUID | None = None
             if user_id_raw:
@@ -384,10 +425,11 @@ class BillingService:
             return
 
         plan_map = {"free": PlanTier.FREE, "team": PlanTier.TEAM, "business": PlanTier.BUSINESS}
-        plan_tier = plan_map.get(plan_name, PlanTier.FREE)
+        plan_tier = plan_map.get(str(plan_name).strip())
+        if plan_tier is None:
+            raise BillingOperationError("WEBHOOK_INVALID_PAYLOAD", "Webhook содержит неизвестный тариф")
         now = datetime.now(UTC)
         period_end = now + timedelta(days=30)
-        org_uuid = uuid.UUID(org_id)
 
         async with UnitOfWork() as uow:
             repo = BillingRepository(uow.session)

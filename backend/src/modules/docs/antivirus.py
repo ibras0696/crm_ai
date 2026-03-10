@@ -70,7 +70,7 @@ class ClamAVAntivirusProvider(AntivirusProvider):
 
                 sock.sendall(struct.pack("!I", 0))
                 response = self._read_response(sock)
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             return AntivirusScanResult(result="error", details=f"clamav_unavailable: {exc}")
 
         if "FOUND" in response:

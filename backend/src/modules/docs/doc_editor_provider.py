@@ -88,7 +88,7 @@ class OnlyOfficeDocumentEditorProvider:
         self._refresh()
         try:
             return jwt.decode(str(token), self._state_secret(), algorithms=["HS256"])
-        except Exception as exc:
+        except jwt.InvalidTokenError as exc:
             raise DocsModuleError(
                 code="ONLYOFFICE_SIGNATURE_INVALID",
                 message="Некорректная подпись callback от OnlyOffice",
@@ -201,7 +201,7 @@ class OnlyOfficeDocumentEditorProvider:
             )
         try:
             jwt.decode(token, self.jwt_secret, algorithms=["HS256"])
-        except Exception as exc:
+        except jwt.InvalidTokenError as exc:
             raise DocsModuleError(
                 code="ONLYOFFICE_UNAUTHORIZED",
                 message="Invalid OnlyOffice callback signature",

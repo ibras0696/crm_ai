@@ -7,6 +7,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from redis.exceptions import RedisError
+
 from src.config import settings
 from src.infrastructure.redis import get_redis
 from src.modules.docs.errors import DocsModuleError
@@ -62,7 +64,7 @@ class DocsTextSaveRateLimiter:
             return
         except DocsModuleError:
             raise
-        except Exception as exc:
+        except RedisError as exc:
             bucket = self._memory[key]
             now_float = time.time()
             bucket.values = [value for value in bucket.values if now_float - value < 60.0]

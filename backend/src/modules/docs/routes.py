@@ -5,9 +5,12 @@ from __future__ import annotations
 import logging
 import uuid  # noqa: TC003
 
+import httpx
 import jwt
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from kombu.exceptions import OperationalError
 
 from src.common.enums import UserRole
 from src.common.schemas import ApiResponse
@@ -185,7 +188,7 @@ async def finish_upload(
         await uow.commit()
         try:
             scan_version.delay(str(result.version_id))
-        except Exception:
+        except (OperationalError, OSError, RuntimeError):
             logger.exception("docs_scan_enqueue_failed", extra={"file_id": str(file_obj.id)})
             scan_version.run(str(result.version_id))
         item = FileOut.model_validate(file_obj)
@@ -413,7 +416,7 @@ async def sign_pdf(
                 body.model_dump(),
                 str(current_user.user_id),
             )
-        except Exception:
+        except (OperationalError, OSError, RuntimeError):
             logger.exception("docs_pdf_sign_enqueue_failed", extra={"file_id": str(file_id)})
             pdf_stamp_sign.run(
                 str(result.source_version_id),
@@ -484,7 +487,7 @@ async def internal_download(version_id: uuid.UUID, token: str):
             body,
             media_type=resp.get("ContentType", "application/octet-stream"),
         )
-    except Exception as err:
+    except (BotoCoreError, ClientError, KeyError, OSError) as err:
         logger.error(f"S3 download failed internally: {err}")
         raise HTTPException(status_code=500, detail="Storage error") from err
 
@@ -499,7 +502,7 @@ async def onlyoffice_callback(request: Request):
         body = await request.json()
         if not isinstance(body, dict):
             body = {}
-    except Exception:
+    except ValueError:
         body = {}
 
     auth_header = request.headers.get("Authorization")
@@ -519,7 +522,7 @@ async def onlyoffice_callback(request: Request):
                 status_code=error.status_code,
                 content={"error": 1, "message": error.message, "code": error.code},
             )
-        except Exception:
+        except (httpx.HTTPError, jwt.InvalidTokenError, KeyError, LookupError, RuntimeError, TypeError, ValueError):
             await uow.rollback()
             logger.exception("docs_onlyoffice_callback_failed")
             return JSONResponse(status_code=500, content={"error": 1, "message": "Callback processing failed"})
@@ -527,7 +530,7 @@ async def onlyoffice_callback(request: Request):
     if isinstance(new_version_id, str) and new_version_id.strip():
         try:
             scan_version.delay(str(new_version_id))
-        except Exception:
+        except (OperationalError, OSError, RuntimeError):
             logger.exception("docs_onlyoffice_scan_enqueue_failed", extra={"version_id": new_version_id})
             scan_version.run(str(new_version_id))
     return JSONResponse(status_code=200, content={"error": 0})
@@ -564,7 +567,7 @@ async def create_file_via_ai(
         try:
             task = ai_generate.delay(str(result.job.id))
             task_id = str(getattr(task, "id", "") or "")
-        except Exception:
+        except (OperationalError, OSError, RuntimeError):
             logger.exception("docs_ai_generate_enqueue_failed", extra={"job_id": str(result.job.id)})
             await run_ai_generate_inline(job_id=str(result.job.id), task_id="inline-route-fallback")
 
@@ -575,7 +578,7 @@ async def create_file_via_ai(
                     job = await service.get_ai_generation_job(org_id=current_user.org_id, job_id=result.job.id)
                     job.task_id = task_id
                     await uow.commit()
-                except Exception:
+                except DocsModuleError:
                     await uow.rollback()
 
     payload = AIGenerateOut(

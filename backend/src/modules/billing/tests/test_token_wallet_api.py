@@ -102,6 +102,8 @@ class _MockYooKassaResponse:
 
 
 class _MockYooKassaClient:
+    payments: dict[str, dict] = {}
+
     def __init__(self, *args, **kwargs):
         pass
 
@@ -124,6 +126,14 @@ class _MockYooKassaClient:
             },
         )
 
+    async def get(self, url: str, auth=None, headers=None):
+        assert auth == ("wallet-shop-1", "wallet-secret-1")
+        payment_id = url.rsplit("/", 1)[-1]
+        payload = self.payments.get(payment_id)
+        if payload is None:
+            return _MockYooKassaResponse(404, {"id": payment_id})
+        return _MockYooKassaResponse(200, payload)
+
 
 @pytest.mark.asyncio
 async def test_token_packages_balance_and_purchase_api(client: AsyncClient):
@@ -136,6 +146,7 @@ async def test_token_packages_balance_and_purchase_api(client: AsyncClient):
     from src.modules.billing import service as billing_service_module
 
     old_async_client = billing_service_module.httpx.AsyncClient
+    _MockYooKassaClient.payments = {}
     billing_service_module.httpx.AsyncClient = _MockYooKassaClient
     try:
         packages = await client.get("/api/v1/billing/tokens/packages", headers=_headers(token))
@@ -162,6 +173,16 @@ async def test_token_packages_balance_and_purchase_api(client: AsyncClient):
         assert buy.status_code == 200
         assert buy.json()["ok"] is True
         assert buy.json()["data"]["requires_payment"] is True
+        _MockYooKassaClient.payments["pay-pack_50k"] = {
+            "id": "pay-pack_50k",
+            "status": "succeeded",
+            "paid": True,
+            "metadata": {
+                "org_id": org_id,
+                "purchase_kind": "token_package",
+                "package_code": "pack_50k",
+            },
+        }
 
         webhook = await client.post(
             "/api/v1/billing/webhook/yookassa",
@@ -203,6 +224,7 @@ async def test_wallet_spend_prefers_addon_then_plan_and_idempotency(client: Asyn
     from src.modules.billing import service as billing_service_module
 
     old_async_client = billing_service_module.httpx.AsyncClient
+    _MockYooKassaClient.payments = {}
     billing_service_module.httpx.AsyncClient = _MockYooKassaClient
     try:
         # Покупаем addon-пакет и подтверждаем его webhook'ом.
@@ -212,6 +234,17 @@ async def test_wallet_spend_prefers_addon_then_plan_and_idempotency(client: Asyn
         assert buy.status_code == 200
         assert buy.json()["ok"] is True
         assert buy.json()["data"]["requires_payment"] is True
+        _MockYooKassaClient.payments["pay-pack_50k"] = {
+            "id": "pay-pack_50k",
+            "status": "succeeded",
+            "paid": True,
+            "metadata": {
+                "org_id": str(org_id),
+                "user_id": str(user_id),
+                "purchase_kind": "token_package",
+                "package_code": "pack_50k",
+            },
+        }
 
         webhook = await client.post(
             "/api/v1/billing/webhook/yookassa",

@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.common.enums import UserRole
-from src.infrastructure.uow import UnitOfWork
-from src.modules.ai.models import AIChatMessage
 from src.modules.ai.service import (
     handle_create_columns_action,
     handle_create_dashboard_action,
@@ -17,7 +15,11 @@ from src.modules.ai.service import (
     handle_create_table_action,
     handle_edit_kb_page_action,
 )
-from src.modules.auth.dependencies import CurrentUser
+
+if TYPE_CHECKING:
+    from src.infrastructure.uow import UnitOfWork
+    from src.modules.ai.models import AIChatMessage
+    from src.modules.auth.dependencies import CurrentUser
 
 ACTION_HANDLERS = {
     "create_dashboard": handle_create_dashboard_action,

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from src.common.enums import AuditAction
 from src.common.exceptions import UnauthorizedError
 from src.infrastructure.uow import UnitOfWork
 from src.modules.audit.repository import AuditRepository
 from src.modules.auth.models import RefreshToken, User
 from src.modules.auth.repository import RefreshTokenRepository, UserRepository
-from src.modules.auth.schemas import TokenResponse
 from src.modules.auth.security import (
     create_access_token,
     create_refresh_token,
@@ -16,6 +17,9 @@ from src.modules.auth.security import (
 )
 from src.modules.auth.services.utils import build_token_response
 from src.modules.org.repository import MembershipRepository
+
+if TYPE_CHECKING:
+    from src.modules.auth.schemas import TokenResponse
 
 
 class AuthSessionService:

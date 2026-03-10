@@ -33,7 +33,10 @@ async def cleanup():
         for job in stuck_jobs:
             print(f"Cleaning up Job {job.id} (Status: {job.status}, Created: {job.created_at})")
             job.status = "failed"
-            job.error_message = "[System Cleanup] Task was stuck in queue/running state for too long. Process was likely interrupted before the fix."
+            job.error_message = (
+                "[System Cleanup] Task was stuck in queue/running state for too long. "
+                "Process was likely interrupted before the fix."
+            )
             job.finished_at = datetime.now(UTC)
 
             if job.file_id:

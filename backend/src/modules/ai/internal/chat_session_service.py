@@ -7,11 +7,15 @@
 from __future__ import annotations
 
 import logging
-import uuid
+from typing import TYPE_CHECKING
 
-from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.internal.repository import AIRepository
-from src.modules.ai.models import AIChatSession
+
+if TYPE_CHECKING:
+    import uuid
+
+    from src.infrastructure.uow import UnitOfWork
+    from src.modules.ai.models import AIChatSession
 
 logger = logging.getLogger(__name__)
 

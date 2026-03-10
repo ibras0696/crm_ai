@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.common.enums import SubscriptionStatus
@@ -23,6 +22,11 @@ from src.modules.org.models import Membership, Organization, Subscription
 from src.modules.schedule.models import Event
 from src.modules.tables.models import Table
 from src.modules.tables.records import Record
+
+if TYPE_CHECKING:
+    from datetime import datetime
+
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class AIRepository:

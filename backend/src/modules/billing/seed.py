@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
 from src.modules.billing.models import Plan, TokenPackage
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 DEFAULT_PLANS: list[dict] = [
     {

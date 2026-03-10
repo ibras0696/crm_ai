@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import uuid
-from datetime import datetime
+import uuid  # noqa: TC003
+from datetime import datetime  # noqa: TC003
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, String, text

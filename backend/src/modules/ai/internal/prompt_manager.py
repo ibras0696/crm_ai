@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from src.modules.ai.internal.intent_router import IntentDecision
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.modules.ai.internal.intent_router import IntentDecision
 
 
 def _clip_text(text: str, limit: int) -> str:

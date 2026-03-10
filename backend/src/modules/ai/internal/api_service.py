@@ -5,18 +5,21 @@
 
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.config import settings
 from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.internal.runtime_secrets import decrypt_runtime_secret
 from src.modules.ai.limits import is_org_ai_enabled, resolve_org_plan, resolve_plan_limits
-from src.modules.ai.models import AIChatMessage
 from src.modules.ai.repository import AIRepository
 from src.modules.ai.service import build_messages, build_org_context_for_user, estimate_tokens
 from src.modules.billing.token_wallet import get_token_balance_view
+
+if TYPE_CHECKING:
+    import uuid
+
+    from src.modules.ai.models import AIChatMessage
 
 
 async def build_ai_status(*, org_id: uuid.UUID) -> dict[str, Any]:

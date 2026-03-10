@@ -5,11 +5,13 @@ from __future__ import annotations
 import io
 from dataclasses import dataclass
 from html.parser import HTMLParser
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from docx import Document
 from docx.shared import Inches
-from docx.text.paragraph import Paragraph
+
+if TYPE_CHECKING:
+    from docx.text.paragraph import Paragraph
 
 
 @dataclass

@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, String, text
 from sqlalchemy.dialects.postgresql import UUID
@@ -7,6 +8,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.common.base_model import BaseDBModel
 from src.common.enums import InviteStatus, PlanTier, SubscriptionStatus, UserRole
+
+if TYPE_CHECKING:
+    from src.modules.auth.models import User
 
 
 class Organization(BaseDBModel):
@@ -97,4 +101,4 @@ class Subscription(BaseDBModel):
 
 
 # Import for relationship resolution
-from src.modules.auth.models import User  # noqa: E402
+from src.modules.auth.models import User  # noqa: E402, TC001

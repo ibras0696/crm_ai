@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import uuid
-from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, func, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.enums import SubscriptionStatus
 from src.modules.billing.models import (
@@ -16,6 +14,12 @@ from src.modules.billing.models import (
     TokenUsageIdempotency,
 )
 from src.modules.org.models import Organization, Subscription
+
+if TYPE_CHECKING:
+    import uuid
+    from datetime import datetime
+
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class TokenWalletRepository:

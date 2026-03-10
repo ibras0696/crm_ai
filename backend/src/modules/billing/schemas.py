@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import uuid
+import uuid  # noqa: TC003
 from typing import Literal
 
 from pydantic import BaseModel

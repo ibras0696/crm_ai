@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-import uuid
+import uuid  # noqa: TC003
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import StreamingResponse

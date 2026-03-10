@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import re
-import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.internal.repository import AIRepository
 from src.modules.ai.internal.resolution import normalize_name, resolve_table_by_ref, safe_field_type
 from src.modules.tables.models import Column, FieldType, Table
 from src.modules.tables.records import Record
+
+if TYPE_CHECKING:
+    import uuid
+
+    from src.infrastructure.uow import UnitOfWork
 
 
 def _resolve_row_key_to_column_id(row_key: Any, columns: list[Column]) -> str | None:

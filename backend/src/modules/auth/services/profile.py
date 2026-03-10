@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-import uuid
+from typing import TYPE_CHECKING
 
 from src.infrastructure.uow import UnitOfWork
-from src.modules.auth.models import User
 from src.modules.auth.repository import UserRepository
-from src.modules.auth.schemas import UpdateMeRequest
+
+if TYPE_CHECKING:
+    import uuid
+
+    from src.modules.auth.models import User
+    from src.modules.auth.schemas import UpdateMeRequest
 
 
 class AuthProfileService:

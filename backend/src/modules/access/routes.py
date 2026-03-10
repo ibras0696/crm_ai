@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import uuid
+import uuid  # noqa: TC003
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: TC002
 
 from src.common.enums import UserRole
 from src.common.exceptions import ConflictError

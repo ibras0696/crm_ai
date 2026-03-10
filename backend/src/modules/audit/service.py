@@ -1,9 +1,12 @@
 from __future__ import annotations
 
-import uuid
+from typing import TYPE_CHECKING
 
-from src.modules.audit.models import AuditLog
-from src.modules.audit.repository import AuditRepository
+if TYPE_CHECKING:
+    import uuid
+
+    from src.modules.audit.models import AuditLog
+    from src.modules.audit.repository import AuditRepository
 
 
 class AuditService:

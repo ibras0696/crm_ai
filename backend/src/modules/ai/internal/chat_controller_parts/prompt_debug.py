@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from src.modules.ai.internal.prompts import ACTION_INSTRUCTIONS_PROMPT
-from src.modules.ai.models import AIChatMessage
 from src.modules.ai.service import estimate_tokens
+
+if TYPE_CHECKING:
+    from src.modules.ai.models import AIChatMessage
 
 
 def _estimate_prompt_tokens(messages: list[dict]) -> int:

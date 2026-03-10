@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from src.config import settings
 from src.modules.ai.internal.prompts import ACTION_INSTRUCTIONS_PROMPT
-from src.modules.ai.models import AIChatMessage
+
+if TYPE_CHECKING:
+    from src.modules.ai.models import AIChatMessage
 
 
 def build_messages(

@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import uuid
-
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import TYPE_CHECKING
 
 from src.common.optimistic_lock import optimistic_lock_matches
 from src.modules.tables.errors import TablesModuleError
@@ -17,18 +15,24 @@ from src.modules.tables.repository import (
     TableRepository,
     TableViewRepository,
 )
-from src.modules.tables.schemas import (
-    CreateColumnRequest,
-    CreateFolderRequest,
-    CreateRecordRequest,
-    CreateTableRequest,
-    CreateViewRequest,
-    MoveRecordRequest,
-    UpdateColumnRequest,
-    UpdateFolderRequest,
-    UpdateRecordRequest,
-    UpdateTableRequest,
-)
+
+if TYPE_CHECKING:
+    import uuid
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from src.modules.tables.schemas import (
+        CreateColumnRequest,
+        CreateFolderRequest,
+        CreateRecordRequest,
+        CreateTableRequest,
+        CreateViewRequest,
+        MoveRecordRequest,
+        UpdateColumnRequest,
+        UpdateFolderRequest,
+        UpdateRecordRequest,
+        UpdateTableRequest,
+    )
 
 
 class TableServiceError(TablesModuleError):

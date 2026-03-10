@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from src.infrastructure.uow import UnitOfWork
 from src.modules.docs.errors import DocsModuleError
+
+if TYPE_CHECKING:
+    from src.infrastructure.uow import UnitOfWork
 
 
 def _normalize_document_type(action_payload: dict[str, Any]) -> str:

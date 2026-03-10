@@ -5,10 +5,8 @@ from __future__ import annotations
 import uuid
 from collections import defaultdict
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from src.modules.reports.models import ReportWidget
-from src.modules.reports.repository import ReportsRepository
 from src.modules.reports.schemas import (
     AnalyticsFieldOut,
     AnalyticsFilter,
@@ -19,8 +17,12 @@ from src.modules.reports.schemas import (
     WidgetConfig,
     WidgetOut,
 )
-from src.modules.tables.models import Column, Table
-from src.modules.tables.records import Record
+
+if TYPE_CHECKING:
+    from src.modules.reports.models import ReportWidget
+    from src.modules.reports.repository import ReportsRepository
+    from src.modules.tables.models import Column, Table
+    from src.modules.tables.records import Record
 
 NUMBER_LIKE_TYPES = {"number", "formula"}
 DATE_LIKE_TYPES = {"date", "datetime"}

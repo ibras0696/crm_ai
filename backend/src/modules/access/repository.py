@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-import uuid
+from typing import TYPE_CHECKING
 
 from sqlalchemy import case, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.modules.access.models import AccessRule
+
+if TYPE_CHECKING:
+    import uuid
+
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class AccessRepository:

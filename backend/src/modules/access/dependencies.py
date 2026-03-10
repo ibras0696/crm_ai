@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import uuid
+from typing import TYPE_CHECKING
 
 from fastapi import Depends, Request
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.enums import AuditAction
 from src.common.exceptions import ForbiddenError
@@ -11,6 +11,9 @@ from src.infrastructure.database import get_async_session
 from src.modules.access.service import check_access
 from src.modules.audit.repository import AuditRepository
 from src.modules.auth.dependencies import CurrentUser, require_org
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def require_access(

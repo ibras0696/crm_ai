@@ -1,15 +1,19 @@
 from __future__ import annotations
 
-import uuid
-
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import TYPE_CHECKING
 
 from src.common.enums import UserRole
 from src.common.exceptions import AppError, ValidationError
 from src.modules.access.constants import ACCESS_ROLES, PERMISSION_FIELDS, RESOURCE_TYPES
 from src.modules.access.models import AccessRule
 from src.modules.access.repository import AccessRepository
-from src.modules.access.schemas import CreateAccessRuleRequest, UpdateAccessRuleRequest
+
+if TYPE_CHECKING:
+    import uuid
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from src.modules.access.schemas import CreateAccessRuleRequest, UpdateAccessRuleRequest
 
 
 class AccessService:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import uuid
-from datetime import datetime
+import uuid  # noqa: TC003
+from datetime import datetime  # noqa: TC003
 
 from pydantic import BaseModel
 

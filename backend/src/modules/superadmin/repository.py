@@ -5,11 +5,10 @@
 
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import String, and_, delete, func, or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.enums import SubscriptionStatus
 from src.modules.ai.models import AIUsageLog
@@ -20,6 +19,11 @@ from src.modules.files.models import File
 from src.modules.org.models import Membership, Organization, Subscription
 from src.modules.tables.models import Column, Table
 from src.modules.tables.records import Record
+
+if TYPE_CHECKING:
+    import uuid
+
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def _utc_day_start(dt: datetime) -> datetime:

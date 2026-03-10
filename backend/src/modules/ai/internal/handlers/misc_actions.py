@@ -6,14 +6,16 @@ import re
 import uuid
 from collections import Counter
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.internal.repository import AIRepository
 from src.modules.knowledge.models import KBPage
-from src.modules.schedule.models import Event
 from src.modules.schedule.schemas import CreateEventRequest
 from src.modules.schedule.service import ScheduleService, ScheduleServiceError
+
+if TYPE_CHECKING:
+    from src.infrastructure.uow import UnitOfWork
+    from src.modules.schedule.models import Event
 
 
 def _parse_dt(value: Any | None) -> datetime | None:

@@ -5,8 +5,7 @@ from __future__ import annotations
 import uuid
 from collections import Counter
 from datetime import UTC, datetime, timedelta
-
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import TYPE_CHECKING
 
 from src.modules.reports.analytics_engine import (
     analytics_type_for_field,
@@ -38,6 +37,9 @@ from src.modules.reports.schemas import (
     WidgetOut,
     WidgetUpdateRequest,
 )
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class ReportsService:

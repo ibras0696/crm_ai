@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import httpx
 
@@ -89,8 +90,10 @@ from src.modules.ai.service import (
     get_or_create_session,
     resolve_timeweb_agent_id,
 )
-from src.modules.auth.dependencies import CurrentUser
 from src.modules.billing.token_wallet import spend_tokens
+
+if TYPE_CHECKING:
+    from src.modules.auth.dependencies import CurrentUser
 
 logger = logging.getLogger(__name__)
 

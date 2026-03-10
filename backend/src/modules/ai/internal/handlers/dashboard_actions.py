@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.internal.resolution import normalize_name, resolve_column_id, resolve_table_by_ref
 from src.modules.ai.internal.widget_inference import (
     coerce_widget_type_by_semantics,
@@ -21,7 +19,12 @@ from src.modules.reports.analytics_engine import build_widget_data
 from src.modules.reports.models import ReportDashboard, ReportWidget
 from src.modules.reports.repository import ReportsRepository
 from src.modules.reports.schemas import WidgetConfig
-from src.modules.tables.models import Table
+
+if TYPE_CHECKING:
+    import uuid
+
+    from src.infrastructure.uow import UnitOfWork
+    from src.modules.tables.models import Table
 
 
 async def handle_create_dashboard_action(

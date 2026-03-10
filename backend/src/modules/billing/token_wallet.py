@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-import uuid
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import TYPE_CHECKING
 
 from src.common.enums import PlanTier
 from src.config import settings
 from src.modules.billing.models import TokenBalance, TokenLedger, TokenPurchase, TokenUsageIdempotency
 from src.modules.billing.token_wallet_repository import TokenWalletRepository
+
+if TYPE_CHECKING:
+    import uuid
+
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 DEFAULT_TOKEN_PACKAGE_CATALOG: dict[str, int] = {
     "pack_50k": 50_000,

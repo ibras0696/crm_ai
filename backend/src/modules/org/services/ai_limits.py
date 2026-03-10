@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import uuid
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 from sqlalchemy import func, select
 
@@ -13,6 +13,9 @@ from src.modules.audit.repository import AuditRepository
 from src.modules.auth.models import User
 from src.modules.billing.models import Plan
 from src.modules.org.models import Membership
+
+if TYPE_CHECKING:
+    import uuid
 
 
 class OrgAILimitsService:

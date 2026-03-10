@@ -1,16 +1,20 @@
 from __future__ import annotations
 
-import uuid
+from typing import TYPE_CHECKING
 
-from src.modules.auth.models import User
-from src.modules.auth.schemas import RegisterRequest, TokenResponse, UpdateMeRequest
 from src.modules.auth.services import (
     AuthPasswordService,
     AuthProfileService,
     AuthRegistrationService,
     AuthSessionService,
 )
-from src.modules.org.models import Organization
+
+if TYPE_CHECKING:
+    import uuid
+
+    from src.modules.auth.models import User
+    from src.modules.auth.schemas import RegisterRequest, TokenResponse, UpdateMeRequest
+    from src.modules.org.models import Organization
 
 
 class AuthService:

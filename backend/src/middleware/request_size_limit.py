@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from starlette.types import ASGIApp, Message, Receive, Scope, Send
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 
 class PayloadTooLargeError(Exception):

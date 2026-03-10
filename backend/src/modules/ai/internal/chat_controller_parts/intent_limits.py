@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-import uuid
+from typing import TYPE_CHECKING
 
-from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.internal.repository import AIRepository
+
+if TYPE_CHECKING:
+    import uuid
+
+    from src.infrastructure.uow import UnitOfWork
 
 
 async def _load_action_limits(uow: UnitOfWork, *, org_id: uuid.UUID) -> dict[str, int]:

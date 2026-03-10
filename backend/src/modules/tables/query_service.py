@@ -8,9 +8,9 @@ from __future__ import annotations
 import csv
 import io
 import time
-import uuid
 from contextlib import suppress
 from io import BytesIO
+from typing import TYPE_CHECKING
 
 from openpyxl import Workbook
 
@@ -18,6 +18,9 @@ from src.config import settings
 from src.infrastructure.metrics_custom import EXPORTS_TOTAL, IMPORTS_TOTAL
 from src.modules.tables.records import Record, RecordRepository
 from src.modules.tables.repository import TablePlanLimitsRepository, TableRepository
+
+if TYPE_CHECKING:
+    import uuid
 
 
 class TableQueryService:

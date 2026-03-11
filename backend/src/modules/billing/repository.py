@@ -7,7 +7,9 @@ from sqlalchemy import delete, func, select
 from src.common.enums import NotificationStatus, NotificationType, PlanTier, SubscriptionStatus, UserRole
 from src.modules.ai.models import AIChatMessage, AIChatSession, AIUsageLog
 from src.modules.audit.models import AuditLog
+from src.modules.auth.models import User
 from src.modules.billing.models import Plan, TokenPackage
+from src.modules.docs.models import FileVersion, OrgStorageUsage
 from src.modules.files.models import File
 from src.modules.knowledge.models import KBPage
 from src.modules.notifications.models import Notification
@@ -119,9 +121,132 @@ class BillingRepository:
             return recipients
         return await self.list_org_member_user_ids(org_id=org_id)
 
+    async def get_notification_recipients_with_email(self, *, org_id: uuid.UUID) -> list[tuple[uuid.UUID, str]]:
+        rows = (
+            await self.session.execute(
+                select(Membership.user_id, User.email)
+                .join(User, User.id == Membership.user_id)
+                .where(
+                    Membership.org_id == org_id,
+                    Membership.role.in_([UserRole.OWNER, UserRole.ADMIN]),
+                )
+            )
+        ).all()
+        if not rows:
+            rows = (
+                await self.session.execute(
+                    select(Membership.user_id, User.email)
+                    .join(User, User.id == Membership.user_id)
+                    .where(Membership.org_id == org_id)
+                )
+            ).all()
+        return [(user_id, str(email or "").strip()) for user_id, email in rows if str(email or "").strip()]
+
     async def list_files_for_org(self, *, org_id: uuid.UUID) -> list[File]:
         stmt = select(File).where(File.org_id == org_id)
         return list((await self.session.execute(stmt)).scalars().all())
+
+    async def get_active_plan_by_name(self, *, name: str) -> Plan | None:
+        stmt = select(Plan).where(Plan.name == name, Plan.is_active.is_(True)).limit(1)
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def count_tables_for_org(self, *, org_id: uuid.UUID) -> int:
+        return int(
+            (
+                await self.session.execute(select(func.count()).select_from(Table).where(Table.org_id == org_id))
+            ).scalar()
+            or 0
+        )
+
+    async def count_records_for_org(self, *, org_id: uuid.UUID) -> int:
+        return int(
+            (
+                await self.session.execute(select(func.count()).select_from(Record).where(Record.org_id == org_id))
+            ).scalar()
+            or 0
+        )
+
+    async def sum_file_bytes_for_org(self, *, org_id: uuid.UUID) -> int:
+        return int(
+            (
+                await self.session.execute(select(func.coalesce(func.sum(File.size), 0)).where(File.org_id == org_id))
+            ).scalar()
+            or 0
+        )
+
+    async def list_oldest_tables_for_org(self, *, org_id: uuid.UUID, limit: int) -> list[Table]:
+        stmt = (
+            select(Table)
+            .where(Table.org_id == org_id)
+            .order_by(Table.created_at.asc(), Table.id.asc())
+            .limit(max(1, int(limit)))
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def list_oldest_records_for_org(self, *, org_id: uuid.UUID, limit: int) -> list[Record]:
+        stmt = (
+            select(Record)
+            .where(Record.org_id == org_id)
+            .order_by(Record.created_at.asc(), Record.id.asc())
+            .limit(max(1, int(limit)))
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def list_oldest_files_for_org(self, *, org_id: uuid.UUID, limit: int) -> list[File]:
+        stmt = (
+            select(File)
+            .where(File.org_id == org_id)
+            .order_by(File.created_at.asc(), File.id.asc())
+            .limit(max(1, int(limit)))
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def list_file_versions_for_file_ids(self, *, file_ids: list[uuid.UUID]) -> list[FileVersion]:
+        if not file_ids:
+            return []
+        stmt = select(FileVersion).where(FileVersion.file_id.in_(file_ids))
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def delete_tables_by_ids(self, *, table_ids: list[uuid.UUID]) -> int:
+        if not table_ids:
+            return 0
+        result = await self.session.execute(delete(Table).where(Table.id.in_(table_ids)))
+        await self.session.flush()
+        return int(result.rowcount or 0)
+
+    async def delete_records_by_ids(self, *, record_ids: list[uuid.UUID]) -> int:
+        if not record_ids:
+            return 0
+        result = await self.session.execute(delete(Record).where(Record.id.in_(record_ids)))
+        await self.session.flush()
+        return int(result.rowcount or 0)
+
+    async def delete_file_versions_by_ids(self, *, version_ids: list[uuid.UUID]) -> int:
+        if not version_ids:
+            return 0
+        result = await self.session.execute(delete(FileVersion).where(FileVersion.id.in_(version_ids)))
+        await self.session.flush()
+        return int(result.rowcount or 0)
+
+    async def delete_files_by_ids(self, *, file_ids: list[uuid.UUID]) -> int:
+        if not file_ids:
+            return 0
+        result = await self.session.execute(delete(File).where(File.id.in_(file_ids)))
+        await self.session.flush()
+        return int(result.rowcount or 0)
+
+    async def get_storage_usage_row(self, *, org_id: uuid.UUID) -> OrgStorageUsage | None:
+        stmt = select(OrgStorageUsage).where(OrgStorageUsage.org_id == org_id).limit(1)
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def upsert_storage_usage_bytes(self, *, org_id: uuid.UUID, used_bytes: int) -> None:
+        usage = await self.get_storage_usage_row(org_id=org_id)
+        if usage is None:
+            usage = OrgStorageUsage(org_id=org_id, used_bytes=max(0, int(used_bytes)), reserved_bytes=0)
+            self.session.add(usage)
+        else:
+            usage.used_bytes = max(0, int(used_bytes))
+        await self.session.flush()
 
     async def upsert_subscription(
         self,

@@ -73,6 +73,7 @@ def _send_email_notification_impl(
 ) -> dict:
     logger = logging.getLogger("notifications")
     if not settings.ENABLE_EMAIL:
+        logger.info("Email sending disabled; skipping message", extra={"kind": kind, "to": to_email})
         _inc_email_send_metric(kind=kind, status="disabled")
         return {"status": "disabled", "to": to_email}
 
@@ -90,20 +91,36 @@ def _send_email_notification_impl(
             use_tls=bool(settings.SMTP_TLS),
             timeout_s=float(settings.SMTP_TIMEOUT_S),
         )
+        logger.info("Email sent", extra={"kind": kind, "to": to_email})
         _inc_email_send_metric(kind=kind, status="sent")
         return {"status": "sent", "to": to_email}
     except EmailSendError as exc:
-        logger.exception("Email send failed: %s", exc)
+        permanent_error_codes = {"smtp_not_configured", "smtp_from_not_configured", "smtp_to_missing"}
+        logger.exception("Email send failed", extra={"kind": kind, "to": to_email, "error": str(exc)})
         _inc_email_send_metric(kind=kind, status="failed")
+        if str(exc) in permanent_error_codes:
+            logger.error(
+                "Email send failed permanently; retry suppressed",
+                extra={"kind": kind, "to": to_email, "error": str(exc)},
+            )
+            return {"status": "failed", "to": to_email, "error": str(exc)}
         try:
             task.retry(exc=exc)
         except task.MaxRetriesExceededError:
-            logger.error("Max retries exceeded for email to %s", to_email)
+            logger.error("Max retries exceeded for email", extra={"kind": kind, "to": to_email, "error": str(exc)})
             return {"status": "failed", "to": to_email, "error": str(exc)}
+        logger.warning("Email scheduled for retry", extra={"kind": kind, "to": to_email, "error": str(exc)})
         return {"status": "retrying", "to": to_email}
 
 
-@celery.task(name="send_email_notification", bind=True, max_retries=3, default_retry_delay=60)
+@celery.task(
+    name="send_email_notification",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    retry_backoff=True,
+    retry_jitter=True,
+)
 def send_email_notification(self, to_email: str, subject: str, body: str, kind: str = "generic") -> dict:
     """Send email notification via SMTP."""
     return _send_email_notification_impl(
@@ -115,7 +132,14 @@ def send_email_notification(self, to_email: str, subject: str, body: str, kind: 
     )
 
 
-@celery.task(name="send_invite_email", bind=True, max_retries=3, default_retry_delay=60)
+@celery.task(
+    name="send_invite_email",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    retry_backoff=True,
+    retry_jitter=True,
+)
 def send_invite_email(self, to_email: str, org_name: str, invite_token: str, invite_url: str | None = None) -> dict:
     """Send invite email via SMTP."""
     logger = logging.getLogger("notifications")
@@ -141,7 +165,14 @@ def send_invite_email(self, to_email: str, org_name: str, invite_token: str, inv
     )
 
 
-@celery.task(name="send_password_reset_email", bind=True, max_retries=3, default_retry_delay=60)
+@celery.task(
+    name="send_password_reset_email",
+    bind=True,
+    max_retries=3,
+    default_retry_delay=60,
+    retry_backoff=True,
+    retry_jitter=True,
+)
 def send_password_reset_email(self, to_email: str, reset_token: str, reset_url: str | None = None) -> dict:
     """Send password reset email via SMTP."""
     url = reset_url or f"{settings.FRONTEND_URL.rstrip('/')}/auth/reset-password?token={reset_token}"

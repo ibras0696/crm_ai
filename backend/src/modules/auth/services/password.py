@@ -5,6 +5,7 @@ import secrets
 import string
 import uuid
 
+from kombu.exceptions import KombuError, OperationalError
 from redis.exceptions import RedisError
 
 from src.infrastructure.redis_client import redis_client
@@ -43,7 +44,10 @@ class AuthPasswordService:
             # Avoid import cycle: notifications.tasks imports auth models during Celery autodiscovery.
             from src.modules.notifications.tasks import send_password_reset_email
 
-            send_password_reset_email.delay(to_email=user.email, reset_token=token)
+            try:
+                send_password_reset_email.delay(to_email=user.email, reset_token=token)
+            except (KombuError, OperationalError, OSError):
+                logger.exception("Failed to enqueue password reset email", extra={"user_id": str(user.id)})
 
     async def reset_password(self, token: str, new_password: str) -> bool:
         redis = await redis_client.get()

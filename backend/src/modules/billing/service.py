@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
 import httpx
 from botocore.exceptions import BotoCoreError, ClientError
+from kombu.exceptions import KombuError, OperationalError
+from sqlalchemy.exc import SQLAlchemyError
 
 from src.common.enums import PlanTier, SubscriptionStatus
 from src.config import settings
 from src.infrastructure.uow import UnitOfWork
 from src.modules.billing.errors import BillingModuleError
+from src.modules.billing.lifecycle_policy import FreePlanLimits, should_send_post_expiry_notice
 from src.modules.billing.repository import BillingRepository
 from src.modules.billing.runtime_config import resolve_yookassa_runtime_config
 from src.modules.billing.schemas import UsageOut
@@ -20,6 +24,8 @@ from src.modules.billing.token_wallet import (
 )
 from src.modules.billing.token_wallet_repository import TokenWalletRepository
 from src.modules.files import storage
+
+logger = logging.getLogger(__name__)
 
 
 class BillingOperationError(BillingModuleError):
@@ -456,13 +462,15 @@ class BillingService:
         pre_notice_window = timedelta(hours=max(1, int(settings.BILLING_PRE_EXPIRY_NOTICE_HOURS)))
         grace_delta = timedelta(days=max(1, int(settings.BILLING_GRACE_DAYS)))
         purge_delta = timedelta(days=max(1, int(settings.BILLING_PURGE_AFTER_END_DAYS)))
+        reminder_delta = timedelta(days=max(1, int(settings.BILLING_POST_EXPIRY_REMINDER_DAYS)))
 
         stats = {
             "pre_expiry_notifications": 0,
             "post_expiry_notifications": 0,
             "downgraded_orgs": 0,
-            "purged_orgs": 0,
+            "trimmed_orgs": 0,
         }
+        orgs_to_trim: list[uuid.UUID] = []
 
         async with UnitOfWork() as uow:
             repo = BillingRepository(uow.session)
@@ -514,19 +522,28 @@ class BillingService:
                         data_purge_at=purge_at,
                     )
 
-                if is_paid_plan and period_end <= now_utc and sub.post_expiry_notified_at is None:
+                if is_paid_plan and should_send_post_expiry_notice(
+                    now_utc=now_utc,
+                    period_end=period_end,
+                    grace_end=grace_end,
+                    last_sent_at=sub.post_expiry_notified_at,
+                    reminder_delta=reminder_delta,
+                ):
+                    days_left = max(0, int((grace_end - now_utc).total_seconds() // 86400))
                     created = await self._create_billing_notification(
                         repo=repo,
                         org_id=sub.org_id,
                         title="Подписка завершена",
                         body=(
                             "Подписка завершилась. "
-                            f"Льготный период для оплаты: {int(settings.BILLING_GRACE_DAYS)} дней."
+                            f"Льготный период для оплаты: {int(settings.BILLING_GRACE_DAYS)} дней. "
+                            f"До автоснижения и очистки до лимитов free осталось примерно {days_left} дн."
                         ),
                         meta={
                             "kind": "subscription_post_expiry",
                             "period_end": period_end.isoformat(),
                             "grace_period_end": grace_end.isoformat(),
+                            "days_left": days_left,
                         },
                     )
                     if created > 0:
@@ -543,11 +560,17 @@ class BillingService:
                     stats["downgraded_orgs"] += 1
 
                 if sub.status == SubscriptionStatus.CANCELLED and sub.data_purged_at is None and now_utc >= purge_at:
-                    await self._purge_org_data(repo=repo, org_id=sub.org_id)
-                    sub.data_purged_at = now_utc
-                    stats["purged_orgs"] += 1
+                    orgs_to_trim.append(sub.org_id)
 
             await uow.commit()
+
+        for org_id in orgs_to_trim:
+            try:
+                await self._trim_org_to_free_limits(org_id=org_id)
+                await self._mark_trim_completed(org_id=org_id, completed_at=now_utc)
+                stats["trimmed_orgs"] += 1
+            except (SQLAlchemyError, BotoCoreError, ClientError, OSError, RuntimeError, ValueError):
+                logger.exception("billing_trim_to_free_failed", extra={"org_id": str(org_id)})
 
         return stats
 
@@ -560,21 +583,133 @@ class BillingService:
         body: str,
         meta: dict,
     ) -> int:
-        recipients = await repo.get_notification_recipient_ids(org_id=org_id)
-        return await repo.create_in_app_notifications(
+        recipients = await repo.get_notification_recipients_with_email(org_id=org_id)
+        created = await repo.create_in_app_notifications(
             org_id=org_id,
-            user_ids=recipients,
+            user_ids=[user_id for user_id, _email in recipients],
             title=title,
             body=body,
             meta=meta,
         )
+        # Avoid Celery autodiscovery import cycle: notifications.tasks -> auth -> org -> billing.
+        from src.modules.notifications.tasks import send_email_notification
 
-    async def _purge_org_data(self, *, repo: BillingRepository, org_id: uuid.UUID) -> None:
-        files = await repo.list_files_for_org(org_id=org_id)
-        for f in files:
+        for _user_id, email in recipients:
             try:
-                storage.delete_file(f.s3_key, f.s3_bucket)
-            except (ClientError, BotoCoreError):
-                # Хранилище не должно блокировать очистку SQL-данных.
-                continue
-        await repo.delete_org_business_data(org_id=org_id)
+                send_email_notification.delay(
+                    to_email=email,
+                    subject=title,
+                    body=body,
+                    kind="billing_lifecycle",
+                )
+            except (KombuError, OperationalError, OSError):
+                logger.exception(
+                    "Failed to enqueue billing lifecycle email",
+                    extra={"org_id": str(org_id), "to": email},
+                )
+        return created
+
+    async def _resolve_free_plan_limits(self, *, repo: BillingRepository) -> FreePlanLimits:
+        free_plan = await repo.get_active_plan_by_name(name="free")
+        max_tables = int(getattr(free_plan, "max_tables", 10) or 10)
+        max_records = int(getattr(free_plan, "max_records", 10_000) or 10_000)
+        max_storage_mb = int(getattr(free_plan, "max_storage_mb", 500) or 500)
+        return FreePlanLimits(
+            max_tables=max_tables,
+            max_records=max_records,
+            max_storage_bytes=max_storage_mb * 1024 * 1024,
+        )
+
+    async def _trim_org_to_free_limits(self, *, org_id: uuid.UUID) -> None:
+        batch_size = max(1, int(getattr(settings, "BILLING_CLEANUP_BATCH_SIZE", 100) or 100))
+
+        async with UnitOfWork() as uow:
+            repo = BillingRepository(uow.session)
+            limits = await self._resolve_free_plan_limits(repo=repo)
+            await uow.commit()
+
+        await self._trim_tables(org_id=org_id, limit=limits.max_tables, batch_size=batch_size)
+        await self._trim_records(org_id=org_id, limit=limits.max_records, batch_size=batch_size)
+        await self._trim_files(org_id=org_id, limit_bytes=limits.max_storage_bytes, batch_size=batch_size)
+
+    async def _mark_trim_completed(self, *, org_id: uuid.UUID, completed_at: datetime) -> None:
+        async with UnitOfWork() as uow:
+            repo = BillingRepository(uow.session)
+            sub = await repo.get_subscription(org_id=org_id)
+            if sub is not None:
+                sub.data_purged_at = completed_at
+            await uow.commit()
+
+    async def _trim_tables(self, *, org_id: uuid.UUID, limit: int, batch_size: int) -> None:
+        while True:
+            async with UnitOfWork() as uow:
+                repo = BillingRepository(uow.session)
+                total = await repo.count_tables_for_org(org_id=org_id)
+                excess = max(0, total - max(0, int(limit)))
+                if excess <= 0:
+                    await uow.commit()
+                    return
+                tables = await repo.list_oldest_tables_for_org(org_id=org_id, limit=min(batch_size, excess))
+                deleted = await repo.delete_tables_by_ids(table_ids=[table.id for table in tables])
+                await uow.commit()
+            if deleted <= 0:
+                return
+
+    async def _trim_records(self, *, org_id: uuid.UUID, limit: int, batch_size: int) -> None:
+        while True:
+            async with UnitOfWork() as uow:
+                repo = BillingRepository(uow.session)
+                total = await repo.count_records_for_org(org_id=org_id)
+                excess = max(0, total - max(0, int(limit)))
+                if excess <= 0:
+                    await uow.commit()
+                    return
+                records = await repo.list_oldest_records_for_org(org_id=org_id, limit=min(batch_size, excess))
+                deleted = await repo.delete_records_by_ids(record_ids=[record.id for record in records])
+                await uow.commit()
+            if deleted <= 0:
+                return
+
+    async def _trim_files(self, *, org_id: uuid.UUID, limit_bytes: int, batch_size: int) -> None:
+        while True:
+            async with UnitOfWork() as uow:
+                repo = BillingRepository(uow.session)
+                total_bytes = await repo.sum_file_bytes_for_org(org_id=org_id)
+                if total_bytes <= max(0, int(limit_bytes)):
+                    await repo.upsert_storage_usage_bytes(org_id=org_id, used_bytes=total_bytes)
+                    await uow.commit()
+                    return
+
+                files = await repo.list_oldest_files_for_org(org_id=org_id, limit=batch_size)
+                if not files:
+                    await repo.upsert_storage_usage_bytes(org_id=org_id, used_bytes=total_bytes)
+                    await uow.commit()
+                    return
+
+                file_ids = [file_obj.id for file_obj in files]
+                versions = await repo.list_file_versions_for_file_ids(file_ids=file_ids)
+                for version in versions:
+                    if version.s3_bucket and version.s3_key:
+                        try:
+                            storage.delete_file(version.s3_key, version.s3_bucket)
+                        except (ClientError, BotoCoreError):
+                            logger.warning(
+                                "billing_cleanup_failed_to_delete_file_version_from_storage",
+                                extra={"org_id": str(org_id), "file_id": str(version.file_id), "key": version.s3_key},
+                            )
+
+                for file_obj in files:
+                    if getattr(file_obj, "s3_bucket", None) and getattr(file_obj, "s3_key", None):
+                        try:
+                            storage.delete_file(file_obj.s3_key, file_obj.s3_bucket)
+                        except (ClientError, BotoCoreError):
+                            logger.warning(
+                                "billing_cleanup_failed_to_delete_file_from_storage",
+                                extra={"org_id": str(org_id), "file_id": str(file_obj.id), "key": file_obj.s3_key},
+                            )
+
+                await repo.delete_file_versions_by_ids(version_ids=[version.id for version in versions])
+                await repo.delete_files_by_ids(file_ids=file_ids)
+                remaining = await repo.sum_file_bytes_for_org(org_id=org_id)
+                await repo.upsert_storage_usage_bytes(org_id=org_id, used_bytes=remaining)
+                await uow.commit()

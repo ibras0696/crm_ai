@@ -7,7 +7,9 @@ from sqlalchemy import delete, func, select
 from src.common.enums import NotificationStatus, NotificationType, PlanTier, SubscriptionStatus, UserRole
 from src.modules.ai.models import AIChatMessage, AIChatSession, AIUsageLog
 from src.modules.audit.models import AuditLog
+from src.modules.auth.models import User
 from src.modules.billing.models import Plan, TokenBalance, TokenPurchase
+from src.modules.docs.models import FileVersion, OrgStorageUsage
 from src.modules.files.models import File
 from src.modules.knowledge.models import KBPage
 from src.modules.notifications.models import Notification
@@ -132,6 +134,23 @@ class BillingSyncRepository:
             row[0] for row in self.session.execute(select(Membership.user_id).where(Membership.org_id == org_id)).all()
         ]
 
+    def get_notification_recipients_with_email(self, *, org_id: uuid.UUID) -> list[tuple[uuid.UUID, str]]:
+        rows = self.session.execute(
+            select(Membership.user_id, User.email)
+            .join(User, User.id == Membership.user_id)
+            .where(
+                Membership.org_id == org_id,
+                Membership.role.in_([UserRole.OWNER, UserRole.ADMIN]),
+            )
+        ).all()
+        if not rows:
+            rows = self.session.execute(
+                select(Membership.user_id, User.email)
+                .join(User, User.id == Membership.user_id)
+                .where(Membership.org_id == org_id)
+            ).all()
+        return [(user_id, str(email or "").strip()) for user_id, email in rows if str(email or "").strip()]
+
     def add_in_app_notification(
         self,
         *,
@@ -188,6 +207,109 @@ class BillingSyncRepository:
 
     def list_files_by_org(self, *, org_id: uuid.UUID) -> list[File]:
         return list(self.session.execute(select(File).where(File.org_id == org_id)).scalars().all())
+
+    def get_active_plan_by_name(self, *, name: str) -> Plan | None:
+        return self.session.execute(
+            select(Plan).where(Plan.name == name, Plan.is_active.is_(True)).limit(1)
+        ).scalar_one_or_none()
+
+    def count_tables_for_org(self, *, org_id: uuid.UUID) -> int:
+        return int(
+            self.session.execute(select(func.count()).select_from(Table).where(Table.org_id == org_id)).scalar() or 0
+        )
+
+    def count_records_for_org(self, *, org_id: uuid.UUID) -> int:
+        return int(
+            self.session.execute(select(func.count()).select_from(Record).where(Record.org_id == org_id)).scalar() or 0
+        )
+
+    def sum_file_bytes_for_org(self, *, org_id: uuid.UUID) -> int:
+        return int(
+            self.session.execute(select(func.coalesce(func.sum(File.size), 0)).where(File.org_id == org_id)).scalar()
+            or 0
+        )
+
+    def list_oldest_tables_for_org(self, *, org_id: uuid.UUID, limit: int) -> list[Table]:
+        return list(
+            self.session.execute(
+                select(Table)
+                .where(Table.org_id == org_id)
+                .order_by(Table.created_at.asc(), Table.id.asc())
+                .limit(max(1, int(limit)))
+            )
+            .scalars()
+            .all()
+        )
+
+    def list_oldest_records_for_org(self, *, org_id: uuid.UUID, limit: int) -> list[Record]:
+        return list(
+            self.session.execute(
+                select(Record)
+                .where(Record.org_id == org_id)
+                .order_by(Record.created_at.asc(), Record.id.asc())
+                .limit(max(1, int(limit)))
+            )
+            .scalars()
+            .all()
+        )
+
+    def list_oldest_files_for_org(self, *, org_id: uuid.UUID, limit: int) -> list[File]:
+        return list(
+            self.session.execute(
+                select(File)
+                .where(File.org_id == org_id)
+                .order_by(File.created_at.asc(), File.id.asc())
+                .limit(max(1, int(limit)))
+            )
+            .scalars()
+            .all()
+        )
+
+    def list_file_versions_for_file_ids(self, *, file_ids: list[uuid.UUID]) -> list[FileVersion]:
+        if not file_ids:
+            return []
+        return list(self.session.execute(select(FileVersion).where(FileVersion.file_id.in_(file_ids))).scalars().all())
+
+    def delete_tables_by_ids(self, *, table_ids: list[uuid.UUID]) -> int:
+        if not table_ids:
+            return 0
+        result = self.session.execute(delete(Table).where(Table.id.in_(table_ids)))
+        self.session.flush()
+        return int(result.rowcount or 0)
+
+    def delete_records_by_ids(self, *, record_ids: list[uuid.UUID]) -> int:
+        if not record_ids:
+            return 0
+        result = self.session.execute(delete(Record).where(Record.id.in_(record_ids)))
+        self.session.flush()
+        return int(result.rowcount or 0)
+
+    def delete_file_versions_by_ids(self, *, version_ids: list[uuid.UUID]) -> int:
+        if not version_ids:
+            return 0
+        result = self.session.execute(delete(FileVersion).where(FileVersion.id.in_(version_ids)))
+        self.session.flush()
+        return int(result.rowcount or 0)
+
+    def delete_files_by_ids(self, *, file_ids: list[uuid.UUID]) -> int:
+        if not file_ids:
+            return 0
+        result = self.session.execute(delete(File).where(File.id.in_(file_ids)))
+        self.session.flush()
+        return int(result.rowcount or 0)
+
+    def get_storage_usage_row(self, *, org_id: uuid.UUID) -> OrgStorageUsage | None:
+        return self.session.execute(
+            select(OrgStorageUsage).where(OrgStorageUsage.org_id == org_id).limit(1)
+        ).scalar_one_or_none()
+
+    def upsert_storage_usage_bytes(self, *, org_id: uuid.UUID, used_bytes: int) -> None:
+        usage = self.get_storage_usage_row(org_id=org_id)
+        if usage is None:
+            self.session.add(OrgStorageUsage(org_id=org_id, used_bytes=max(0, int(used_bytes)), reserved_bytes=0))
+        else:
+            usage.used_bytes = max(0, int(used_bytes))
+        self.session.flush()
 
     def delete_org_data_rows(self, *, org_id: uuid.UUID) -> None:
         self.session.execute(delete(AIChatMessage).where(AIChatMessage.org_id == org_id))

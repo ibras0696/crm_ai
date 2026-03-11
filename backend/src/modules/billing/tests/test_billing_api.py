@@ -7,12 +7,15 @@ from sqlalchemy import select
 
 from src.common.enums import NotificationType, PlanTier, SubscriptionStatus
 from src.common.runtime_secret import encrypt_runtime_secret
+from src.config import settings
 from src.infrastructure.uow import UnitOfWork
-from src.modules.billing.models import BillingRuntimeSecret, BillingRuntimeSettings, TokenPurchase
+from src.modules.billing.models import BillingRuntimeSecret, BillingRuntimeSettings, Plan, TokenPurchase
 from src.modules.billing.service import BillingService
+from src.modules.files.models import File
 from src.modules.notifications.models import Notification
 from src.modules.org.models import Membership, Organization, Subscription
 from src.modules.tables.models import Table
+from src.modules.tables.records import Record
 
 
 def _headers(token: str) -> dict:
@@ -443,8 +446,10 @@ async def test_token_purchase_webhook_adds_tokens_once(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_subscription_lifecycle_grace_downgrade_and_purge(client: AsyncClient):
+async def test_subscription_lifecycle_grace_downgrade_and_trim_to_free_limits(client: AsyncClient, monkeypatch):
     token = await _register_owner(client)
+    monkeypatch.setattr(settings, "BILLING_GRACE_DAYS", 30)
+    monkeypatch.setattr(settings, "BILLING_PURGE_AFTER_END_DAYS", 30)
 
     # Ensure plans exist.
     from src.modules.billing.seed import upsert_default_plans
@@ -453,7 +458,7 @@ async def test_subscription_lifecycle_grace_downgrade_and_purge(client: AsyncCli
         await upsert_default_plans(uow.session)
         await uow.commit()
 
-    # Create one table to verify purge.
+    # Create one table to verify controlled trim does not wipe the org entirely.
     table_resp = await client.post("/api/v1/tables/", json={"name": "To be purged"}, headers=_headers(token))
     assert table_resp.status_code == 200
     assert table_resp.json()["ok"] is True
@@ -490,7 +495,7 @@ async def test_subscription_lifecycle_grace_downgrade_and_purge(client: AsyncCli
         await uow.commit()
 
     # After grace period org should be downgraded.
-    downgrade_now = ended_at + timedelta(days=8)
+    downgrade_now = ended_at + timedelta(days=int(settings.BILLING_GRACE_DAYS) + 1)
     second = await service.process_subscription_lifecycle(now=downgrade_now)
     assert second["downgraded_orgs"] >= 1
 
@@ -500,18 +505,137 @@ async def test_subscription_lifecycle_grace_downgrade_and_purge(client: AsyncCli
         assert sub.plan == PlanTier.FREE
         await uow.commit()
 
-    # After 30 days from end date, business data is purged.
-    purge_now = ended_at + timedelta(days=31)
+    # After enforcement date, org data is trimmed to free-tier limits instead of total purge.
+    purge_now = ended_at + timedelta(days=int(settings.BILLING_PURGE_AFTER_END_DAYS) + 1)
     third = await service.process_subscription_lifecycle(now=purge_now)
-    assert third["purged_orgs"] >= 1
+    assert (second["trimmed_orgs"] + third["trimmed_orgs"]) >= 1
 
     async with UnitOfWork() as uow:
         table_count = (await uow.session.execute(select(Table).where(Table.org_id == org_id))).scalars().all()
-        assert len(table_count) == 0
+        assert len(table_count) <= 10
         members = (await uow.session.execute(select(Membership).where(Membership.org_id == org_id))).scalars().all()
-        # org + memberships are still present, only business data is purged.
+        # org + memberships are still present; lifecycle only trims excess business data.
         assert len(members) >= 1
         await uow.commit()
+
+
+@pytest.mark.asyncio
+async def test_subscription_lifecycle_repeats_reminders_and_trims_excess_data(client: AsyncClient, monkeypatch):
+    token = await _register_owner(client)
+    monkeypatch.setattr(settings, "BILLING_GRACE_DAYS", 30)
+    monkeypatch.setattr(settings, "BILLING_PURGE_AFTER_END_DAYS", 30)
+    monkeypatch.setattr(settings, "BILLING_POST_EXPIRY_REMINDER_DAYS", 7)
+    monkeypatch.setattr(settings, "BILLING_CLEANUP_BATCH_SIZE", 2)
+
+    from src.modules.billing.seed import upsert_default_plans
+
+    me_org = await client.get("/api/v1/orgs/current", headers=_headers(token))
+    assert me_org.status_code == 200
+    org_id = uuid.UUID(me_org.json()["data"]["id"])
+
+    async with UnitOfWork() as uow:
+        await upsert_default_plans(uow.session)
+        free_plan = (await uow.session.execute(select(Plan).where(Plan.name == "free"))).scalar_one()
+        free_plan.max_tables = 2
+        free_plan.max_records = 3
+        free_plan.max_storage_mb = 1
+        await uow.commit()
+
+    now = datetime.now(UTC)
+    ended_at = now - timedelta(days=1)
+    table_ids: list[uuid.UUID] = []
+    async with UnitOfWork() as uow:
+        sub = (
+            await uow.session.execute(select(Subscription).where(Subscription.org_id == org_id))
+        ).scalar_one_or_none()
+        if sub is None:
+            sub = Subscription(org_id=org_id, plan=PlanTier.TEAM, status=SubscriptionStatus.ACTIVE)
+            uow.session.add(sub)
+        sub.plan = PlanTier.TEAM
+        sub.status = SubscriptionStatus.ACTIVE
+        sub.current_period_start = ended_at - timedelta(days=30)
+        sub.current_period_end = ended_at
+
+        for idx in range(4):
+            table = Table(org_id=org_id, created_by=None, name=f"Trim table {idx}")
+            uow.session.add(table)
+            await uow.session.flush()
+            table_ids.append(table.id)
+
+        for idx, table_id in enumerate(table_ids):
+            for rec_idx in range(2):
+                uow.session.add(
+                    Record(
+                        table_id=table_id,
+                        org_id=org_id,
+                        created_by=None,
+                        data={"idx": idx, "rec_idx": rec_idx},
+                    )
+                )
+
+        for file_idx in range(3):
+            uow.session.add(
+                File(
+                    org_id=org_id,
+                    uploaded_by=None,
+                    filename=f"file-{file_idx}.txt",
+                    original_name=f"file-{file_idx}.txt",
+                    content_type="text/plain",
+                    size=600_000,
+                    s3_key=f"trim-test/{file_idx}.txt",
+                    s3_bucket="test-bucket",
+                )
+            )
+        await uow.commit()
+
+    from src.modules.billing import service as billing_service_module
+    from src.modules.notifications import tasks as notification_tasks_module
+
+    sent_emails: list[dict] = []
+
+    class _DummyDelay:
+        @staticmethod
+        def delay(**kwargs):
+            sent_emails.append(kwargs)
+            return None
+
+    old_email_task = notification_tasks_module.send_email_notification
+    old_delete_file = billing_service_module.storage.delete_file
+    notification_tasks_module.send_email_notification = _DummyDelay()
+    billing_service_module.storage.delete_file = lambda *_args, **_kwargs: None
+    try:
+        service = BillingService()
+        reminder_days = [1, 8, 15, 22, 29]
+        total_post_expiry_notifications = 0
+        for day in reminder_days:
+            stats = await service.process_subscription_lifecycle(now=ended_at + timedelta(days=day))
+            total_post_expiry_notifications += int(stats["post_expiry_notifications"])
+
+        final_stats = await service.process_subscription_lifecycle(
+            now=ended_at + timedelta(days=int(settings.BILLING_PURGE_AFTER_END_DAYS) + 1)
+        )
+    finally:
+        notification_tasks_module.send_email_notification = old_email_task
+        billing_service_module.storage.delete_file = old_delete_file
+
+    assert total_post_expiry_notifications >= 4
+    assert len(sent_emails) >= 4
+    assert final_stats["downgraded_orgs"] >= 1
+    assert final_stats["trimmed_orgs"] >= 1
+
+    async with UnitOfWork() as uow:
+        remaining_tables = (
+            await uow.session.execute(select(Table).where(Table.org_id == org_id).order_by(Table.created_at.asc()))
+        ).scalars().all()
+        remaining_records = (await uow.session.execute(select(Record).where(Record.org_id == org_id))).scalars().all()
+        remaining_files = (await uow.session.execute(select(File).where(File.org_id == org_id))).scalars().all()
+        remaining_file_bytes = sum(int(file_obj.size or 0) for file_obj in remaining_files)
+        sub = (await uow.session.execute(select(Subscription).where(Subscription.org_id == org_id))).scalar_one()
+        assert sub.status == SubscriptionStatus.CANCELLED
+        assert sub.plan == PlanTier.FREE
+        assert len(remaining_tables) == 2
+        assert len(remaining_records) == 3
+        assert remaining_file_bytes <= 1 * 1024 * 1024
 
 
 @pytest.mark.asyncio

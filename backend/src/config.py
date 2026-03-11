@@ -226,9 +226,11 @@ class Settings(BaseSettings):
     YOOKASSA_SECRET_KEY: str = ""
     YOOKASSA_RETURN_URL: str = "http://localhost:5173/billing/success"
     YOOKASSA_WEBHOOK_URL: str = ""
-    BILLING_GRACE_DAYS: int = 7
+    BILLING_GRACE_DAYS: int = 30
     BILLING_PRE_EXPIRY_NOTICE_HOURS: int = 24
     BILLING_PURGE_AFTER_END_DAYS: int = 30
+    BILLING_POST_EXPIRY_REMINDER_DAYS: int = 7
+    BILLING_CLEANUP_BATCH_SIZE: int = 100
 
     # Sentry
     SENTRY_DSN: str = ""

@@ -29,7 +29,7 @@ _billing_service = BillingService()
 
 @router.get("/plans", response_model=ApiResponse[list[PlanOut]])
 async def list_plans(
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
+    _current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
 ):
     plans = await _billing_service.list_plans()
     return ApiResponse(data=[PlanOut.model_validate(p) for p in plans])
@@ -73,7 +73,7 @@ async def get_subscription(
 @router.get("/payments/{payment_id}", response_model=ApiResponse[PaymentStatusOut])
 async def get_payment_status(
     payment_id: str,
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
+    _current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
 ):
     try:
         data = await _billing_service.get_payment_status(payment_id=payment_id)
@@ -92,7 +92,7 @@ async def get_token_balance(
 
 @router.get("/tokens/packages", response_model=ApiResponse[list[TokenPackageOut]])
 async def get_token_packages(
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
+    _current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
 ):
     data = await _billing_service.list_token_packages()
     return ApiResponse(

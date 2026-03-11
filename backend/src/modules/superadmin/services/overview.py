@@ -785,19 +785,17 @@ class SuperadminOverviewService:
                 .offset(offset)
             )
             rows = (await uow.session.execute(stmt)).all()
-            result: list[dict] = []
-            for row in rows:
-                result.append(
-                    {
-                        "id": str(row.id),
-                        "name": row.name,
-                        "org_id": str(row.org_id),
-                        "columns": _safe_int(row.columns),
-                        "records": _safe_int(row.records),
-                        "created_at": row.created_at.isoformat() if row.created_at else None,
-                    },
-                )
-        return result
+            return [
+                {
+                    "id": str(row.id),
+                    "name": row.name,
+                    "org_id": str(row.org_id),
+                    "columns": _safe_int(row.columns),
+                    "records": _safe_int(row.records),
+                    "created_at": row.created_at.isoformat() if row.created_at else None,
+                }
+                for row in rows
+            ]
 
     async def ai_usage_by_org(self) -> list[dict]:
         async with UnitOfWork() as uow:

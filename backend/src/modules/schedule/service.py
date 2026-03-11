@@ -226,7 +226,7 @@ class ScheduleService:
             self._normalize_reminder_offsets(reminder_offsets_minutes)
 
     async def _ensure_users_in_org(self, *, org_id: uuid.UUID, user_ids: list[uuid.UUID]) -> None:
-        unique_ids = {uid for uid in user_ids}
+        unique_ids = set(user_ids)
         if not unique_ids:
             return
         existing = await self.repo.list_existing_org_users(org_id=org_id, user_ids=list(unique_ids))

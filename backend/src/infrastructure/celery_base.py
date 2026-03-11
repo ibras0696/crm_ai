@@ -1,6 +1,7 @@
 """Base Celery task with retry logic."""
 
 import logging
+from typing import ClassVar
 
 from celery import Task
 
@@ -11,7 +12,7 @@ class BaseTaskWithRetry(Task):
     """Base task class with automatic retry logic."""
 
     autoretry_for = (Exception,)
-    retry_kwargs = {"max_retries": 3}
+    retry_kwargs: ClassVar[dict[str, int]] = {"max_retries": 3}
     retry_backoff = True
     retry_backoff_max = 600
     retry_jitter = True

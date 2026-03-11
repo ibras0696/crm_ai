@@ -5,7 +5,7 @@ import os
 import uuid
 from contextlib import suppress
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 from urllib.parse import urlparse, urlunparse
 
 import httpx
@@ -77,12 +77,12 @@ def _inc_ai_generate_metric(status: str, file_type: str) -> None:
 
 
 class DocsServiceBase:
-    ALLOWED_CONTENT_TYPES: dict[str, FileType] = {
+    ALLOWED_CONTENT_TYPES: ClassVar[dict[str, FileType]] = {
         "text/plain": FileType.TXT,
         "application/pdf": FileType.PDF,
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document": FileType.DOCX,
     }
-    ALLOWED_EXTENSIONS: dict[str, FileType] = {
+    ALLOWED_EXTENSIONS: ClassVar[dict[str, FileType]] = {
         ".txt": FileType.TXT,
         ".pdf": FileType.PDF,
         ".docx": FileType.DOCX,

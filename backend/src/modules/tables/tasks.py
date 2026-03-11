@@ -1,7 +1,7 @@
 """Celery tasks for tables module."""
 
 import logging
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from celery import shared_task
 from sqlalchemy import text
@@ -43,7 +43,7 @@ def archive_old_records(months_old: int = 24):
 def cleanup_soft_deleted_records(days_old: int = 90):
     """Permanently delete soft-deleted records older than specified days."""
     try:
-        cutoff_date = datetime.now() - timedelta(days=days_old)
+        cutoff_date = datetime.now(UTC) - timedelta(days=days_old)
 
         with get_sync_session() as session:
             # Delete from table_records

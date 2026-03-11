@@ -236,7 +236,8 @@ async def test_folders_views_filter_and_move(client: AsyncClient):
     r2 = await client.post(
         f"/api/v1/tables/{table_id}/records/", json={"data": {col_id: "Won"}}, headers=_headers(token)
     )
-    assert r1.status_code == 200 and r2.status_code == 200
+    assert r1.status_code == 200
+    assert r2.status_code == 200
     rec2_id = r2.json()["data"]["id"]
 
     mv = await client.post(
@@ -368,8 +369,10 @@ async def test_table_and_record_limits_from_plan(client: AsyncClient):
 
     r1 = await client.post(f"/api/v1/tables/{table_id}/records/", json={"data": {"a": "1"}}, headers=_headers(token))
     r2 = await client.post(f"/api/v1/tables/{table_id}/records/", json={"data": {"a": "2"}}, headers=_headers(token))
-    assert r1.status_code == 200 and r1.json()["ok"] is True
-    assert r2.status_code == 200 and r2.json()["ok"] is True
+    assert r1.status_code == 200
+    assert r1.json()["ok"] is True
+    assert r2.status_code == 200
+    assert r2.json()["ok"] is True
 
     r3 = await client.post(f"/api/v1/tables/{table_id}/records/", json={"data": {"a": "3"}}, headers=_headers(token))
     assert r3.status_code == 200
@@ -400,7 +403,8 @@ async def test_rename_table_and_move_folder_tree(client: AsyncClient):
     token = await _register_owner(client)
 
     root = await client.post("/api/v1/tables/folders/", json={"name": "Root"}, headers=_headers(token))
-    assert root.status_code == 200 and root.json()["ok"] is True
+    assert root.status_code == 200
+    assert root.json()["ok"] is True
     root_id = root.json()["data"]["id"]
 
     child = await client.post(
@@ -408,7 +412,8 @@ async def test_rename_table_and_move_folder_tree(client: AsyncClient):
         json={"name": "Child", "parent_id": root_id},
         headers=_headers(token),
     )
-    assert child.status_code == 200 and child.json()["ok"] is True
+    assert child.status_code == 200
+    assert child.json()["ok"] is True
     child_id = child.json()["data"]["id"]
 
     table = await client.post(
@@ -416,7 +421,8 @@ async def test_rename_table_and_move_folder_tree(client: AsyncClient):
         json={"name": "Initial table", "folder_id": child_id},
         headers=_headers(token),
     )
-    assert table.status_code == 200 and table.json()["ok"] is True
+    assert table.status_code == 200
+    assert table.json()["ok"] is True
     table_id = table.json()["data"]["id"]
 
     # Table rename should work and preserve folder binding.
@@ -452,7 +458,8 @@ async def test_move_folder_to_descendant_is_rejected(client: AsyncClient):
     token = await _register_owner(client)
 
     root = await client.post("/api/v1/tables/folders/", json={"name": "Root"}, headers=_headers(token))
-    assert root.status_code == 200 and root.json()["ok"] is True
+    assert root.status_code == 200
+    assert root.json()["ok"] is True
     root_id = root.json()["data"]["id"]
 
     child = await client.post(
@@ -460,7 +467,8 @@ async def test_move_folder_to_descendant_is_rejected(client: AsyncClient):
         json={"name": "Child", "parent_id": root_id},
         headers=_headers(token),
     )
-    assert child.status_code == 200 and child.json()["ok"] is True
+    assert child.status_code == 200
+    assert child.json()["ok"] is True
     child_id = child.json()["data"]["id"]
 
     # Cannot move root under its descendant.
@@ -490,14 +498,16 @@ async def test_import_csv_respects_record_limit(client: AsyncClient):
         await uow.commit()
 
     t = await client.post("/api/v1/tables/", json={"name": "Import limit"}, headers=_headers(token))
-    assert t.status_code == 200 and t.json()["ok"] is True
+    assert t.status_code == 200
+    assert t.json()["ok"] is True
     table_id = t.json()["data"]["id"]
 
     # Already 1 record.
     created = await client.post(
         f"/api/v1/tables/{table_id}/records/", json={"data": {"a": "one"}}, headers=_headers(token)
     )
-    assert created.status_code == 200 and created.json()["ok"] is True
+    assert created.status_code == 200
+    assert created.json()["ok"] is True
 
     csv_content = "Название\nv2\nv3\n"
     imp = await client.post(

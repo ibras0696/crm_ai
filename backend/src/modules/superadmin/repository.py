@@ -176,23 +176,22 @@ class SuperadminRepository:
         total = int((await self.session.execute(count_stmt)).scalar() or 0)
         rows = (await self.session.execute(stmt.limit(limit).offset(offset))).all()
 
-        items: list[dict] = []
-        for r in rows:
-            items.append(
-                {
-                    "id": str(r.id),
-                    "org_id": str(r.org_id),
-                    "folder_id": str(r.folder_id) if r.folder_id else None,
-                    "name": r.name,
-                    "description": r.description,
-                    "icon": r.icon,
-                    "color": r.color,
-                    "is_archived": bool(r.is_archived),
-                    "created_at": r.created_at.isoformat() if r.created_at else None,
-                    "columns": int(r.columns or 0),
-                    "records": int(r.records or 0),
-                }
-            )
+        items = [
+            {
+                "id": str(r.id),
+                "org_id": str(r.org_id),
+                "folder_id": str(r.folder_id) if r.folder_id else None,
+                "name": r.name,
+                "description": r.description,
+                "icon": r.icon,
+                "color": r.color,
+                "is_archived": bool(r.is_archived),
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "columns": int(r.columns or 0),
+                "records": int(r.records or 0),
+            }
+            for r in rows
+        ]
         return items, total
 
     async def get_table_in_org(self, *, org_id: uuid.UUID, table_id: uuid.UUID) -> Table | None:
@@ -320,30 +319,29 @@ async def list_orgs_page(
     total = int((await session.execute(count_stmt)).scalar() or 0)
     rows = (await session.execute(stmt.limit(limit).offset(offset))).all()
 
-    items: list[dict] = []
-    for r in rows:
-        items.append(
-            {
-                "id": str(r.id),
-                "name": r.name,
-                "slug": r.slug,
-                "plan": r.plan.value if hasattr(r.plan, "value") else str(r.plan),
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-                "members": int(r.members or 0),
-                "tables": int(r.tables or 0),
-                "records": int(r.records or 0),
-                "subscription": (
-                    None
-                    if r.sub_status is None and r.sub_plan is None
-                    else {
-                        "plan": r.sub_plan.value if hasattr(r.sub_plan, "value") else str(r.sub_plan),
-                        "status": r.sub_status.value if hasattr(r.sub_status, "value") else str(r.sub_status),
-                        "current_period_start": r.current_period_start.isoformat() if r.current_period_start else None,
-                        "current_period_end": r.current_period_end.isoformat() if r.current_period_end else None,
-                    }
-                ),
-            }
-        )
+    items = [
+        {
+            "id": str(r.id),
+            "name": r.name,
+            "slug": r.slug,
+            "plan": r.plan.value if hasattr(r.plan, "value") else str(r.plan),
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "members": int(r.members or 0),
+            "tables": int(r.tables or 0),
+            "records": int(r.records or 0),
+            "subscription": (
+                None
+                if r.sub_status is None and r.sub_plan is None
+                else {
+                    "plan": r.sub_plan.value if hasattr(r.sub_plan, "value") else str(r.sub_plan),
+                    "status": r.sub_status.value if hasattr(r.sub_status, "value") else str(r.sub_status),
+                    "current_period_start": r.current_period_start.isoformat() if r.current_period_start else None,
+                    "current_period_end": r.current_period_end.isoformat() if r.current_period_end else None,
+                }
+            ),
+        }
+        for r in rows
+    ]
     return items, total
 
 
@@ -522,19 +520,18 @@ async def list_users_page(
                 {"org_id": str(m.org_id), "role": m.role.value if hasattr(m.role, "value") else str(m.role)}
             )
 
-    items: list[dict] = []
-    for u in users:
-        items.append(
-            {
-                "id": str(u.id),
-                "email": u.email,
-                "first_name": u.first_name,
-                "last_name": u.last_name,
-                "is_active": bool(u.is_active),
-                "created_at": u.created_at.isoformat() if u.created_at else None,
-                "orgs": memberships.get(u.id, []),
-            }
-        )
+    items = [
+        {
+            "id": str(u.id),
+            "email": u.email,
+            "first_name": u.first_name,
+            "last_name": u.last_name,
+            "is_active": bool(u.is_active),
+            "created_at": u.created_at.isoformat() if u.created_at else None,
+            "orgs": memberships.get(u.id, []),
+        }
+        for u in users
+    ]
     return items, total
 
 

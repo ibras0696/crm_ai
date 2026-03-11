@@ -357,7 +357,7 @@ class SavePDFAnnotationsResult(BaseModel):
 class ConvertDocxToHtmlRequest(BaseModel):
     """Request to convert DOCX to HTML."""
 
-    pass  # File ID is in URL
+    # File ID is in URL
 
 
 class ConvertDocxToHtmlResult(BaseModel):

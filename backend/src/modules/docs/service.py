@@ -19,15 +19,15 @@ from src.modules.docs.service_parts.folders import DocsFoldersMixin
 from src.modules.docs.storage import DEFAULT_STORAGE_PROVIDER
 
 __all__ = [
-    "AIGenerateRequestResult",
-    "check_ai_limits",
     "DEFAULT_AI_DOCUMENT_GENERATOR",
     "DEFAULT_DOC_EDITOR_PROVIDER",
     "DEFAULT_STORAGE_PROVIDER",
+    "AIGenerateRequestResult",
     "DocsService",
     "FinishUploadResult",
     "OpenDocxResult",
     "PdfSignRequestResult",
+    "check_ai_limits",
 ]
 
 

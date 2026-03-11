@@ -36,6 +36,7 @@ class DocsFilesMixin:
         user_id: uuid.UUID,
         file_id: uuid.UUID,
     ) -> None:
+        _ = user_id
         file_obj = await self.repo.get_doc_file(file_id=file_id, org_id=org_id)
         if file_obj is None:
             raise DocsModuleError(code="NOT_FOUND", message="Файл не найден", status_code=404)

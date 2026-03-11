@@ -115,7 +115,8 @@ async def test_superadmin_org_detail_and_members(client: AsyncClient):
     assert detail.status_code == 200
     d = detail.json()["data"]
     assert d["org"]["id"] == org_id
-    assert "usage" in d and d["usage"]["members"] >= 1
+    assert "usage" in d
+    assert d["usage"]["members"] >= 1
     assert "plan_limits" in d
 
     mem = await client.get(f"/api/v1/superadmin/orgs/{org_id}/members?limit=50&offset=0", headers=_h(sa))

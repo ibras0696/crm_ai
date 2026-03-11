@@ -58,16 +58,16 @@ class TableQueryService:
                 for rec in filtered:
                     cell = str(rec.data.get(col_id, "")).lower()
                     if (
-                        op == "eq"
-                        and cell == val_str
-                        or op == "contains"
-                        and val_str in cell
-                        or op == "gt"
-                        and cell > val_str
-                        or op == "lt"
-                        and cell < val_str
-                        or op == "neq"
-                        and cell != val_str
+                        (op == "eq"
+                        and cell == val_str)
+                        or (op == "contains"
+                        and val_str in cell)
+                        or (op == "gt"
+                        and cell > val_str)
+                        or (op == "lt"
+                        and cell < val_str)
+                        or (op == "neq"
+                        and cell != val_str)
                     ):
                         new_filtered.append(rec)
                 filtered = new_filtered

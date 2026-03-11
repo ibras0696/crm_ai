@@ -31,7 +31,7 @@ def _parse_dt(value: Any | None) -> datetime | None:
     if not s:
         return None
     s = s.replace(",", " ").replace("  ", " ")
-    if s.endswith("Z") or s.endswith("z"):
+    if s.endswith(("Z", "z")):
         s = s[:-1] + "+00:00"
     try:
         dt = datetime.fromisoformat(s)
@@ -48,7 +48,7 @@ def _parse_dt(value: Any | None) -> datetime | None:
         )
         for fmt in known_formats:
             try:
-                dt = datetime.strptime(s, fmt)
+                dt = datetime.strptime(s, fmt).replace(tzinfo=UTC)
                 break
             except Exception:
                 continue
@@ -548,6 +548,7 @@ async def handle_create_kb_page_action(
     user_message: str | None = None,
 ) -> dict[str, Any]:
     """Создать страницу(ы) базы знаний, включая древовидную структуру."""
+    _ = user_message
     repo = AIRepository(uow.session)
     nodes = _extract_kb_nodes(action_payload)
     if not nodes:
@@ -652,6 +653,7 @@ async def handle_edit_kb_page_action(
     user_message: str | None = None,
 ) -> dict[str, Any]:
     """Отредактировать существующую страницу базы знаний."""
+    _ = (user_id, user_message)
     repo = AIRepository(uow.session)
     page_id_raw = action_payload.get("page_id") or action_payload.get("id")
     if not page_id_raw:
@@ -667,7 +669,7 @@ async def handle_edit_kb_page_action(
         return {"action": "edit_kb_page", "ok": False, "error": "page_not_found"}
 
     updated = False
-    if "title" in action_payload and action_payload["title"]:
+    if action_payload.get("title"):
         title_str = str(action_payload["title"])[:500]
         if page.title != title_str:
             page.title = title_str

@@ -194,18 +194,17 @@ async def handle_create_dashboard_action(
         created_widgets.append(widget)
 
     await uow.session.flush()
-    preview_items: list[dict[str, Any]] = []
-    for widget in created_widgets:
-        preview_items.append(
-            {
-                "widget_id": str(widget.id),
-                "title": widget.title,
-                "widget_type": widget.widget_type,
-                "table_id": str(widget.table_id) if widget.table_id else None,
-                "config": widget.config or {},
-                "data": await build_widget_data(reports_repo, org_id, widget),
-            }
-        )
+    preview_items = [
+        {
+            "widget_id": str(widget.id),
+            "title": widget.title,
+            "widget_type": widget.widget_type,
+            "table_id": str(widget.table_id) if widget.table_id else None,
+            "config": widget.config or {},
+            "data": await build_widget_data(reports_repo, org_id, widget),
+        }
+        for widget in created_widgets
+    ]
     return {
         "action": "create_dashboard",
         "ok": True,

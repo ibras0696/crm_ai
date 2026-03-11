@@ -4,7 +4,7 @@
 `ai` не разрастался. Этот файл сохраняет стабильные пути импортов.
 """
 
-from src.modules.ai.internal.api_service import (  # noqa: F401
+from src.modules.ai.internal.api_service import (
     build_ai_status,
     build_ai_usage_by_user,
     build_chat_messages,
@@ -18,10 +18,10 @@ from src.modules.ai.internal.api_service import (  # noqa: F401
 __all__ = [
     "build_ai_status",
     "build_ai_usage_by_user",
-    "build_chat_sessions",
-    "create_chat_session",
-    "delete_chat_session",
     "build_chat_messages",
+    "build_chat_sessions",
     "build_context_estimate",
     "build_context_sources",
+    "create_chat_session",
+    "delete_chat_session",
 ]

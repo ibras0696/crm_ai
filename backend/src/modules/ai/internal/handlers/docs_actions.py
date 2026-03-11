@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from src.infrastructure.uow import UnitOfWork
 
 
-def _normalize_document_type(action_payload: dict[str, Any]) -> str:
+def _normalize_document_type(_action_payload: dict[str, Any]) -> str:
     # AI-action for documents currently supports only DOCX creation.
     return "docx"
 

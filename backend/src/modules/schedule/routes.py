@@ -130,7 +130,7 @@ async def delete_event(
 @router.post("/events/dispatch-reminders", response_model=ApiResponse[DispatchRemindersOut])
 async def dispatch_reminders(
     body: DispatchRemindersRequest,
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
     _: None = Depends(require_access(resource_type="schedule", permission="can_write")),
 ):
     async with UnitOfWork() as uow:

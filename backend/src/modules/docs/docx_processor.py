@@ -37,7 +37,7 @@ class HTMLToDocxParser(HTMLParser):
         self.list_stack: list[str] = []
         self.in_table = False
 
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+    def handle_starttag(self, tag: str, _attrs: list[tuple[str, str | None]]) -> None:
         """Handle opening HTML tags."""
         tag_lower = tag.lower()
 

@@ -118,7 +118,7 @@ async def test_e2e_ai_limits_billing_payments_flow(client: AsyncClient, monkeypa
 
     from src.modules.ai.internal import chat_controller as ai_chat_controller
 
-    async def _fake_ai_call(*args, **kwargs):
+    async def _fake_ai_call(*_args, **_kwargs):
         return {
             "choices": [
                 {
@@ -231,6 +231,7 @@ async def test_e2e_ai_limits_billing_payments_flow(client: AsyncClient, monkeypa
             )
 
         async def get(self, url: str, auth=None, headers=None):
+            _ = headers
             assert auth == ("shop-e2e-1", "secret-e2e-1")
             payment_id = url.rsplit("/", 1)[-1]
             if payment_id == "pay-e2e-token-1":
@@ -340,7 +341,7 @@ async def test_e2e_token_limit_then_addon_purchase_unblocks_ai(client: AsyncClie
 
     from src.modules.ai.internal import chat_controller as ai_chat_controller
 
-    async def _fake_ai_call(*args, **kwargs):
+    async def _fake_ai_call(*_args, **_kwargs):
         return {
             "choices": [{"message": {"content": "Привет!"}}],
             "usage": {"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
@@ -400,6 +401,7 @@ async def test_e2e_token_limit_then_addon_purchase_unblocks_ai(client: AsyncClie
             return False
 
         async def post(self, url: str, json=None, auth=None, headers=None):
+            _ = headers
             assert url == "https://api.yookassa.ru/v3/payments"
             assert auth == ("shop-e2e-token-2", "secret-e2e-token-2")
             assert (json or {}).get("metadata", {}).get("package_code") == "pack_50k"
@@ -413,6 +415,7 @@ async def test_e2e_token_limit_then_addon_purchase_unblocks_ai(client: AsyncClie
             )
 
         async def get(self, url: str, auth=None, headers=None):
+            _ = headers
             assert auth == ("shop-e2e-token-2", "secret-e2e-token-2")
             payment_id = url.rsplit("/", 1)[-1]
             if payment_id == "pay-e2e-token-unblock":

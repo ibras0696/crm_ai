@@ -62,7 +62,9 @@ async def test_superadmin_login_and_overview(client, random_email):
     payload = ov.json()
     assert payload["ok"] is True
     data = payload["data"]
-    assert "dashboard" in data and "orgs" in data and "generated_at" in data
+    assert "dashboard" in data
+    assert "orgs" in data
+    assert "generated_at" in data
     assert data["dashboard"]["totals"]["orgs"] >= 1
     assert data["dashboard"]["totals"]["users"] >= 1
     assert isinstance(data["orgs"], list)

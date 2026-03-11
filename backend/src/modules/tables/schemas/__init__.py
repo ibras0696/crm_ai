@@ -182,7 +182,11 @@ class CreateViewRequest(BaseModel):
 
 
 class FilterRequest(BaseModel):
-    # {col_id: {op: "eq"|"contains"|"gt"|"lt"|"neq", value: ...}}
+    """In-memory filtering request for table records.
+
+    `filters` shape: `{col_id: {op: "eq"|"contains"|"gt"|"lt"|"neq", value: ...}}`
+    `sorts` shape: `[{col_id: str, dir: "asc"|"desc"}]`
+    """
+
     filters: dict | None = None
-    # [{col_id: str, dir: "asc"|"desc"}]
     sorts: list[dict] | None = None

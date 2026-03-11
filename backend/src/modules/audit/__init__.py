@@ -7,7 +7,7 @@ from src.modules.audit.service import AuditService
 
 __all__ = [
     "AuditLog",
-    "AuditRepository",
     "AuditLogItem",
+    "AuditRepository",
     "AuditService",
 ]

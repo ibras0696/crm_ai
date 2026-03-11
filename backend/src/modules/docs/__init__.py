@@ -2,4 +2,4 @@
 
 from src.modules.docs.models import DocsAIGenerationJob, FileVersion, Folder, OrgStorageUsage
 
-__all__ = ["Folder", "FileVersion", "OrgStorageUsage", "DocsAIGenerationJob"]
+__all__ = ["DocsAIGenerationJob", "FileVersion", "Folder", "OrgStorageUsage"]

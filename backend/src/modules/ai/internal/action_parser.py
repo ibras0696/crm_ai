@@ -198,8 +198,7 @@ def _strip_broken_action_blob(text: str) -> str:
         return text
     tail = text[idx:]
     if '"action"' in tail or "'action'" in tail or '"crm_action"' in tail or "'crm_action'" in tail:
-        head = text[:idx].strip()
-        return head
+        return text[:idx].strip()
     return text
 
 

@@ -9,7 +9,7 @@ def test_send_invite_email_skips_when_validation_fails(monkeypatch):
         assert invite_token == "inv-token"
         return False, "already_member"
 
-    def _mock_send_email_notification_impl(*args, **kwargs):
+    def _mock_send_email_notification_impl(*_args, **_kwargs):
         sent["called"] = True
         return {"status": "sent"}
 
@@ -35,7 +35,7 @@ def test_send_invite_email_sends_when_validation_passes(monkeypatch):
         assert invite_token == "inv-token"
         return True, "ok"
 
-    def _mock_send_email_notification_impl(*args, to_email: str, subject: str, body: str, kind: str = "generic"):
+    def _mock_send_email_notification_impl(*_args, to_email: str, subject: str, body: str, kind: str = "generic"):
         sent["called"] += 1
         assert to_email == "user@example.com"
         assert "Приглашение в организацию" in subject
@@ -65,10 +65,11 @@ def test_send_email_notification_retries_on_transport_error(monkeypatch):
             pass
 
         def retry(self, exc=None):
+            _ = exc
             calls["retry"] += 1
-            return None
+            return
 
-    def _mock_send_smtp_email(**kwargs):
+    def _mock_send_smtp_email(**_kwargs):
         raise tasks.EmailSendError("smtp_down")
 
     monkeypatch.setattr(tasks, "send_smtp_email", _mock_send_smtp_email)
@@ -93,10 +94,11 @@ def test_send_email_notification_does_not_retry_on_permanent_config_error(monkey
             pass
 
         def retry(self, exc=None):
+            _ = exc
             calls["retry"] += 1
-            return None
+            return
 
-    def _mock_send_smtp_email(**kwargs):
+    def _mock_send_smtp_email(**_kwargs):
         raise tasks.EmailSendError("smtp_from_not_configured")
 
     monkeypatch.setattr(tasks, "send_smtp_email", _mock_send_smtp_email)

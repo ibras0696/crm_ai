@@ -1,4 +1,5 @@
 import uuid
+from typing import ClassVar
 
 import httpx
 import pytest
@@ -102,9 +103,9 @@ class _MockYooKassaResponse:
 
 
 class _MockYooKassaClient:
-    payments: dict[str, dict] = {}
+    payments: ClassVar[dict[str, dict]] = {}
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *_args, **_kwargs):
         pass
 
     async def __aenter__(self):
@@ -114,6 +115,7 @@ class _MockYooKassaClient:
         return False
 
     async def post(self, url: str, json=None, auth=None, headers=None):
+        _ = headers
         assert url == "https://api.yookassa.ru/v3/payments"
         assert auth == ("wallet-shop-1", "wallet-secret-1")
         package_code = (json or {}).get("metadata", {}).get("package_code") or "pack_50k"
@@ -127,6 +129,7 @@ class _MockYooKassaClient:
         )
 
     async def get(self, url: str, auth=None, headers=None):
+        _ = headers
         assert auth == ("wallet-shop-1", "wallet-secret-1")
         payment_id = url.rsplit("/", 1)[-1]
         payload = self.payments.get(payment_id)

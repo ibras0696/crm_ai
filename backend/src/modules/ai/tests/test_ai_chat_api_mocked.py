@@ -49,7 +49,7 @@ async def test_ai_chat_executes_action_with_mocked_provider(client: AsyncClient,
     old_token = settings.OPENAI_BEARER_TOKEN
     settings.OPENAI_BEARER_TOKEN = "test-token"
 
-    async def _fake_call(*args, **kwargs):
+    async def _fake_call(*_args, **_kwargs):
         return {
             "choices": [
                 {
@@ -83,7 +83,8 @@ async def test_ai_chat_executes_action_with_mocked_provider(client: AsyncClient,
     assert ar["table"]["name"] == "Mocked"
 
     chat_id = body["data"]["chat_id"]
-    assert isinstance(chat_id, str) and chat_id
+    assert isinstance(chat_id, str)
+    assert chat_id
 
     chats = await client.get("/api/v1/ai/chats", headers=_headers(token))
     assert chats.status_code == 200
@@ -122,7 +123,7 @@ async def test_ai_chat_regression_create_kb_course_persists_page(client: AsyncCl
     settings.OPENAI_BEARER_TOKEN = "test-token"
     try:
 
-        async def _fake_call(*args, **kwargs):
+        async def _fake_call(*_args, **_kwargs):
             return {
                 "choices": [
                     {
@@ -201,7 +202,7 @@ async def test_ai_chat_regression_create_table_in_middle_of_chat(client: AsyncCl
     try:
         calls = {"count": 0}
 
-        async def _fake_call(*args, **kwargs):
+        async def _fake_call(*_args, **_kwargs):
             calls["count"] += 1
             if calls["count"] == 1:
                 return {
@@ -298,7 +299,7 @@ async def test_ai_chat_regression_greeting_and_math_without_action_and_with_prom
     try:
         calls = {"count": 0}
 
-        async def _fake_call(*args, **kwargs):
+        async def _fake_call(*_args, **_kwargs):
             calls["count"] += 1
             if calls["count"] == 1:
                 return {
@@ -369,7 +370,7 @@ async def test_ai_chat_executes_action_when_model_returns_action(client: AsyncCl
     old_token = settings.OPENAI_BEARER_TOKEN
     settings.OPENAI_BEARER_TOKEN = "test-token"
 
-    async def _fake_call(*args, **kwargs):
+    async def _fake_call(*_args, **_kwargs):
         return {
             "choices": [
                 {
@@ -414,7 +415,7 @@ async def test_ai_chat_synthesizes_action_when_reply_has_no_action_block(client:
 
     calls = {"count": 0}
 
-    async def _fake_call(*args, **kwargs):
+    async def _fake_call(*_args, **_kwargs):
         calls["count"] += 1
         if calls["count"] == 1:
             return {
@@ -469,7 +470,7 @@ async def test_ai_chat_flags_claimed_execution_without_action(client: AsyncClien
 
     calls = {"count": 0}
 
-    async def _fake_call(*args, **kwargs):
+    async def _fake_call(*_args, **_kwargs):
         calls["count"] += 1
         if calls["count"] == 1:
             return {
@@ -508,7 +509,7 @@ async def test_ai_chat_accepts_continue_as_explicit_action_request(client: Async
     old_token = settings.OPENAI_BEARER_TOKEN
     settings.OPENAI_BEARER_TOKEN = "test-token"
 
-    async def _fake_call(*args, **kwargs):
+    async def _fake_call(*_args, **_kwargs):
         return {
             "choices": [
                 {
@@ -598,7 +599,7 @@ async def test_ai_chat_handles_provider_error_variants(client: AsyncClient, monk
     settings.OPENAI_BEARER_TOKEN = "test-token"
     try:
 
-        async def _bad_payload(*args, **kwargs):
+        async def _bad_payload(*_args, **_kwargs):
             return {"choices": []}
 
         monkeypatch.setattr(ai_chat_controller, "call_openai_compatible_api", _bad_payload)
@@ -612,7 +613,7 @@ async def test_ai_chat_handles_provider_error_variants(client: AsyncClient, monk
         assert bad_payload_body["ok"] is False
         assert bad_payload_body["error"]["code"] == "AI_BAD_PROVIDER_RESPONSE"
 
-        async def _unauthorized(*args, **kwargs):
+        async def _unauthorized(*_args, **_kwargs):
             request = httpx.Request("POST", "https://provider.local/chat")
             response = httpx.Response(status_code=401, request=request)
             raise httpx.HTTPStatusError("unauthorized", request=request, response=response)
@@ -628,7 +629,7 @@ async def test_ai_chat_handles_provider_error_variants(client: AsyncClient, monk
         assert unauthorized_body["ok"] is False
         assert unauthorized_body["error"]["code"] == "AI_PROVIDER_UNAUTHORIZED"
 
-        async def _provider_error(*args, **kwargs):
+        async def _provider_error(*_args, **_kwargs):
             request = httpx.Request("POST", "https://provider.local/chat")
             response = httpx.Response(status_code=500, request=request)
             raise httpx.HTTPStatusError("server error", request=request, response=response)
@@ -658,10 +659,10 @@ async def test_ai_chat_rejects_on_limit_before_provider_call(client: AsyncClient
     settings.OPENAI_BEARER_TOKEN = "test-token"
     try:
 
-        async def _deny_limit(*args, **kwargs):
+        async def _deny_limit(*_args, **_kwargs):
             return False, {"code": "AI_DAILY_LIMIT", "message": "limit reached"}
 
-        async def _provider_should_not_be_called(*args, **kwargs):
+        async def _provider_should_not_be_called(*_args, **_kwargs):
             raise AssertionError("provider should not be called when limits reject request")
 
         monkeypatch.setattr(ai_chat_controller, "check_ai_limits", _deny_limit)
@@ -733,7 +734,7 @@ async def test_ai_chat_prechecks_table_limit_by_ui_intent(client: AsyncClient, m
             uow.session.add(Table(org_id=membership.org_id, created_by=me.id, name="Taken", is_archived=False))
             await uow.commit()
 
-        async def _provider_should_not_be_called(*args, **kwargs):
+        async def _provider_should_not_be_called(*_args, **_kwargs):
             raise AssertionError("provider should not be called when table limit reached by precheck")
 
         monkeypatch.setattr(ai_chat_controller, "call_openai_compatible_api", _provider_should_not_be_called)
@@ -815,7 +816,7 @@ async def test_ai_chat_prechecks_kb_limit_by_ui_intent(client: AsyncClient, monk
             )
             await uow.commit()
 
-        async def _provider_should_not_be_called(*args, **kwargs):
+        async def _provider_should_not_be_called(*_args, **_kwargs):
             raise AssertionError("provider should not be called when kb limit reached by precheck")
 
         monkeypatch.setattr(ai_chat_controller, "call_openai_compatible_api", _provider_should_not_be_called)
@@ -847,13 +848,14 @@ async def test_ai_chat_create_document_via_ui_intent_fallback(client: AsyncClien
     old_token = settings.OPENAI_BEARER_TOKEN
     settings.OPENAI_BEARER_TOKEN = "test-token"
 
-    async def _fake_call(*args, **kwargs):
+    async def _fake_call(*_args, **_kwargs):
         return {
             "choices": [{"message": {"content": "Подготовлю документ и сохраню его в документах."}}],
             "usage": {"prompt_tokens": 10, "completion_tokens": 15, "total_tokens": 25},
         }
 
     async def _fake_handler(uow, org_id, user_id, action_payload, user_message=None):
+        _ = (uow, org_id, user_id, user_message)
         return {
             "action": "create_document",
             "ok": True,
@@ -976,7 +978,7 @@ async def test_ai_chat_uses_request_id_idempotency_for_token_spend(client: Async
             )
             await uow.commit()
 
-        async def _fake_call(*args, **kwargs):
+        async def _fake_call(*_args, **_kwargs):
             return {
                 "choices": [{"message": {"content": "Готово"}}],
                 "usage": {"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12},
@@ -1035,7 +1037,7 @@ async def test_ai_chat_idempotent_replay_does_not_duplicate_usage_logs_or_messag
     settings.OPENAI_BEARER_TOKEN = "test-token"
     try:
 
-        async def _fake_call(*args, **kwargs):
+        async def _fake_call(*_args, **_kwargs):
             return {
                 "choices": [{"message": {"content": "Готово"}}],
                 "usage": {"prompt_tokens": 5, "completion_tokens": 7, "total_tokens": 12},
@@ -1116,6 +1118,7 @@ async def test_ai_chat_uses_runtime_provider_base_url_and_token_override(client:
         captured: dict[str, str] = {}
 
         async def _fake_call(base_url, bearer_token, model, messages, max_tokens=2000, temperature=0.3):
+            _ = (model, messages, max_tokens, temperature)
             captured["base_url"] = base_url
             captured["bearer_token"] = bearer_token
             return {

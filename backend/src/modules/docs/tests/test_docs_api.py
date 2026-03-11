@@ -354,7 +354,7 @@ async def test_docs_folder_tree_upload_scanning_and_usage(client: AsyncClient, m
     )
     monkeypatch.setattr(
         "src.modules.docs.service.DEFAULT_STORAGE_PROVIDER.generate_presigned_get_url",
-        lambda **kwargs: "https://example.local/get",
+        lambda **_kwargs: "https://example.local/get",
     )
 
     root = await client.post("/api/v1/docs/folders", json={"name": "Root"}, headers=_headers(token))

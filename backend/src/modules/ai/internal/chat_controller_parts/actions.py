@@ -341,6 +341,7 @@ def _build_dashboard_fallback_action(
     assistant_reply: str,
 ) -> dict | None:
     """Собрать fallback-action для дашборда, если модель не прислала crm_action."""
+    _ = user_message
     if (ui_intent or "").strip().lower() != "create_dashboard":
         return None
 

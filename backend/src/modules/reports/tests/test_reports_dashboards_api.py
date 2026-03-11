@@ -123,7 +123,8 @@ async def test_reports_not_found_and_validation(client: AsyncClient):
 
     # Invalid widget type / config validation.
     d = await client.post("/api/v1/reports/dashboards", json={"name": "V"}, headers=_headers(token))
-    assert d.status_code == 200 and d.json()["ok"] is True
+    assert d.status_code == 200
+    assert d.json()["ok"] is True
     dash_id = d.json()["data"]["id"]
 
     bad_widget_type = await client.post(
@@ -197,7 +198,8 @@ async def test_reports_employee_read_only_access(client: AsyncClient):
         json={"name": "Owner dashboard", "description": "for read"},
         headers=_headers(owner_token),
     )
-    assert d.status_code == 200 and d.json()["ok"] is True
+    assert d.status_code == 200
+    assert d.json()["ok"] is True
     dash_id = d.json()["data"]["id"]
 
     # Employee can read dashboards list and dashboard data.

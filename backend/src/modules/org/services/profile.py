@@ -43,17 +43,15 @@ class OrgProfileService:
         async with UnitOfWork() as uow:
             member_repo = MembershipRepository(uow.session)
             memberships = await member_repo.get_user_memberships(user_id)
-            result = []
-            for membership in memberships:
-                result.append(
-                    {
-                        "org_id": membership.org_id,
-                        "org_name": membership.organization.name,
-                        "org_slug": membership.organization.slug,
-                        "role": membership.role.value,
-                    }
-                )
-            return result
+            return [
+                {
+                    "org_id": membership.org_id,
+                    "org_name": membership.organization.name,
+                    "org_slug": membership.organization.slug,
+                    "role": membership.role.value,
+                }
+                for membership in memberships
+            ]
 
     async def delete_org(self, org_id: uuid.UUID) -> None:
         async with UnitOfWork() as uow:

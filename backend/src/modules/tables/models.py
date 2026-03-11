@@ -1,4 +1,5 @@
 import uuid
+from typing import ClassVar
 
 from sqlalchemy import Boolean, ForeignKey, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -40,7 +41,21 @@ class FieldType:
     RELATION = "relation"
     FORMULA = "formula"
 
-    ALL = [TEXT, NUMBER, DATE, DATETIME, BOOLEAN, SELECT, MULTI_SELECT, URL, EMAIL, PHONE, FILE, RELATION, FORMULA]
+    ALL: ClassVar[list[str]] = [
+        TEXT,
+        NUMBER,
+        DATE,
+        DATETIME,
+        BOOLEAN,
+        SELECT,
+        MULTI_SELECT,
+        URL,
+        EMAIL,
+        PHONE,
+        FILE,
+        RELATION,
+        FORMULA,
+    ]
 
 
 class Table(BaseDBModel):

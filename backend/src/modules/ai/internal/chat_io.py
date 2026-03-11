@@ -132,6 +132,7 @@ async def call_openai_compatible_api(
             if attempt >= attempts:
                 raise
             await asyncio.sleep(min(2.0, 0.5 * attempt))
+    return None
 
 
 def resolve_timeweb_agent_id(base_url: str) -> str | None:
@@ -195,3 +196,4 @@ async def call_timeweb_native_api(
             if attempt >= attempts:
                 raise
             await asyncio.sleep(min(2.0, 0.5 * attempt))
+    return None

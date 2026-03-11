@@ -143,7 +143,7 @@ async def test_billing_payment_status_uses_runtime_yookassa_config(client: Async
             return self._payload
 
     class _MockAsyncClient:
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *_args, **_kwargs):
             pass
 
         async def __aenter__(self):
@@ -153,6 +153,7 @@ async def test_billing_payment_status_uses_runtime_yookassa_config(client: Async
             return False
 
         async def get(self, url: str, auth=None, headers=None):
+            _ = headers
             assert url == "https://api.yookassa.ru/v3/payments/pay-status-1"
             assert auth == ("runtime-shop-status", "runtime-secret-status")
             return _MockResponse(
@@ -221,7 +222,7 @@ async def test_billing_create_payment_uses_runtime_yookassa_config(client: Async
             return self._payload
 
     class _MockAsyncClient:
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *_args, **_kwargs):
             pass
 
         async def __aenter__(self):
@@ -301,7 +302,7 @@ async def test_purchase_tokens_creates_yookassa_payment_link(client: AsyncClient
             return self._payload
 
     class _MockAsyncClient:
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *_args, **_kwargs):
             pass
 
         async def __aenter__(self):
@@ -392,7 +393,7 @@ async def test_token_purchase_webhook_adds_tokens_once(client: AsyncClient):
             return self._payload
 
     class _MockAsyncClient:
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *_args, **_kwargs):
             pass
 
         async def __aenter__(self):
@@ -402,6 +403,7 @@ async def test_token_purchase_webhook_adds_tokens_once(client: AsyncClient):
             return False
 
         async def get(self, url: str, auth=None, headers=None):
+            _ = headers
             assert url == f"https://api.yookassa.ru/v3/payments/{payment_id}"
             assert auth == ("runtime-shop-webhook", "runtime-secret-webhook")
             return _MockResponse(
@@ -597,7 +599,7 @@ async def test_subscription_lifecycle_repeats_reminders_and_trims_excess_data(cl
         @staticmethod
         def delay(**kwargs):
             sent_emails.append(kwargs)
-            return None
+            return
 
     old_email_task = notification_tasks_module.send_email_notification
     old_delete_file = billing_service_module.storage.delete_file
@@ -678,7 +680,7 @@ async def test_billing_webhook_upgrades_subscription_and_org_plan(client: AsyncC
             return self._payload
 
     class _MockAsyncClient:
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *_args, **_kwargs):
             pass
 
         async def __aenter__(self):
@@ -688,6 +690,7 @@ async def test_billing_webhook_upgrades_subscription_and_org_plan(client: AsyncC
             return False
 
         async def get(self, url: str, auth=None, headers=None):
+            _ = headers
             assert url == f"https://api.yookassa.ru/v3/payments/{webhook_payload['object']['id']}"
             assert auth == ("runtime-shop-webhook", "runtime-secret-webhook")
             return _MockResponse(
@@ -763,7 +766,7 @@ async def test_billing_cancel_subscription_downgrades_to_free(client: AsyncClien
             return self._payload
 
     class _MockAsyncClient:
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *_args, **_kwargs):
             pass
 
         async def __aenter__(self):
@@ -773,6 +776,7 @@ async def test_billing_cancel_subscription_downgrades_to_free(client: AsyncClien
             return False
 
         async def get(self, url: str, auth=None, headers=None):
+            _ = headers
             assert url == f"https://api.yookassa.ru/v3/payments/{payment_id}"
             assert auth == ("runtime-shop-webhook", "runtime-secret-webhook")
             return _MockResponse(
@@ -845,7 +849,7 @@ async def test_billing_webhook_rejects_unconfirmed_payment(client: AsyncClient):
             return self._payload
 
     class _MockAsyncClient:
-        def __init__(self, *args, **kwargs):
+        def __init__(self, *_args, **_kwargs):
             pass
 
         async def __aenter__(self):
@@ -855,6 +859,7 @@ async def test_billing_webhook_rejects_unconfirmed_payment(client: AsyncClient):
             return False
 
         async def get(self, url: str, auth=None, headers=None):
+            _ = headers
             assert url == f"https://api.yookassa.ru/v3/payments/{payment_id}"
             assert auth == ("runtime-shop-webhook", "runtime-secret-webhook")
             return _MockResponse(

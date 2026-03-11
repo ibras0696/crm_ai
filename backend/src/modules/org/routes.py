@@ -61,20 +61,19 @@ async def switch_org(body: SwitchOrgRequest, current_user: CurrentUser = Depends
 @router.get("/members", response_model=ApiResponse[list[MemberResponse]])
 async def list_members(current_user: CurrentUser = Depends(require_org)):
     memberships = await _org_service.get_members(current_user.org_id)
-    result = []
-    for m in memberships:
-        result.append(
-            MemberResponse(
-                id=m.id,
-                user_id=m.user_id,
-                org_id=m.org_id,
-                role=m.role,
-                user_email=m.user.email if m.user else None,
-                user_first_name=m.user.first_name if m.user else None,
-                user_last_name=m.user.last_name if m.user else None,
-                created_at=m.created_at,
-            )
+    result = [
+        MemberResponse(
+            id=m.id,
+            user_id=m.user_id,
+            org_id=m.org_id,
+            role=m.role,
+            user_email=m.user.email if m.user else None,
+            user_first_name=m.user.first_name if m.user else None,
+            user_last_name=m.user.last_name if m.user else None,
+            created_at=m.created_at,
         )
+        for m in memberships
+    ]
     return ApiResponse(data=result)
 
 

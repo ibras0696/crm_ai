@@ -6,8 +6,8 @@ from src.modules.auth.services.registration import AuthRegistrationService
 from src.modules.auth.services.session import AuthSessionService
 
 __all__ = [
+    "AuthPasswordService",
+    "AuthProfileService",
     "AuthRegistrationService",
     "AuthSessionService",
-    "AuthProfileService",
-    "AuthPasswordService",
 ]

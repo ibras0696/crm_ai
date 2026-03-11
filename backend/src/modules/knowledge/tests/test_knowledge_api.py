@@ -212,7 +212,8 @@ async def test_move_page_to_another_parent_and_prevent_cycles(client: AsyncClien
 
     root_a = await client.post("/api/v1/knowledge/pages", json={"title": "A"}, headers=_headers(token))
     root_b = await client.post("/api/v1/knowledge/pages", json={"title": "B"}, headers=_headers(token))
-    assert root_a.status_code == 200 and root_b.status_code == 200
+    assert root_a.status_code == 200
+    assert root_b.status_code == 200
     root_a_id = root_a.json()["data"]["id"]
     root_b_id = root_b.json()["data"]["id"]
 

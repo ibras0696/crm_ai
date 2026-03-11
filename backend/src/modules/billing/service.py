@@ -164,8 +164,7 @@ class BillingService:
 
     async def get_token_balance(self, *, org_id: uuid.UUID) -> dict:
         async with UnitOfWork() as uow:
-            wallet = await get_token_balance_view(uow.session, org_id=org_id)
-        return wallet
+            return await get_token_balance_view(uow.session, org_id=org_id)
 
     async def list_token_packages(self) -> list[dict]:
         async with UnitOfWork() as uow:

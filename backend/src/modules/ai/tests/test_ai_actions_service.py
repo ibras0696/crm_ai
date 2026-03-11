@@ -151,7 +151,7 @@ async def test_ai_service_can_create_document_job(client: AsyncClient, monkeypat
     from src.modules.docs.service import DocsService
     from src.modules.org.models import Membership
 
-    async def _fake_request_ai_generate(self, **kwargs):
+    async def _fake_request_ai_generate(_self, **kwargs):
         return SimpleNamespace(
             job=SimpleNamespace(
                 id=uuid.uuid4(),

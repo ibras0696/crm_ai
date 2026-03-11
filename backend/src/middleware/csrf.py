@@ -2,6 +2,7 @@
 
 import logging
 import secrets
+from typing import ClassVar
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 class CSRFMiddleware(BaseHTTPMiddleware):
     """CSRF protection for state-changing requests."""
 
-    SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
+    SAFE_METHODS: ClassVar[set[str]] = {"GET", "HEAD", "OPTIONS", "TRACE"}
     CSRF_COOKIE_NAME = "csrf_token"
     CSRF_HEADER_NAME = "X-CSRF-Token"
 

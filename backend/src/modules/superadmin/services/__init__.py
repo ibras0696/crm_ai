@@ -6,8 +6,8 @@ from src.modules.superadmin.services.overview import SuperadminOverviewService
 from src.modules.superadmin.services.tables import SuperadminTablesService
 
 __all__ = [
-    "SuperadminAuthService",
     "SuperadminAIConfigService",
+    "SuperadminAuthService",
     "SuperadminBillingService",
     "SuperadminOrgsService",
     "SuperadminOverviewService",

@@ -135,7 +135,7 @@ jobs:
 
       - name: Lint (ruff)
         working-directory: backend
-        run: ruff check src/ --select E,W,F --ignore E501
+        run: ruff check src/ tests/
 
       - name: Guard broad except (modules)
         working-directory: backend
@@ -205,6 +205,10 @@ jobs:
       - name: Type check
         working-directory: frontend
         run: npx tsc --noEmit
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
 
       - name: Build
         working-directory: frontend

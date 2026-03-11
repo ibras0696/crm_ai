@@ -10,8 +10,29 @@ src = ["src", "tests"]
 extend-exclude = ["alembic/versions"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "UP", "B", "A", "SIM", "TCH"]
-ignore = ["A003", "B008"]
+select = [
+  "E",
+  "F",
+  "W",
+  "I",
+  "N",
+  "UP",
+  "B",
+  "A",
+  "SIM",
+  "C4",
+  "RET",
+  "ARG",
+  "RUF",
+  "TCH",
+  "PIE",
+  "PT",
+  "ASYNC",
+  "DTZ",
+  "PERF",
+  "ERA",
+]
+ignore = ["A003", "B008", "RUF001", "RUF002", "RUF003"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]

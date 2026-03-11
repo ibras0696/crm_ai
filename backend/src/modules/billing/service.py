@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 import httpx
 from botocore.exceptions import BotoCoreError, ClientError
 
-from src.common.enums import NotificationStatus, NotificationType, PlanTier, SubscriptionStatus
+from src.common.enums import PlanTier, SubscriptionStatus
 from src.config import settings
 from src.infrastructure.uow import UnitOfWork
 from src.modules.billing.errors import BillingModuleError
@@ -20,7 +20,6 @@ from src.modules.billing.token_wallet import (
 )
 from src.modules.billing.token_wallet_repository import TokenWalletRepository
 from src.modules.files import storage
-from src.modules.notifications.models import Notification
 
 
 class BillingOperationError(BillingModuleError):
@@ -433,44 +432,19 @@ class BillingService:
 
         async with UnitOfWork() as uow:
             repo = BillingRepository(uow.session)
-            sub = await repo.upsert_subscription(
+            await repo.activate_subscription(
                 org_id=org_uuid,
                 plan=plan_tier,
-                status=SubscriptionStatus.ACTIVE,
                 current_period_start=now,
                 current_period_end=period_end,
                 external_id=payment_id,
             )
-            sub.grace_period_end = None
-            sub.data_purge_at = None
-            sub.pre_expiry_notified_at = None
-            sub.post_expiry_notified_at = None
-            sub.downgraded_at = None
-            sub.data_purged_at = None
-            org = await repo.get_org(org_id=org_uuid)
-            if org:
-                org.plan = plan_tier
             await uow.commit()
 
     async def cancel_subscription(self, *, org_id: uuid.UUID) -> dict:
         async with UnitOfWork() as uow:
             repo = BillingRepository(uow.session)
-            sub = await repo.upsert_subscription(
-                org_id=org_id,
-                plan=PlanTier.FREE,
-                status=SubscriptionStatus.CANCELLED,
-                current_period_start=None,
-                current_period_end=None,
-                external_id=None,
-            )
-            sub.grace_period_end = None
-            sub.data_purge_at = None
-            sub.pre_expiry_notified_at = None
-            sub.post_expiry_notified_at = None
-            sub.downgraded_at = datetime.now(UTC)
-            org = await repo.get_org(org_id=org_id)
-            if org:
-                org.plan = PlanTier.FREE
+            await repo.cancel_subscription_now(org_id=org_id, cancelled_at=datetime.now(UTC))
             await uow.commit()
         return {"plan": "free", "status": "cancelled"}
 
@@ -534,9 +508,11 @@ class BillingService:
                         stats["pre_expiry_notifications"] += created
 
                 if is_paid_plan and period_end <= now_utc and sub.status == SubscriptionStatus.ACTIVE:
-                    sub.status = SubscriptionStatus.PAST_DUE
-                    sub.grace_period_end = grace_end
-                    sub.data_purge_at = purge_at
+                    await repo.mark_subscription_past_due(
+                        sub=sub,
+                        grace_period_end=grace_end,
+                        data_purge_at=purge_at,
+                    )
 
                 if is_paid_plan and period_end <= now_utc and sub.post_expiry_notified_at is None:
                     created = await self._create_billing_notification(
@@ -558,11 +534,12 @@ class BillingService:
                         stats["post_expiry_notifications"] += created
 
                 if sub.status == SubscriptionStatus.PAST_DUE and now_utc >= grace_end and sub.downgraded_at is None:
-                    sub.status = SubscriptionStatus.CANCELLED
-                    sub.plan = PlanTier.FREE
-                    sub.downgraded_at = now_utc
-                    sub.data_purge_at = purge_at
-                    org.plan = PlanTier.FREE
+                    await repo.downgrade_subscription_to_free(
+                        sub=sub,
+                        org=org,
+                        downgraded_at=now_utc,
+                        data_purge_at=purge_at,
+                    )
                     stats["downgraded_orgs"] += 1
 
                 if sub.status == SubscriptionStatus.CANCELLED and sub.data_purged_at is None and now_utc >= purge_at:
@@ -583,26 +560,14 @@ class BillingService:
         body: str,
         meta: dict,
     ) -> int:
-        recipients = await repo.list_org_owner_admin_user_ids(org_id=org_id)
-        if not recipients:
-            recipients = await repo.list_org_member_user_ids(org_id=org_id)
-        if not recipients:
-            return 0
-
-        for user_id in recipients:
-            repo.session.add(
-                Notification(
-                    org_id=org_id,
-                    user_id=user_id,
-                    type=NotificationType.IN_APP,
-                    status=NotificationStatus.PENDING,
-                    title=title,
-                    body=body,
-                    meta=meta,
-                )
-            )
-        await repo.session.flush()
-        return len(recipients)
+        recipients = await repo.get_notification_recipient_ids(org_id=org_id)
+        return await repo.create_in_app_notifications(
+            org_id=org_id,
+            user_ids=recipients,
+            title=title,
+            body=body,
+            meta=meta,
+        )
 
     async def _purge_org_data(self, *, repo: BillingRepository, org_id: uuid.UUID) -> None:
         files = await repo.list_files_for_org(org_id=org_id)

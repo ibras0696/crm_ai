@@ -43,6 +43,7 @@ from src.modules.docs.schemas import (
 )
 from src.modules.docs.service import DocsService
 from src.modules.docs.tasks import ai_generate, pdf_stamp_sign, run_ai_generate_inline, scan_version
+from src.modules.files.storage import get_s3_client
 
 router = APIRouter(prefix="/docs", tags=["docs"])
 logger = logging.getLogger(__name__)
@@ -476,8 +477,6 @@ async def internal_download(version_id: uuid.UUID, token: str):
                 raise HTTPException(status_code=404, detail="Version not found")
         except DocsModuleError as err:
             raise HTTPException(status_code=404, detail="Version not found") from err
-
-    from src.modules.files.storage import get_s3_client
 
     s3 = get_s3_client()
     try:

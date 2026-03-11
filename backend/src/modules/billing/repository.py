@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, func, select
 
-from src.common.enums import PlanTier, SubscriptionStatus, UserRole
+from src.common.enums import NotificationStatus, NotificationType, PlanTier, SubscriptionStatus, UserRole
 from src.modules.ai.models import AIChatMessage, AIChatSession, AIUsageLog
 from src.modules.audit.models import AuditLog
 from src.modules.billing.models import Plan, TokenPackage
@@ -113,6 +113,12 @@ class BillingRepository:
         rows = (await self.session.execute(stmt)).all()
         return [row[0] for row in rows]
 
+    async def get_notification_recipient_ids(self, *, org_id: uuid.UUID) -> list[uuid.UUID]:
+        recipients = await self.list_org_owner_admin_user_ids(org_id=org_id)
+        if recipients:
+            return recipients
+        return await self.list_org_member_user_ids(org_id=org_id)
+
     async def list_files_for_org(self, *, org_id: uuid.UUID) -> list[File]:
         stmt = select(File).where(File.org_id == org_id)
         return list((await self.session.execute(stmt)).scalars().all())
@@ -147,6 +153,116 @@ class BillingRepository:
         self.session.add(sub)
         await self.session.flush()
         return sub
+
+    async def activate_subscription(
+        self,
+        *,
+        org_id: uuid.UUID,
+        plan: PlanTier,
+        current_period_start: datetime,
+        current_period_end: datetime,
+        external_id: str | None,
+    ) -> Subscription:
+        sub = await self.upsert_subscription(
+            org_id=org_id,
+            plan=plan,
+            status=SubscriptionStatus.ACTIVE,
+            current_period_start=current_period_start,
+            current_period_end=current_period_end,
+            external_id=external_id,
+        )
+        sub.grace_period_end = None
+        sub.data_purge_at = None
+        sub.pre_expiry_notified_at = None
+        sub.post_expiry_notified_at = None
+        sub.downgraded_at = None
+        sub.data_purged_at = None
+
+        org = await self.get_org(org_id=org_id)
+        if org is not None:
+            org.plan = plan
+
+        await self.session.flush()
+        return sub
+
+    async def cancel_subscription_now(self, *, org_id: uuid.UUID, cancelled_at: datetime) -> Subscription:
+        sub = await self.upsert_subscription(
+            org_id=org_id,
+            plan=PlanTier.FREE,
+            status=SubscriptionStatus.CANCELLED,
+            current_period_start=None,
+            current_period_end=None,
+            external_id=None,
+        )
+        sub.grace_period_end = None
+        sub.data_purge_at = None
+        sub.pre_expiry_notified_at = None
+        sub.post_expiry_notified_at = None
+        sub.downgraded_at = cancelled_at
+        sub.data_purged_at = None
+
+        org = await self.get_org(org_id=org_id)
+        if org is not None:
+            org.plan = PlanTier.FREE
+
+        await self.session.flush()
+        return sub
+
+    async def mark_subscription_past_due(
+        self,
+        *,
+        sub: Subscription,
+        grace_period_end: datetime,
+        data_purge_at: datetime,
+    ) -> None:
+        sub.status = SubscriptionStatus.PAST_DUE
+        sub.grace_period_end = grace_period_end
+        sub.data_purge_at = data_purge_at
+        await self.session.flush()
+
+    async def downgrade_subscription_to_free(
+        self,
+        *,
+        sub: Subscription,
+        org: Organization,
+        downgraded_at: datetime,
+        data_purge_at: datetime,
+    ) -> None:
+        sub.status = SubscriptionStatus.CANCELLED
+        sub.plan = PlanTier.FREE
+        sub.downgraded_at = downgraded_at
+        sub.data_purge_at = data_purge_at
+        org.plan = PlanTier.FREE
+        await self.session.flush()
+
+    async def create_in_app_notifications(
+        self,
+        *,
+        org_id: uuid.UUID,
+        user_ids: list[uuid.UUID],
+        title: str,
+        body: str,
+        meta: dict,
+    ) -> int:
+        if not user_ids:
+            return 0
+
+        self.session.add_all(
+            [
+                Notification(
+                    org_id=org_id,
+                    user_id=user_id,
+                    type=NotificationType.IN_APP,
+                    status=NotificationStatus.PENDING,
+                    title=title,
+                    body=body,
+                    meta=meta,
+                )
+                for user_id in user_ids
+            ]
+        )
+        await self.session.flush()
+        return len(user_ids)
 
     async def delete_org_business_data(self, *, org_id: uuid.UUID) -> None:
         await self.session.execute(delete(AIChatMessage).where(AIChatMessage.org_id == org_id))

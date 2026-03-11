@@ -6,11 +6,14 @@ import sentry_sdk
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from src.common.exceptions import BaseAppError
 from src.config import settings
+from src.infrastructure.database import async_session_factory
 from src.infrastructure.logging import setup_logging
 from src.infrastructure.metrics import setup_metrics
 from src.infrastructure.redis_client import RedisClient, ping_with_timeout
@@ -21,7 +24,10 @@ from src.middleware.error_handler import (
     http_error_handler,
     validation_error_handler,
 )
+from src.middleware.rate_limit import RateLimitMiddleware
 from src.middleware.request_size_limit import RequestSizeLimitMiddleware
+from src.middleware.security_headers import SecurityHeadersMiddleware
+from src.router import router as api_router
 
 setup_logging(debug=settings.DEBUG)
 logger = logging.getLogger(__name__)
@@ -85,14 +91,10 @@ def create_app() -> FastAPI:
 
     # Security headers (only in production — BaseHTTPMiddleware can break POST body in dev)
     if is_prod:
-        from src.middleware.security_headers import SecurityHeadersMiddleware
-
         application.add_middleware(SecurityHeadersMiddleware)
 
     # Rate limiter (only in production — BaseHTTPMiddleware can break POST body in dev)
     if settings.ENABLE_RATE_LIMIT and is_prod:
-        from src.middleware.rate_limit import RateLimitMiddleware
-
         rpm = int(settings.RATE_LIMIT_REQUESTS_PER_MINUTE or 120)
         application.add_middleware(RateLimitMiddleware, requests_per_minute=rpm)
 
@@ -102,8 +104,6 @@ def create_app() -> FastAPI:
     application.add_exception_handler(StarletteHTTPException, http_error_handler)
     application.add_exception_handler(Exception, generic_error_handler)
 
-    from src.router import router as api_router
-
     application.include_router(api_router)
 
     @application.get("/api/health")
@@ -112,11 +112,9 @@ def create_app() -> FastAPI:
 
         # DB check (timeout-protected)
         try:
-            from src.infrastructure.database import async_session_factory
-
             async with async_session_factory() as session:
                 await asyncio.wait_for(
-                    session.execute(__import__("sqlalchemy").text("SELECT 1")),
+                    session.execute(text("SELECT 1")),
                     timeout=float(settings.DB_HEALTH_TIMEOUT_S),
                 )
             result["services"]["db"] = "ok"
@@ -137,14 +135,10 @@ def create_app() -> FastAPI:
     @application.get("/api/readiness")
     async def readiness():
         """Readiness probe: returns 200 only when DB is reachable."""
-        from fastapi.responses import JSONResponse
-
         try:
-            from src.infrastructure.database import async_session_factory
-
             async with async_session_factory() as session:
                 await asyncio.wait_for(
-                    session.execute(__import__("sqlalchemy").text("SELECT 1")),
+                    session.execute(text("SELECT 1")),
                     timeout=float(settings.DB_HEALTH_TIMEOUT_S),
                 )
             return JSONResponse({"ready": True})

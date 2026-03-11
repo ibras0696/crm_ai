@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, func, select
 
-from src.common.enums import NotificationStatus, NotificationType, SubscriptionStatus, UserRole
+from src.common.enums import NotificationStatus, NotificationType, PlanTier, SubscriptionStatus, UserRole
 from src.modules.ai.models import AIChatMessage, AIChatSession, AIUsageLog
 from src.modules.audit.models import AuditLog
 from src.modules.billing.models import Plan, TokenBalance, TokenPurchase
@@ -154,6 +154,33 @@ class BillingSyncRepository:
         )
 
     def flush(self) -> None:
+        self.session.flush()
+
+    def mark_subscription_past_due(
+        self,
+        *,
+        sub: Subscription,
+        grace_period_end: datetime,
+        data_purge_at: datetime,
+    ) -> None:
+        sub.status = SubscriptionStatus.PAST_DUE
+        sub.grace_period_end = grace_period_end
+        sub.data_purge_at = data_purge_at
+        self.session.flush()
+
+    def downgrade_subscription_to_free(
+        self,
+        *,
+        sub: Subscription,
+        org: Organization,
+        downgraded_at: datetime,
+        data_purge_at: datetime,
+    ) -> None:
+        sub.status = SubscriptionStatus.CANCELLED
+        sub.plan = PlanTier.FREE
+        sub.downgraded_at = downgraded_at
+        sub.data_purge_at = data_purge_at
+        org.plan = PlanTier.FREE
         self.session.flush()
 
     def commit(self) -> None:

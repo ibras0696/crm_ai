@@ -37,6 +37,11 @@ class UnauthorizedError(AppError):
         super().__init__(code="UNAUTHORIZED", message=message, status_code=401)
 
 
+class BadRequestError(AppError):
+    def __init__(self, message: str = "Bad request", field: str | None = None):
+        super().__init__(code="BAD_REQUEST", message=message, status_code=400, field=field)
+
+
 class ValidationError(AppError):
     def __init__(self, message: str = "Validation error", field: str | None = None):
         super().__init__(code="VALIDATION_ERROR", message=message, status_code=422, field=field)

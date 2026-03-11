@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from sqlalchemy import String, and_, delete, func, or_, select
+from sqlalchemy.orm import selectinload
 
 from src.common.enums import SubscriptionStatus
 from src.modules.ai.models import AIUsageLog
@@ -198,8 +199,6 @@ class SuperadminRepository:
         """Получить таблицу с колонками, проверяя принадлежность организации."""
         stmt = select(Table).where(Table.id == table_id, Table.org_id == org_id).options()
         # TableRepository already uses selectinload, но здесь проще явно.
-        from sqlalchemy.orm import selectinload
-
         stmt = stmt.options(selectinload(Table.columns))
         return (await self.session.execute(stmt)).scalar_one_or_none()
 

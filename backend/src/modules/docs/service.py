@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 import jwt
@@ -42,6 +43,7 @@ from src.modules.docs.models import DocsAIGenerationJob, FileVersion, Folder, Or
 from src.modules.docs.rate_limit import DEFAULT_DOCS_TEXT_SAVE_RATE_LIMITER
 from src.modules.docs.repository import DocsRepository
 from src.modules.docs.storage import DEFAULT_BUCKET, DEFAULT_STORAGE_PROVIDER, StorageProvider
+from src.modules.docs.tasks import docs_delete_file_background
 from src.modules.files.models import File
 
 if TYPE_CHECKING:
@@ -230,8 +232,6 @@ class DocsService:
                     await self.repo.update_ai_generation_job(job)
         except SQLAlchemyError:
             logger.exception("docs_delete_file_ai_cleanup_failed", extra={"file_id": str(file_id)})
-
-        from src.modules.docs.tasks import docs_delete_file_background
 
         with suppress(Exception):
             docs_delete_file_background.delay(str(file_id))
@@ -1410,8 +1410,6 @@ class DocsService:
                 title=file_obj.title or file_obj.original_name,
             )
         elif file_obj.type == FileType.DOCX.value:
-            from src.modules.docs.doc_editor_provider import DEFAULT_DOC_EDITOR_PROVIDER
-
             DEFAULT_DOC_EDITOR_PROVIDER.ensure_configured()
 
             # Нам нужно передать URL скачивания в сервис конвертации
@@ -1480,8 +1478,6 @@ class DocsService:
 
     async def _download_onlyoffice_file(self, file_url: str) -> bytes:
         """Скачать сохраненный OnlyOffice файл по callback URL."""
-        from urllib.parse import urlparse, urlunparse
-
         # Если backend и OnlyOffice оба в Docker, а клиент снаружи по localhost,
         # URL из коллбека может быть недоступен (например, localhost:8080).
         # Подменяем хост на внутренний (DOCS_ONLYOFFICE_DOCUMENT_SERVER_INTERNAL_URL).

@@ -33,8 +33,6 @@ class TableFolderRepository:
         return list(result.scalars().all())
 
     async def get_max_position(self, org_id: uuid.UUID) -> int:
-        from sqlalchemy import func
-
         stmt = select(func.coalesce(func.max(TableFolder.position), -1)).where(TableFolder.org_id == org_id)
         result = await self.session.execute(stmt)
         return result.scalar() or 0

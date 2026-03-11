@@ -72,9 +72,11 @@ class BillingServiceSync:
                     stats["pre_expiry_notifications"] += created
 
             if is_paid_plan and period_end <= now_utc and sub.status == SubscriptionStatus.ACTIVE:
-                sub.status = SubscriptionStatus.PAST_DUE
-                sub.grace_period_end = grace_end
-                sub.data_purge_at = purge_at
+                self.repo.mark_subscription_past_due(
+                    sub=sub,
+                    grace_period_end=grace_end,
+                    data_purge_at=purge_at,
+                )
 
             if is_paid_plan and period_end <= now_utc and sub.post_expiry_notified_at is None:
                 created = self._create_billing_notification(
@@ -92,11 +94,12 @@ class BillingServiceSync:
                     stats["post_expiry_notifications"] += created
 
             if sub.status == SubscriptionStatus.PAST_DUE and now_utc >= grace_end and sub.downgraded_at is None:
-                sub.status = SubscriptionStatus.CANCELLED
-                sub.plan = PlanTier.FREE
-                sub.downgraded_at = now_utc
-                sub.data_purge_at = purge_at
-                org.plan = PlanTier.FREE
+                self.repo.downgrade_subscription_to_free(
+                    sub=sub,
+                    org=org,
+                    downgraded_at=now_utc,
+                    data_purge_at=purge_at,
+                )
                 stats["downgraded_orgs"] += 1
 
             if sub.status == SubscriptionStatus.CANCELLED and sub.data_purged_at is None and now_utc >= purge_at:

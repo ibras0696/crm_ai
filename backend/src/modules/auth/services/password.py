@@ -10,6 +10,7 @@ from redis.exceptions import RedisError
 from src.infrastructure.redis_client import redis_client
 from src.infrastructure.uow import UnitOfWork
 from src.modules.auth.repository import UserRepository
+from src.modules.auth.security import hash_password
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class AuthPasswordService:
                 logger.error(f"Failed to set password reset token in Redis: {e}")
                 return
 
-            # Send Email using Celery
+            # Avoid import cycle: notifications.tasks imports auth models during Celery autodiscovery.
             from src.modules.notifications.tasks import send_password_reset_email
 
             send_password_reset_email.delay(to_email=user.email, reset_token=token)
@@ -64,9 +65,7 @@ class AuthPasswordService:
             if not user:
                 return False
 
-            from src.infrastructure.hasher import Hasher
-
-            user.hashed_password = Hasher.get_password_hash(new_password)
+            user.hashed_password = hash_password(new_password)
 
             await repo.update(user)
             await uow.commit()

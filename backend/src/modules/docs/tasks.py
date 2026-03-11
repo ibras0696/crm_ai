@@ -47,6 +47,7 @@ from src.modules.docs.pdf_stamper import PdfStampInput, stamp_pdf_with_signature
 from src.modules.docs.repository import DocsRepository
 from src.modules.docs.storage import DEFAULT_STORAGE_PROVIDER
 from src.modules.files.models import File
+from src.modules.files.storage import get_s3_client
 
 logger = logging.getLogger(__name__)
 _WORKER_EVENT_LOOP: asyncio.AbstractEventLoop | None = None
@@ -748,13 +749,9 @@ def cleanup_old_doc_versions() -> dict[str, int | str]:
             for version in versions[keep_latest:]:
                 if deleted_count >= batch_size:
                     break
-                try:
+                with suppress(BotoCoreError, ClientError, OSError):
                     # У StorageProvider нет публичного delete, поэтому используем базовый клиент files-модуля.
-                    from src.modules.files.storage import get_s3_client
-
                     get_s3_client().delete_object(Bucket=version.s3_bucket, Key=version.s3_key)
-                except (BotoCoreError, ClientError, OSError):
-                    pass
                 session.execute(delete(FileVersion).where(FileVersion.id == version.id))
                 deleted_count += 1
             if deleted_count >= batch_size:
@@ -787,8 +784,6 @@ def docs_cleanup_stale_files() -> dict[str, int | str]:
 
         s3_client = None
         with suppress(ImportError, RuntimeError, ValueError, BotoCoreError, ClientError):
-            from src.modules.files.storage import get_s3_client
-
             s3_client = get_s3_client()
 
         for file_obj in files:
@@ -1007,8 +1002,6 @@ def docs_delete_file_background(file_id: str) -> dict[str, int | str]:
 
         s3_client = None
         with suppress(ImportError, RuntimeError, ValueError, BotoCoreError, ClientError):
-            from src.modules.files.storage import get_s3_client
-
             s3_client = get_s3_client()
 
         versions = session.execute(select(FileVersion).where(FileVersion.file_id == file_uuid)).scalars().all()

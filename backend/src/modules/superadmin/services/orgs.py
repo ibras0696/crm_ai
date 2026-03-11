@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from src.common.enums import AuditAction, PlanTier, SubscriptionStatus
 from src.infrastructure.uow import UnitOfWork
 from src.modules.audit.repository import AuditRepository
+from src.modules.org.models import Subscription
 from src.modules.superadmin.repository import SuperadminRepository
 
 
@@ -83,8 +84,6 @@ class SuperadminOrgsService:
                 sub.plan = plan_tier
                 sub.status = SubscriptionStatus.ACTIVE
             else:
-                from src.modules.org.models import Subscription
-
                 sub = Subscription(org_id=org_uuid, plan=plan_tier, status=SubscriptionStatus.ACTIVE)
                 uow.session.add(sub)
 
@@ -157,8 +156,6 @@ class SuperadminOrgsService:
                 sub.downgraded_at = None
                 sub.data_purged_at = None
             else:
-                from src.modules.org.models import Subscription
-
                 sub = Subscription(
                     org_id=org_uuid,
                     plan=plan_tier,

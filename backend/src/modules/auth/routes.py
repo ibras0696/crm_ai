@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, Request, Response
 
-from src.common.exceptions import NotFoundError
+from src.common.exceptions import BadRequestError, NotFoundError, UnauthorizedError
 from src.common.schemas import ApiResponse
 from src.config import settings
 from src.infrastructure.cache import CacheService
@@ -79,8 +79,6 @@ async def login(body: LoginRequest, request: Request, response: Response):
 async def refresh(request: Request, response: Response, body: RefreshRequest | None = None):
     raw_refresh = (body.refresh_token if body else None) or request.cookies.get(settings.AUTH_REFRESH_COOKIE_NAME)
     if not raw_refresh:
-        from src.common.exceptions import UnauthorizedError
-
         raise UnauthorizedError("Missing refresh token")
     ip = request.client.host if request.client else None
     tokens = await _auth_service.refresh(raw_refresh, ip_address=ip)
@@ -137,8 +135,6 @@ async def forgot_password(body: ForgotPasswordRequest):
 @router.post("/reset-password", response_model=ApiResponse)
 async def reset_password(body: ResetPasswordRequest):
     success = await _auth_service.reset_password(body.token, body.new_password)
-    from src.common.exceptions import BadRequestError
-
     if not success:
         raise BadRequestError("Неверный токен или срок его действия истек")
     return ApiResponse(data=None)

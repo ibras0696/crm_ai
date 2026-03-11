@@ -303,12 +303,18 @@ class DocsService:
         await self.repo.update_storage_usage(usage)
         _inc_upload_metric("uploading")
 
-        upload_url, upload_headers = self.storage.generate_presigned_put_url(
-            bucket=DEFAULT_BUCKET,
-            key=key,
-            content_type=content_type,
-            expires_in=expires_in,
-        )
+        try:
+            upload_url, upload_headers = self.storage.generate_presigned_put_url(
+                bucket=DEFAULT_BUCKET,
+                key=key,
+                content_type=content_type,
+                expires_in=expires_in,
+            )
+        except (BotoCoreError, ClientError, KeyError, OSError, ValueError) as exc:
+            raise DocsModuleError(
+                code="STORAGE_URL_ERROR",
+                message="Не удалось сформировать ссылку на загрузку файла",
+            ) from exc
         return {
             "file_id": file_id,
             "upload_url": upload_url,
@@ -1225,11 +1231,17 @@ class DocsService:
         if version is None:
             raise DocsModuleError(code="FILE_VERSION_NOT_FOUND", message="Текущая версия файла не найдена")
 
-        url = self.storage.generate_presigned_get_url(
-            bucket=version.s3_bucket,
-            key=version.s3_key,
-            expires_in=expires_in,
-        )
+        try:
+            url = self.storage.generate_presigned_get_url(
+                bucket=version.s3_bucket,
+                key=version.s3_key,
+                expires_in=expires_in,
+            )
+        except (BotoCoreError, ClientError, KeyError, OSError, ValueError) as exc:
+            raise DocsModuleError(
+                code="STORAGE_URL_ERROR",
+                message="Не удалось сформировать ссылку на скачивание",
+            ) from exc
         return {"url": url, "expires_in": int(expires_in)}
 
     async def get_usage(self, *, org_id: uuid.UUID) -> dict[str, object]:

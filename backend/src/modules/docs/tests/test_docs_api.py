@@ -14,6 +14,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 import httpx
 import pytest
+from botocore.exceptions import EndpointConnectionError
 from httpx import AsyncClient
 from PIL import Image, ImageDraw
 from reportlab.pdfgen import canvas
@@ -732,6 +733,35 @@ async def test_docs_parallel_init_upload_respects_quota(client: AsyncClient, mon
 
     assert ok_count == 1
     assert "QUOTA_EXCEEDED" in err_codes
+
+
+@pytest.mark.asyncio
+async def test_docs_init_upload_returns_business_error_when_storage_unavailable(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+):
+    token = await _register_owner(client)
+
+    def _raise_storage_unavailable(**_kwargs):
+        raise EndpointConnectionError(endpoint_url="http://localhost:9000/crm-files")
+
+    monkeypatch.setattr(
+        "src.modules.docs.service.DEFAULT_STORAGE_PROVIDER.generate_presigned_put_url",
+        _raise_storage_unavailable,
+    )
+
+    init_upload = await client.post(
+        "/api/v1/docs/files/init-upload",
+        json={
+            "filename": "unavailable.txt",
+            "content_type": "text/plain",
+            "size_bytes": 12,
+        },
+        headers=_headers(token),
+    )
+
+    assert init_upload.status_code == 200
+    assert init_upload.json()["ok"] is False
+    assert init_upload.json()["error"]["code"] == "STORAGE_URL_ERROR"
 
 
 @pytest.mark.asyncio
@@ -1809,6 +1839,13 @@ async def test_docs_upload_smoke_20_init_finish(client: AsyncClient, monkeypatch
 async def test_docs_retention_cleanup_deletes_old_versions(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
     token = await _register_owner(client)
     file_id = await _create_ready_txt_file(client, token, monkeypatch, size_bytes=9)
+    storage_map: dict[str, bytes] = {}
+
+    def _put_object_bytes(*, bucket: str, key: str, payload: bytes, content_type: str) -> None:
+        _ = bucket, content_type
+        storage_map[key] = payload
+
+    monkeypatch.setattr("src.modules.docs.service.DEFAULT_STORAGE_PROVIDER.put_object_bytes", _put_object_bytes)
     file_before = await client.get(f"/api/v1/docs/files/{file_id}", headers=_headers(token))
     assert file_before.status_code == 200
     expected_updated_at = file_before.json()["data"]["updated_at"]

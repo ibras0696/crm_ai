@@ -67,6 +67,19 @@ jobs:
   # ─── Backend tests ───
   backend-lint-test:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: postgresql+asyncpg://test_user:test_pass@localhost:5432/test_db
+      DATABASE_URL_SYNC: postgresql+psycopg2://test_user:test_pass@localhost:5432/test_db
+      REDIS_URL: redis://localhost:6379/0
+      SECRET_KEY: test-secret-key-for-ci-pipeline
+      TESTING: "true"
+      S3_ENDPOINT: http://localhost:9000
+      S3_PUBLIC_ENDPOINT: http://localhost:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: crm-files
+      S3_USE_SSL: "false"
+      S3_VERIFY_SSL: "false"
     services:
       postgres:
         image: postgres:16-alpine
@@ -101,7 +114,24 @@ jobs:
         working-directory: backend
         run: |
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio httpx ruff
+          pip install pytest pytest-asyncio pytest-cov httpx ruff
+
+      - name: Start MinIO for docs storage tests
+        run: |
+          docker run -d --name ci-minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:RELEASE.2025-01-20T14-49-07Z \
+            server /data --console-address ":9001"
+          for i in {1..30}; do
+            if curl -fsS http://localhost:9000/minio/health/live >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs ci-minio
+          exit 1
 
       - name: Lint (ruff)
         working-directory: backend
@@ -113,21 +143,10 @@ jobs:
 
       - name: Run migrations
         working-directory: backend
-        env:
-          DATABASE_URL: postgresql+asyncpg://test_user:test_pass@localhost:5432/test_db
-          DATABASE_URL_SYNC: postgresql+psycopg2://test_user:test_pass@localhost:5432/test_db
-          REDIS_URL: redis://localhost:6379/0
-          SECRET_KEY: test-secret-key-for-ci-pipeline
         run: alembic upgrade head
 
       - name: Verify full backend test discovery
         working-directory: backend
-        env:
-          DATABASE_URL: postgresql+asyncpg://test_user:test_pass@localhost:5432/test_db
-          DATABASE_URL_SYNC: postgresql+psycopg2://test_user:test_pass@localhost:5432/test_db
-          REDIS_URL: redis://localhost:6379/0
-          SECRET_KEY: test-secret-key-for-ci-pipeline
-          TESTING: "true"
         run: |
           pytest --collect-only -q > /tmp/backend-pytest-collect.txt
           tail -n 20 /tmp/backend-pytest-collect.txt
@@ -150,13 +169,22 @@ jobs:
 
       - name: Run full backend test suite
         working-directory: backend
-        env:
-          DATABASE_URL: postgresql+asyncpg://test_user:test_pass@localhost:5432/test_db
-          DATABASE_URL_SYNC: postgresql+psycopg2://test_user:test_pass@localhost:5432/test_db
-          REDIS_URL: redis://localhost:6379/0
-          SECRET_KEY: test-secret-key-for-ci-pipeline
-          TESTING: "true"
-        run: pytest -v --tb=short
+        run: pytest -v --tb=short --cov=src --cov-report= --cov-report=xml:coverage.xml
+
+      - name: Print backend coverage percent
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse("coverage.xml").getroot()
+          coverage = float(root.attrib["line-rate"]) * 100
+          print(f"Coverage: {coverage:.2f}%")
+          PY
+
+      - name: Stop MinIO
+        if: always()
+        run: docker rm -f ci-minio || true
 
   # ─── Frontend build ───
   frontend-build:

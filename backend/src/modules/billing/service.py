@@ -6,7 +6,6 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 from botocore.exceptions import BotoCoreError, ClientError
-from kombu.exceptions import KombuError, OperationalError
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.common.enums import PlanTier, SubscriptionStatus
@@ -24,6 +23,7 @@ from src.modules.billing.token_wallet import (
 )
 from src.modules.billing.token_wallet_repository import TokenWalletRepository
 from src.modules.files import storage
+from src.modules.notifications.public_api import queue_email_notification
 
 logger = logging.getLogger(__name__)
 
@@ -590,22 +590,13 @@ class BillingService:
             body=body,
             meta=meta,
         )
-        # Avoid Celery autodiscovery import cycle: notifications.tasks -> auth -> org -> billing.
-        from src.modules.notifications.tasks import send_email_notification
-
         for _user_id, email in recipients:
-            try:
-                send_email_notification.delay(
-                    to_email=email,
-                    subject=title,
-                    body=body,
-                    kind="billing_lifecycle",
-                )
-            except (KombuError, OperationalError, OSError):
-                logger.exception(
-                    "Failed to enqueue billing lifecycle email",
-                    extra={"org_id": str(org_id), "to": email},
-                )
+            queue_email_notification(
+                to_email=email,
+                subject=title,
+                body=body,
+                kind="billing_lifecycle",
+            )
         return created
 
     async def _resolve_free_plan_limits(self, *, repo: BillingRepository) -> FreePlanLimits:

@@ -5,13 +5,13 @@ import secrets
 import string
 import uuid
 
-from kombu.exceptions import KombuError, OperationalError
 from redis.exceptions import RedisError
 
 from src.infrastructure.redis_client import redis_client
 from src.infrastructure.uow import UnitOfWork
 from src.modules.auth.repository import UserRepository
 from src.modules.auth.security import hash_password
+from src.modules.notifications.public_api import queue_password_reset_email
 
 logger = logging.getLogger(__name__)
 
@@ -41,13 +41,7 @@ class AuthPasswordService:
                 logger.error(f"Failed to set password reset token in Redis: {e}")
                 return
 
-            # Avoid import cycle: notifications.tasks imports auth models during Celery autodiscovery.
-            from src.modules.notifications.tasks import send_password_reset_email
-
-            try:
-                send_password_reset_email.delay(to_email=user.email, reset_token=token)
-            except (KombuError, OperationalError, OSError):
-                logger.exception("Failed to enqueue password reset email", extra={"user_id": str(user.id)})
+            queue_password_reset_email(to_email=user.email, reset_token=token)
 
     async def reset_password(self, token: str, new_password: str) -> bool:
         redis = await redis_client.get()

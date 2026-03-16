@@ -13,9 +13,10 @@
 .PHONY: help init up down build restart ps logs logs-api logs-front \
         bootstrap migrate migration shell-api shell-db \
         up-prod down-prod restart-prod logs-prod \
-        test lint lint-fix clean clean-all gen-prod-secrets
+        test lint lint-fix clean clean-all gen-prod-secrets \
+        up-exposed up-debug up-full down-full
 
-COMPOSE_DEV := docker compose --profile dev -f docker-compose.yml -f secrets.yml
+COMPOSE_DEV := SECRETS_FILE=$(SECRETS_FILE) ./scripts/compose-dev.sh
 COMPOSE_PROD := docker compose --profile prod -f docker-compose.prod.yml -f secrets.yml
 SECRETS_FILE ?= secrets.yml
 
@@ -26,7 +27,11 @@ help:
 	@echo "DEV"
 	@echo "  make init          - prepare (creates secrets.yml from secrets.yml.example if needed)"
 	@echo "  make up            - start dev (docker-compose.yml + secrets.yml if exists)"
+	@echo "  make up-exposed    - start dev with host ports for db/redis/rabbitmq/minio console"
+	@echo "  make up-debug      - start dev with infra-debug profile (grafana/prometheus/node-exporter)"
+	@echo "  make up-full       - start dev with exposed infra ports and infra-debug profile"
 	@echo "  make down          - stop dev"
+	@echo "  make down-full     - stop full dev stack including exposed/debug services"
 	@echo "  make restart       - rebuild and restart dev"
 	@echo "  make logs          - logs dev (all services)"
 	@echo "  make logs-api      - logs dev (api)"
@@ -61,7 +66,11 @@ help-ru:
 	@echo "DEV"
 	@echo "  make init          - подготовка (создает secrets.yml из secrets.yml.example, если нужно)"
 	@echo "  make up            - поднять dev (docker-compose.yml + secrets.yml если есть)"
+	@echo "  make up-exposed    - поднять dev с host ports для db/redis/rabbitmq/minio console"
+	@echo "  make up-debug      - поднять dev с profile infra-debug (grafana/prometheus/node-exporter)"
+	@echo "  make up-full       - поднять dev с exposed infra ports и infra-debug"
 	@echo "  make down          - остановить dev"
+	@echo "  make down-full     - остановить полный dev стек вместе с debug/exposed сервисами"
 	@echo "  make restart       - пересобрать и перезапустить dev"
 	@echo "  make logs          - логи dev (все сервисы)"
 	@echo "  make logs-api      - логи dev (api)"
@@ -99,15 +108,31 @@ init:
 		echo "[OK] $(SECRETS_FILE) уже существует"; \
 	fi
 	@echo "Примечание: docker-compose берет секреты из secrets.yml (если подключен). backend/.env не трогаем."
+	@echo "Подсказка: для доп. infra используйте native compose flags:"
+	@echo "  ./scripts/compose-dev.sh -f docker-compose.exposed.yml up -d"
+	@echo "  ./scripts/compose-dev.sh --profile infra-debug up -d"
+	@echo "  ./scripts/compose-dev.sh -f docker-compose.exposed.yml --profile infra-debug up -d"
 
 up:
 	$(COMPOSE_DEV) up -d --build
+
+up-exposed:
+	$(COMPOSE_DEV) -f docker-compose.exposed.yml up -d --build
+
+up-debug:
+	$(COMPOSE_DEV) --profile infra-debug up -d --build
+
+up-full:
+	$(COMPOSE_DEV) -f docker-compose.exposed.yml --profile infra-debug up -d --build
 
 bootstrap:
 	$(COMPOSE_DEV) run --rm bootstrap
 
 down:
 	$(COMPOSE_DEV) down
+
+down-full:
+	$(COMPOSE_DEV) -f docker-compose.exposed.yml --profile infra-debug down
 
 build:
 	$(COMPOSE_DEV) build

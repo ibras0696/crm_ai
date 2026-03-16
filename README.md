@@ -62,6 +62,12 @@ flowchart TB
 1. Скопируй `secrets.yml.example` → `secrets.yml`
 2. Заполни значения в `secrets.yml`
 3. Убедись, что `secrets.yml` не коммитится (он в `.gitignore`)
+4. Важно: `secrets.yml` используется только как local dev override
+
+Contract:
+- общий config contract: `docs/config/CONFIG_CONTRACT.md`
+- typed settings: `backend/src/config.py`
+- production secrets: env или mounted secret files `*_FILE`
 
 ### 2) Запуск
 
@@ -89,7 +95,9 @@ flowchart TB
 ./scripts/compose-prod.sh up -d --build
 ```
 
-Примечание: в prod используется `nginx` и сертификаты (см. `docker-compose.prod.yml`, `nginx/`, `certbot`).
+Примечание:
+- в prod используется `nginx` и сертификаты (см. `docker-compose.prod.yml`, `nginx/`, `certbot`)
+- production secrets должны приходить через env или mounted secret files (`*_FILE`), а не через `secrets.yml` как основной источник
 
 ## 🔌 API Контракты (кратко)
 

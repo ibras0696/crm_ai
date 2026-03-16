@@ -112,8 +112,8 @@ start_project() {
     
     cd "$PROJECT_ROOT"
     
-    echo "Запускаю: docker compose -f docker-compose.yml -f secrets.yml up -d"
-    docker compose -f docker-compose.yml -f secrets.yml up -d
+    echo "Запускаю: ./scripts/compose-dev.sh up -d"
+    ./scripts/compose-dev.sh up -d
     
     echo ""
     print_success "Проект запущен!"
@@ -133,12 +133,13 @@ show_services() {
     echo "API:        ${GREEN}http://localhost:8000${NC}"
     echo "API Docs:   ${GREEN}http://localhost:8000/api/docs${NC}"
     echo ""
-    echo "PostgreSQL: localhost:5432"
-    echo "Redis:      localhost:6379"
-    echo "RabbitMQ:   localhost:5672 (Management: http://localhost:15672)"
-    echo "MinIO:      http://localhost:9000"
-    echo "Grafana:    http://localhost:3000"
-    echo "Prometheus: http://localhost:9090"
+    echo "OnlyOffice: http://localhost:8080"
+    echo "MinIO API:  http://localhost:9000"
+    echo ""
+    echo "Доп. infra порты включаются обычными Compose override/profile:"
+    echo "  ./scripts/compose-dev.sh -f docker-compose.exposed.yml up -d"
+    echo "  ./scripts/compose-dev.sh --profile infra-debug up -d"
+    echo "  ./scripts/compose-dev.sh -f docker-compose.exposed.yml --profile infra-debug up -d"
     echo ""
 }
 
@@ -160,7 +161,7 @@ stop_project() {
     print_header "Остановка проекта"
     
     cd "$PROJECT_ROOT"
-    docker compose -f docker-compose.yml -f secrets.yml down
+    ./scripts/compose-dev.sh down
     
     print_success "Проект остановлен"
 }

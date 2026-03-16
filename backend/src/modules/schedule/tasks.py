@@ -7,13 +7,15 @@ from sqlalchemy import select
 
 from src.common.enums import NotificationStatus, NotificationType
 from src.infrastructure.celery_app import celery
+from src.infrastructure.celery_base import BaseTaskWithRetry
 from src.infrastructure.database_sync import sync_session_factory
 from src.modules.notifications.models import Notification
 from src.modules.schedule.models import Event
 
 
-@celery.task(name="dispatch_schedule_reminders")
-def dispatch_schedule_reminders() -> dict:
+@celery.task(name="dispatch_schedule_reminders", bind=True, base=BaseTaskWithRetry)
+def dispatch_schedule_reminders(self) -> dict:
+    _ = self
     now = datetime.now(UTC)
     created_notifications = 0
 

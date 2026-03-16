@@ -16,7 +16,7 @@ from src.modules.auth.security import (
     hash_password,
     refresh_token_expires_at,
 )
-from src.modules.notifications.tasks import send_invite_email
+from src.modules.notifications.public_api import queue_invite_email
 from src.modules.org.models import Invite, Membership
 from src.modules.org.repository import (
     InviteRepository,
@@ -94,10 +94,7 @@ class OrgInviteService:
             org_name = org.name if org else "CRM"
             await uow.commit()
 
-            try:
-                send_invite_email.delay(email, org_name, token, None)
-            except Exception:
-                logger.exception("Failed to enqueue invite email task")
+            queue_invite_email(to_email=email, org_name=org_name, invite_token=token, invite_url=None)
             # UI uses this to show clear handling for unregistered users.
             invite.invitee_exists = existing_user is not None  # type: ignore[attr-defined]
             return invite
@@ -136,10 +133,7 @@ class OrgInviteService:
             org_name = org.name if org else "CRM"
             await uow.commit()
 
-            try:
-                send_invite_email.delay(invite.email, org_name, invite.token, None)
-            except Exception:
-                logger.exception("Failed to enqueue invite resend task")
+            queue_invite_email(to_email=invite.email, org_name=org_name, invite_token=invite.token, invite_url=None)
 
             invite.expires_at = new_expiry
             return invite

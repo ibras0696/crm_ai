@@ -7,8 +7,8 @@ from datetime import UTC, datetime, timedelta
 from src.common.enums import AuditAction
 from src.config import settings
 from src.modules.ai.internal.repository import AIRepository
-from src.modules.ai.limits import check_ai_limits as _default_check_ai_limits
-from src.modules.ai.limits import is_org_ai_enabled
+from src.modules.ai.public_api import check_ai_limits as _default_check_ai_limits
+from src.modules.ai.public_api import is_org_ai_enabled
 from src.modules.docs.ai_generator import DEFAULT_AI_DOCUMENT_GENERATOR, estimate_generation_budget
 from src.modules.docs.domain import FileStatus
 from src.modules.docs.errors import DocsModuleError, QuotaExceededError

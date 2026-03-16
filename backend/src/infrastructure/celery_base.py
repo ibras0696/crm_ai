@@ -5,6 +5,8 @@ from typing import ClassVar
 
 from celery import Task
 
+from src.infrastructure.task_logging import log_task_failure
+
 logger = logging.getLogger(__name__)
 
 
@@ -19,8 +21,14 @@ class BaseTaskWithRetry(Task):
 
     def on_failure(self, exc, task_id, args, kwargs, einfo):
         """Log failed tasks for monitoring."""
-        logger.error(
-            f"Task {self.name} failed after max retries",
-            extra={"task_id": task_id, "exception": str(exc), "args": args, "kwargs": kwargs},
+        log_task_failure(
+            logger,
+            task_name=self.name,
+            task_id=task_id,
+            task_args=args,
+            task_kwargs=kwargs,
+            exc=exc,
+            einfo=einfo,
+            message="Background task failed after retries",
         )
         super().on_failure(exc, task_id, args, kwargs, einfo)

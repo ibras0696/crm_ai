@@ -3,7 +3,7 @@ set -eu
 
 # Usage:
 #   ./scripts/generate_prod_secrets.sh your-domain.com > .env.prod.generated
-# Then copy values into secrets.yml (or your secret manager).
+# Then load values into your secret manager / mounted secret files / deployment env.
 
 DOMAIN="${1:-}"
 if [ -z "$DOMAIN" ]; then

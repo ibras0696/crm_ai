@@ -12,6 +12,7 @@ from src.config import settings
 from src.modules.billing.lifecycle_policy import FreePlanLimits, should_send_post_expiry_notice
 from src.modules.billing.repository_sync import BillingSyncRepository
 from src.modules.files import storage
+from src.modules.notifications.public_api import queue_email_notification
 from src.modules.org.models import Subscription
 
 if TYPE_CHECKING:
@@ -184,9 +185,6 @@ class BillingServiceSync:
         if not recipients:
             return 0
 
-        # Avoid Celery autodiscovery import cycle: notifications.tasks -> auth -> org -> billing.
-        from src.modules.notifications.tasks import send_email_notification
-
         for user_id, email in recipients:
             self.repo.add_in_app_notification(
                 org_id=org_id,
@@ -195,18 +193,12 @@ class BillingServiceSync:
                 body=body,
                 meta=meta,
             )
-            try:
-                send_email_notification.delay(
-                    to_email=email,
-                    subject=title,
-                    body=body,
-                    kind="billing_lifecycle",
-                )
-            except Exception:
-                self.logger.exception(
-                    "Failed to enqueue billing lifecycle email",
-                    extra={"org_id": str(org_id), "to": email},
-                )
+            queue_email_notification(
+                to_email=email,
+                subject=title,
+                body=body,
+                kind="billing_lifecycle",
+            )
         self.repo.flush()
         return len(recipients)
 

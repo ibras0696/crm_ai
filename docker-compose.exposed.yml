@@ -1,0 +1,17 @@
+services:
+  db:
+    ports:
+      - "${DB_HOST_PORT:-5432}:5432"
+
+  redis:
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+
+  rabbitmq:
+    ports:
+      - "${RABBITMQ_HOST_PORT:-5672}:5672"
+      - "${RABBITMQ_MANAGEMENT_HOST_PORT:-15672}:15672"
+
+  minio:
+    ports:
+      - "${MINIO_CONSOLE_HOST_PORT:-9001}:9001"

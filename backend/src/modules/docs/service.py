@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from src.modules.ai.limits import check_ai_limits
+from src.modules.ai.public_api import check_ai_limits
 from src.modules.docs.ai_generator import DEFAULT_AI_DOCUMENT_GENERATOR
 from src.modules.docs.doc_editor_provider import DEFAULT_DOC_EDITOR_PROVIDER
 from src.modules.docs.service_parts.ai import DocsAIMixin

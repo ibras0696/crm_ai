@@ -1,4 +1,5 @@
 import json
+import os
 from typing import Any
 
 from pydantic import field_validator, model_validator
@@ -269,6 +270,25 @@ class Settings(BaseSettings):
     AI_SEND_SYSTEM_PROMPT_ONCE_PER_CHAT: bool = True
     AI_PROVIDER_TIMEOUT_S: float = 60.0
     AI_SYSTEM_PROMPT: str = "You are an AI assistant for the CRM platform. Reply in Russian."
+
+    @model_validator(mode="before")
+    @classmethod
+    def _load_file_backed_values(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        merged = dict(data)
+        for field_name in cls.model_fields:
+            file_env_name = f"{field_name}_FILE"
+            file_path = str(os.getenv(file_env_name, "") or "").strip()
+            if not file_path:
+                continue
+            try:
+                with open(file_path, encoding="utf-8") as fh:
+                    merged[field_name] = fh.read().strip()
+            except OSError as exc:
+                raise ValueError(f"Failed to load {field_name} from {file_env_name}={file_path}: {exc}") from exc
+        return merged
 
     @model_validator(mode="after")
     def _validate_production_secrets(self) -> "Settings":

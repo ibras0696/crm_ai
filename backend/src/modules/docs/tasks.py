@@ -23,6 +23,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from src.common.enums import AuditAction
 from src.config import settings
 from src.infrastructure.celery_app import celery
+from src.infrastructure.celery_base import BaseTaskWithRetry
 from src.infrastructure.database_sync import sync_session_factory
 from src.infrastructure.metrics_custom import (
     DOCS_AI_GENERATE_ERRORS_TOTAL,
@@ -31,10 +32,11 @@ from src.infrastructure.metrics_custom import (
     FILE_SCAN_TOTAL,
     UPLOADS_TOTAL,
 )
+from src.infrastructure.task_logging import log_task_failure
 from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.internal.repository import AIRepository
-from src.modules.ai.limits import check_ai_limits
 from src.modules.ai.models import AIUsageLog
+from src.modules.ai.public_api import check_ai_limits
 from src.modules.audit.models import AuditLog
 from src.modules.billing.token_wallet import spend_tokens
 from src.modules.docs.ai_generator import DEFAULT_AI_DOCUMENT_GENERATOR
@@ -372,6 +374,16 @@ def ai_generate(self, job_id: str) -> dict[str, str]:
         TypeError,
         ValueError,
     ) as exc:
+        log_task_failure(
+            logger,
+            task_name="docs_ai_generate",
+            task_id=task_id,
+            task_args=(job_id,),
+            task_kwargs={},
+            exc=exc,
+            context={"job_id": job_id, "failure_mode": "caught_exception"},
+            message="Docs AI generate task failed",
+        )
         with suppress(Exception):
             _run_async_on_worker_loop(_mark_ai_job_failed_unexpected(job_id=job_id, reason=str(exc)))
         _inc_ai_generate_error_metric("unexpected_exception")
@@ -703,9 +715,10 @@ async def _mark_ai_job_failed_unexpected(*, job_id: str, reason: str) -> None:
         )
 
 
-@celery.task(name="docs_cleanup_old_versions")
-def cleanup_old_doc_versions() -> dict[str, int | str]:
+@celery.task(name="docs_cleanup_old_versions", bind=True, base=BaseTaskWithRetry)
+def cleanup_old_doc_versions(self) -> dict[str, int | str]:
     """Удалить старые неактуальные версии документов по retention-политике."""
+    _ = self
     retention_days = int(getattr(settings, "DOCS_RETENTION_DAYS", 0) or 0)
     keep_latest = max(1, int(getattr(settings, "DOCS_RETENTION_KEEP_LATEST", 5) or 5))
     batch_size = max(1, int(getattr(settings, "DOCS_RETENTION_BATCH_SIZE", 200) or 200))
@@ -761,9 +774,10 @@ def cleanup_old_doc_versions() -> dict[str, int | str]:
     return {"status": "ok", "deleted": int(deleted_count), "scanned_files": int(scanned_files)}
 
 
-@celery.task(name="docs_cleanup_stale_files")
-def docs_cleanup_stale_files() -> dict[str, int | str]:
+@celery.task(name="docs_cleanup_stale_files", bind=True, base=BaseTaskWithRetry)
+def docs_cleanup_stale_files(self) -> dict[str, int | str]:
     """Удалить зависшие UPLOADING и DRAFT файлы и их временные S3 объекты."""
+    _ = self
     threshold = datetime.now(UTC) - timedelta(hours=24)
     batch_size = max(1, int(getattr(settings, "DOCS_RETENTION_BATCH_SIZE", 200) or 200))
     deleted_count = 0

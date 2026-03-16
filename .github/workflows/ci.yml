@@ -19,6 +19,9 @@ jobs:
       - name: Validate docker-compose files
         run: |
           docker compose -f docker-compose.yml config -q
+          docker compose -f docker-compose.yml -f docker-compose.exposed.yml config -q
+          docker compose -f docker-compose.yml --profile infra-debug config -q
+          docker compose -f docker-compose.yml -f docker-compose.exposed.yml --profile infra-debug config -q
           docker compose -f docker-compose.prod.yml config -q
 
       - name: Build and start infra + background workers

@@ -1,104 +1,81 @@
-# Project Architecture and File Structure
+# Project Architecture
 
-Документ отвечает на 3 вопроса:
-- что где лежит;
-- как запрос проходит по системе;
-- какие сервисы за что отвечают.
-
-## 1. Корневая структура
+## Что где лежит
 
 ```text
-crm_ai/
-├── backend/                # FastAPI, бизнес-логика, БД, интеграции
-├── frontend/               # React/Vite интерфейс
-├── monitoring/             # Prometheus/Grafana provisioning
-├── nginx/                  # Nginx конфиг для production
-├── scripts/                # служебные скрипты (секреты, backup/restore)
-├── docker-compose.yml      # dev окружение
-├── docker-compose.prod.yml # production окружение
-├── secrets.yml.example     # шаблон секретов
-└── docs/                   # актуальная документация
+backend/      FastAPI, бизнес-логика, БД, Celery, интеграции
+frontend/     React + Vite
+monitoring/   Prometheus и Grafana
+nginx/        production reverse proxy
+scripts/      служебные команды
+docs/         короткая живая документация
 ```
 
-## 2. Backend: как организован код
+## Backend
 
-Путь: `backend/src`
+Основной путь: `backend/src`
 
-- `main.py` - создание FastAPI app, middleware, health/readiness.
-- `router.py` - подключение модулей под префиксом `/api/v1`.
-- `config.py` - все env настройки и prod-валидация безопасности.
-- `common/` - общие схемы (`ApiResponse`), ошибки, enum.
-- `middleware/` - correlation id, лимит тела запроса, security headers, rate limit.
-- `infrastructure/` - database/redis/celery/logging/metrics.
-- `modules/` - бизнес-модули:
-  - `auth`
-  - `org`
-  - `tables`
-  - `knowledge`
-  - `files`
-  - `notifications`
-  - `audit`
-  - `reports`
-  - `billing`
-  - `ai`
-  - `schedule`
-  - `access`
-  - `superadmin`
+Главные слои:
+- `main.py`, `router.py` — запуск приложения и подключение модулей
+- `config.py` — настройки
+- `common/` — общие ошибки, enum, схемы ответа
+- `infrastructure/` — database, redis, celery, logging, metrics
+- `modules/` — бизнес-модули
 
-Типичный модуль содержит:
-- `routes.py` - HTTP endpoints;
-- `schemas.py` - pydantic модели;
-- `service.py` или `services/` - бизнес-логика;
-- `repository.py` или `repositories/` - работа с БД.
+Основные модули:
+- `auth`
+- `org`
+- `tables`
+- `knowledge`
+- `files`
+- `docs`
+- `billing`
+- `ai`
+- `notifications`
+- `superadmin`
 
-## 3. Frontend: как организован код
+Типичный модуль:
+- `routes.py` — HTTP
+- `schemas.py` — pydantic
+- `service.py` / `services/` — бизнес-логика
+- `repository.py` — доступ к БД
+- `tests/` — тесты модуля
 
-Путь: `frontend/src`
+## Frontend
 
-- `pages/` - экранные страницы.
-- `components/` - переиспользуемые UI-компоненты.
-- `contexts/` - глобальные контексты (auth и т.д.).
-- `lib/api/` - API-клиенты.
-  - `core/client.ts` - axios клиент, `withCredentials`, авто-refresh на 401.
-  - `auth/*`, `superadmin/*` - специализированные клиенты.
+Основной путь: `frontend/src`
 
-## 4. Как работает запрос (поток)
+Главные зоны:
+- `pages/` — страницы
+- `components/` — переиспользуемые части UI
+- `contexts/` — auth и прочие глобальные состояния
+- `lib/api/` — HTTP-клиенты
 
-1. Пользователь в браузере вызывает действие на frontend.
-2. Frontend отправляет запрос в backend (`/api/v1/...`) с cookie-сессией.
-3. Backend middleware добавляет correlation id, проверяет лимиты/безопасность.
-4. Endpoint модуля вызывает service.
-5. Service читает/пишет БД, Redis, S3, RabbitMQ по необходимости.
-6. Backend возвращает `ApiResponse`.
-7. Frontend отображает `data` или безопасную `error`.
-
-## 5. Сервисы и роли (compose)
+## Runtime
 
 Основные сервисы:
+- `api`
+- `frontend`
+- `db`
+- `redis`
+- `rabbitmq`
+- `celery_worker`
+- `celery_beat`
+- `minio`
+- `onlyoffice`
 
-- `api` - FastAPI backend.
-- `frontend` - React приложение.
-- `db` - PostgreSQL.
-- `redis` - кэш/лимитеры/служебные данные.
-- `rabbitmq` - брокер очередей.
-- `celery_worker`, `celery_beat` - фоновые задачи.
-- `minio` - объектное хранилище файлов.
-- `prometheus`, `grafana`, `node-exporter` - мониторинг.
-- `nginx` (prod) - входная точка HTTPS и reverse proxy.
-- `certbot` (prod) - обновление сертификатов.
+Опционально для мониторинга:
+- `prometheus`
+- `grafana`
+- `node-exporter`
 
-## 6. API: где смотреть контракты
+## Как идёт запрос
 
-- Живая схема: `/api/openapi.json`
-- Swagger: `/api/docs`
-- Маршруты собираются в `backend/src/router.py`
+1. Браузер вызывает frontend
+2. frontend идёт в `/api/v1/...`
+3. backend middleware добавляет технический контекст и проверки
+4. endpoint вызывает service
+5. service работает с БД, Redis, MinIO, RabbitMQ
+6. ответ уходит в `ApiResponse`
 
-Подробности по endpoint-ам: [api_contracts.md](api_contracts.md)
-
-## 7. Где править что
-
-- Проблемы авторизации: `backend/src/modules/auth`, `frontend/src/contexts/AuthContext.tsx`, `frontend/src/lib/api/core/client.ts`
-- Проблемы superadmin: `backend/src/modules/superadmin`, `frontend/src/components/superadmin`, `frontend/src/pages/superadmin`
-- Проблемы таблиц/записей: `backend/src/modules/tables`, `frontend/src/pages/tables`
-- Проблемы конфигов/секретов: `backend/src/config.py`, `secrets.yml.example`, `docker-compose*.yml`
-- Проблемы мониторинга: `monitoring/`, `docker-compose*.yml`
+API-контракты: [api_contracts.md](api_contracts.md)

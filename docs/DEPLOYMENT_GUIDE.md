@@ -1,222 +1,66 @@
-# 🚀 CRM Platform Deployment Guide
+# Deployment Guide
 
-Полное руководство по развертыванию CRM Platform в production.
+Короткая схема для staging/prod.
 
----
+## Требования
 
-## 📋 Pre-requisites
+- Linux сервер
+- Docker + Docker Compose v2
+- домен и TLS
+- подготовленные секреты
 
-### Минимальные Требования
-- **CPU:** 4 cores
-- **RAM:** 8 GB
-- **Disk:** 50 GB SSD
-- **OS:** Ubuntu 22.04 LTS или новее
-- **Docker:** 24.0+
-- **Docker Compose:** 2.20+
+## Модель конфигурации
 
-### Рекомендуемые Требования (HA Setup)
-- **CPU:** 8+ cores
-- **RAM:** 16+ GB
-- **Disk:** 100+ GB SSD
-- **Network:** 1 Gbps
+В production:
+- обычные настройки идут через env
+- секреты идут через env или `*_FILE`
+- `secrets.yml` не используется как основной operational источник
 
----
+Подробности: [config/CONFIG_CONTRACT.md](config/CONFIG_CONTRACT.md)
 
-## 🔧 Production Setup
+## Минимальные шаги
 
-### 1. Подготовка Сервера
+1. Подготовить сервер и Docker
+2. Клонировать репозиторий
+3. Заполнить production env/secrets
+4. Проверить `docker-compose.prod.yml`
+5. Запустить:
 
-```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
-
-# Install Docker
-curl -fsSL https://get.docker.com -o get-docker.sh
-sudo sh get-docker.sh
-
-# Install Docker Compose
-sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
-
-# Add user to docker group
-sudo usermod -aG docker $USER
-newgrp docker
-```
-
-### 2. Clone Repository
-
-```bash
-git clone https://github.com/your-org/crm-platform.git
-cd crm-platform
-```
-
-### 3. Configure Secrets
-
-```bash
-# Copy example secrets
-cp secrets.yml.example secrets.yml
-
-# Generate strong passwords
-openssl rand -base64 32  # For SECRET_KEY
-openssl rand -base64 32  # For JWT_USER_SECRET_KEY
-openssl rand -base64 32  # For JWT_SUPERADMIN_SECRET_KEY
-openssl rand -base64 16  # For DB password
-openssl rand -base64 16  # For RabbitMQ password
-openssl rand -base64 16  # For Redis password
-
-# Edit secrets.yml
-nano secrets.yml
-```
-
-**secrets.yml example:**
-```yaml
-services:
-  db:
-    environment:
-      POSTGRES_USER: "crm_prod"
-      POSTGRES_PASSWORD: "STRONG_DB_PASSWORD_HERE"
-      POSTGRES_DB: "crm_db"
-  
-  rabbitmq:
-    environment:
-      RABBITMQ_DEFAULT_USER: "crm_rabbit"
-      RABBITMQ_DEFAULT_PASS: "STRONG_RABBIT_PASSWORD_HERE"
-  
-  minio:
-    environment:
-      MINIO_ROOT_USER: "crm_minio"
-      MINIO_ROOT_PASSWORD: "STRONG_MINIO_PASSWORD_HERE"
-  
-  api:
-    environment:
-      ENVIRONMENT: "production"
-      DEBUG: "false"
-      DOMAIN: "your-domain.com"
-      FRONTEND_URL: "https://your-domain.com"
-      
-      # Database
-      POSTGRES_USER: "crm_prod"
-      POSTGRES_PASSWORD: "STRONG_DB_PASSWORD_HERE"
-      DATABASE_URL: "postgresql+asyncpg://crm_prod:STRONG_DB_PASSWORD_HERE@db:5432/crm_db"
-      DATABASE_URL_SYNC: "postgresql+psycopg2://crm_prod:STRONG_DB_PASSWORD_HERE@db:5432/crm_db"
-      
-      # RabbitMQ
-      RABBITMQ_URL: "amqp://crm_rabbit:STRONG_RABBIT_PASSWORD_HERE@rabbitmq:5672/"
-      
-      # S3
-      S3_ACCESS_KEY: "crm_minio"
-      S3_SECRET_KEY: "STRONG_MINIO_PASSWORD_HERE"
-      
-      # Security
-      SECRET_KEY: "GENERATED_SECRET_KEY_32_CHARS"
-      JWT_USER_SECRET_KEY: "GENERATED_JWT_USER_KEY_32_CHARS"
-      JWT_SUPERADMIN_SECRET_KEY: "GENERATED_JWT_SUPERADMIN_KEY_32_CHARS"
-      
-      # CORS
-      CORS_ORIGINS: "[\"https://your-domain.com\"]"
-      
-      # Cookies
-      AUTH_COOKIE_SECURE: "true"
-      AUTH_COOKIE_SAMESITE: "lax"
-      
-      # AI (optional)
-      ENABLE_AI: "true"
-      OPENAI_BEARER_TOKEN: "YOUR_OPENAI_TOKEN"
-      
-      # Email (optional)
-      ENABLE_EMAIL: "true"
-      SMTP_HOST: "smtp.gmail.com"
-      SMTP_PORT: "587"
-      SMTP_USER: "your-email@gmail.com"
-      SMTP_PASSWORD: "your-app-password"
-      SMTP_FROM: "noreply@your-domain.com"
-```
-
-### 4. SSL Certificates (Let's Encrypt)
-
-```bash
-# Install certbot
-sudo apt install certbot
-
-# Get certificate
-sudo certbot certonly --standalone -d your-domain.com
-
-# Certificates will be in:
-# /etc/letsencrypt/live/your-domain.com/fullchain.pem
-# /etc/letsencrypt/live/your-domain.com/privkey.pem
-```
-
-### 5. Deploy
-
-**Standard Deployment:**
 ```bash
 ./scripts/compose-prod.sh up -d --build
 ```
 
-**High Availability Deployment:**
-```bash
-docker compose -f docker-compose.ha.yml up -d --build
-```
+## Что обязательно задать
 
-### 6. Verify Deployment
+- `ENVIRONMENT=production`
+- `DOMAIN`
+- `FRONTEND_URL`
+- `SECRET_KEY`
+- `JWT_USER_SECRET_KEY`
+- `JWT_SUPERADMIN_SECRET_KEY`
+- `DATABASE_URL`
+- `DATABASE_URL_SYNC`
+- `RABBITMQ_URL`
+- `S3_ACCESS_KEY`
+- `S3_SECRET_KEY`
 
-```bash
-# Check all services are running
-docker compose ps
+Опционально, если используются:
+- `OPENAI_BEARER_TOKEN` / `OPENAI_API_KEY`
+- `SMTP_*`
+- `YOOKASSA_*`
 
-# Check API health
-curl https://your-domain.com/api/health
-
-# Check logs
-docker compose logs -f api
-```
-
----
-
-## 🔄 Database Migrations
-
-### Apply Migrations
+## После запуска проверить
 
 ```bash
-# Run migrations
-docker compose exec api alembic upgrade head
-
-# Create new migration
-docker compose exec api alembic revision --autogenerate -m "description"
+docker compose -f docker-compose.prod.yml ps
+curl http://localhost:8000/api/health
+curl http://localhost:8000/api/readiness
+docker compose -f docker-compose.prod.yml logs -f api
 ```
 
-### Apply Critical Indexes
+## Перед релизом
 
-```bash
-# Copy SQL file to container
-docker cp backend/alembic/versions/add_critical_indexes.sql crm_chechen-db-1:/tmp/
-
-# Execute
-docker compose exec db psql -U crm_prod -d crm_db -f /tmp/add_critical_indexes.sql
-```
-
-### Setup Partitioning
-
-```bash
-# Copy partitioning SQL
-docker cp backend/alembic/versions/add_table_partitioning.sql crm_chechen-db-1:/tmp/
-
-# Execute
-docker compose exec db psql -U crm_prod -d crm_db -f /tmp/add_table_partitioning.sql
-```
-
----
-
-## 📊 Monitoring Setup
-
-### Grafana
-
-1. Access: `https://your-domain.com:3000`
-2. Login: admin / (password from secrets.yml)
-3. Add Prometheus datasource: `http://prometheus:9090`
-4. Import dashboards from `monitoring/grafana/dashboards/`
-
-### Prometheus
+Свериться с [release_checklist.md](release_checklist.md).
 
 1. Access: `https://your-domain.com:9090`
 2. Verify targets are up: Status → Targets

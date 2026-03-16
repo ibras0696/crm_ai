@@ -1,18 +1,13 @@
-# Документация проекта (актуальная)
+# Документация
 
-Этот раздел содержит рабочую документацию для запуска, поддержки и разработки.
+В `docs/` оставлены только рабочие документы.
 
-## С чего начать
+Что читать:
+- [api_contracts.md](api_contracts.md) — что отдаёт API и где смотреть живую схему
+- [project_architecture.md](project_architecture.md) — как устроен проект
+- [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) — как поднимать staging/prod
+- [release_checklist.md](release_checklist.md) — что проверить перед релизом
+- [config/CONFIG_CONTRACT.md](config/CONFIG_CONTRACT.md) — где живут настройки и секреты
+- [contracts/INTEGRATION_CONTRACTS.md](contracts/INTEGRATION_CONTRACTS.md) — публичные стыки между модулями
 
-1. Секреты и `secrets.yml`: [secrets_yml_guide.md](secrets_yml_guide.md)
-2. API контракты: [api_contracts.md](api_contracts.md)
-3. Структура проекта и как все работает: [project_architecture.md](project_architecture.md)
-4. Миграции и rollback (Sprint 2-5): [migrations_rollback_plan.md](migrations_rollback_plan.md)
-5. Релизный чек-лист: [release_checklist.md](release_checklist.md)
-
-## Legacy
-
-Старые документы перенесены в:
-- [legacy](legacy)
-
-Их можно использовать как исторический контекст, но как источник истины используем только текущие файлы в `docs/`.
+Если нужен обычный запуск проекта, начни с корневого [README.md](/Users/ibragim/PycharmProjects/CRM_AI/crm_ai/README.md).

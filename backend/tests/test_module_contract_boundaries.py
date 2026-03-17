@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-ROOT = Path("/app/src/modules")
+ROOT = Path(__file__).resolve().parents[1] / "src" / "modules"
 
 
 def _read(relative_path: str) -> str:

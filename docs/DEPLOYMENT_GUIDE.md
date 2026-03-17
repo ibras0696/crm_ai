@@ -30,6 +30,19 @@
 ./scripts/compose-prod.sh up -d --build
 ```
 
+## Swap для слабых серверов
+
+Если сервер маленький и на нём крутится `OnlyOffice`, стоит заранее включить swap.
+
+```bash
+sudo ./scripts/setup-server.sh --swap-size-gb 4
+```
+
+По умолчанию скрипт:
+- создаёт или пересоздаёт `/swapfile`
+- прописывает swap в `/etc/fstab`
+- ставит `vm.swappiness=10`
+
 ## Что обязательно задать
 
 - `ENVIRONMENT=production`

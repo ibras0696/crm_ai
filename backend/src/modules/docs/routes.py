@@ -231,7 +231,7 @@ async def create_empty_file(
     ),
     _: None = Depends(require_access(resource_type="files", permission="can_write")),
 ):
-    """Создать пустой PDF/DOCX файл в выбранной папке или в корне."""
+    """Создать пустой DOCX файл в выбранной папке или в корне."""
     async with UnitOfWork() as uow:
         service = DocsService(uow.session)
         try:

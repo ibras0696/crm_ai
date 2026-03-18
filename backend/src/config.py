@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     DOCS_ONLYOFFICE_CALLBACK_URL: str = "http://api:8000/api/v1/docs/integrations/onlyoffice/callback"
     DOCS_ONLYOFFICE_EDITOR_LANG: str = "ru"
     DOCS_ONLYOFFICE_REQUEST_TIMEOUT_S: float = 20.0
+    DOCS_PDF_AUTO_CONVERT_TO_DOCX: bool = False
 
     # --- AI Document Generation ---
     DOCS_AI_GENERATION_ENABLED: bool = True

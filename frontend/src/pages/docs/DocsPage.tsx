@@ -24,7 +24,6 @@ import {
   FolderPlus,
   HardDrive,
   Loader2,
-  PenLine,
   Pencil,
   Sparkles,
   Maximize2,
@@ -35,7 +34,6 @@ import {
 } from 'lucide-react'
 
 import { DocxEditorPanel } from './DocxEditorPanel'
-import { PdfSignerPanel } from './PdfSignerPanel'
 
 
 const MAX_DEPTH = 2
@@ -297,7 +295,6 @@ export default function DocsPage() {
   const [openFolders, setOpenFolders] = useState<Record<string, boolean>>({})
 
   const [docxEditorFile, setDocxEditorFile] = useState<DocsFile | null>(null)
-  const [pdfSignerFile, setPdfSignerFile] = useState<DocsFile | null>(null)
   const [docxLoading, setDocxLoading] = useState(false)
   const [isEditorFullscreen, setIsEditorFullscreen] = useState(false)
   const [docxConfig, setDocxConfig] = useState<Record<string, unknown> | null>(null)
@@ -981,16 +978,6 @@ export default function DocsPage() {
     }
   }
 
-  const onPdfSignOpen = (file: DocsFile) => {
-    if (file.type !== 'pdf') return
-    if (file.status !== 'ready') {
-      setErrorText('Подпись PDF доступна только для файлов в статусе READY')
-      return
-    }
-    setErrorText('')
-    setPdfSignerFile(file)
-  }
-
   const onDocxOpen = async (file: DocsFile) => {
     if (file.type !== 'docx') return
     if (file.status !== 'ready') {
@@ -1017,9 +1004,6 @@ export default function DocsPage() {
 
   const onFileUpdated = (nextFile: DocsFile) => {
     setFiles((prev) => prev.map((item) => (item.id === nextFile.id ? nextFile : item)))
-    if (pdfSignerFile?.id === nextFile.id) {
-      setPdfSignerFile(nextFile)
-    }
     if (docxEditorFile?.id === nextFile.id) {
       setDocxEditorFile(nextFile)
     }
@@ -1207,7 +1191,7 @@ export default function DocsPage() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-2xl font-bold">Документы</h1>
-          <p className="text-sm text-muted-foreground">PDF/DOCX с загрузкой в S3 и версионированием.</p>
+          <p className="text-sm text-muted-foreground">DOCX с загрузкой в S3 и версионированием. PDF при загрузке автоматически конвертируется в DOCX.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={() => void reload()}>
@@ -1485,11 +1469,6 @@ export default function DocsPage() {
                           <p className={`text-xs ${statusClass(visualState.status)}`}>{visualState.helperText}</p>
                         )}
                       </div>
-                      {file.type === 'pdf' && (
-                        <Button variant="outline" size="sm" onClick={() => onPdfSignOpen(file)} disabled={file.status !== 'ready'}>
-                          <PenLine className="mr-1 h-4 w-4" /> Подписать PDF
-                        </Button>
-                      )}
                       {file.type === 'docx' && (
                         <Button variant="outline" size="sm" onClick={() => void onDocxOpen(file)} disabled={file.status !== 'ready' || docxLoading || docxEditorFile?.id === file.id}>
                           <Pencil className="mr-1 h-4 w-4" /> Открыть в редакторе
@@ -1508,7 +1487,7 @@ export default function DocsPage() {
                         size="sm"
                         className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
                         onClick={() => requestDeleteFile(file)}
-                        disabled={docxEditorFile?.id === file.id || pdfSignerFile?.id === file.id || deletingTargetId === file.id}
+                        disabled={docxEditorFile?.id === file.id || deletingTargetId === file.id}
                       >
                         <Trash2 className="mr-1 h-4 w-4" /> Удалить
                       </Button>
@@ -1521,43 +1500,6 @@ export default function DocsPage() {
 
           </CardContent>
         </Card>
-        {pdfSignerFile && (
-          <div className="fixed inset-0 z-[100] flex flex-col bg-background/95 backdrop-blur-sm animate-in fade-in zoom-in duration-200">
-            <div className="flex items-center justify-between border-b border-border bg-background px-4 py-3 shadow-md">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-100/80 text-rose-600 shadow-sm dark:bg-rose-900/40 dark:text-rose-400">
-                  <FileText className="h-5 w-5" />
-                </div>
-                <div>
-                  <h2 className="text-base font-semibold leading-tight px-2">{pdfSignerFile.title || pdfSignerFile.original_name}</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5 font-medium flex items-center gap-1.5 px-2">
-                    <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                    </span>
-                    Инструмент подписания PDF
-                  </p>
-                </div>
-              </div>
-              <Button variant="outline" size="sm" onClick={() => setPdfSignerFile(null)} className="h-9 gap-2 shadow-sm border-border hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all">
-                <X className="h-4 w-4" />
-                Закрыть
-              </Button>
-            </div>
-            <div className="flex-1 overflow-auto bg-[#f4f4f4] dark:bg-neutral-900 p-4 lg:p-8 flex justify-center">
-              <div className="w-full max-w-5xl bg-background rounded-xl shadow-sm border border-border">
-                <PdfSignerPanel
-                  file={pdfSignerFile}
-                  onClose={() => setPdfSignerFile(null)}
-                  onError={setErrorText}
-                  onFileUpdated={onFileUpdated}
-                  pollFileStatus={pollFilesStatus}
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
         {docxEditorFile && docxConfig && docxServerUrl && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 lg:p-6 bg-background/50 backdrop-blur-sm animate-in fade-in zoom-in duration-200">
             <div

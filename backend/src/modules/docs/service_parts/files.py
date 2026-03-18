@@ -289,6 +289,12 @@ class DocsFilesMixin:
         title: str | None,
     ) -> File:
         normalized_type = self._resolve_generated_file_type(file_type)
+        if normalized_type == FileType.PDF:
+            raise DocsModuleError(
+                code="PDF_DISABLED",
+                message="Создание PDF отключено. Используйте DOCX.",
+                status_code=422,
+            )
         if folder_id is not None:
             folder = await self.repo.get_folder(folder_id=folder_id, org_id=org_id)
             if folder is None:
@@ -449,7 +455,7 @@ class DocsFilesMixin:
             file_id=file_obj.id,
             s3_key=key,
             s3_bucket=current_version.s3_bucket,
-            size_bytes=int(len(payload)),
+            size_bytes=len(payload),
             sha256=sha256(payload).hexdigest(),
             mime="text/plain",
             meta_json={"source": "save_text", "replaced_ready_size": replaced_ready_size},
@@ -458,7 +464,7 @@ class DocsFilesMixin:
         await self.repo.create_file_version(version)
 
         usage = await self.repo.get_storage_usage_for_update(org_id=org_id)
-        usage.used_bytes = max(0, int(usage.used_bytes) + int(len(payload)) - replaced_ready_size)
+        usage.used_bytes = max(0, int(usage.used_bytes) + len(payload) - replaced_ready_size)
         await self.repo.update_storage_usage(usage)
 
         if title is not None:
@@ -467,7 +473,7 @@ class DocsFilesMixin:
         file_obj.s3_key = key
         file_obj.s3_bucket = current_version.s3_bucket
         file_obj.content_type = "text/plain"
-        file_obj.size = int(len(payload))
+        file_obj.size = len(payload)
         file_obj.status = FileStatus.READY.value
         await self.repo.update_file(file_obj)
 
@@ -481,7 +487,7 @@ class DocsFilesMixin:
                 "event": "version_created",
                 "source": "save_text",
                 "file_id": str(file_obj.id),
-                "size_bytes": int(len(payload)),
+                "size_bytes": len(payload),
             },
         )
         await self.audit_repo.log(
@@ -493,7 +499,7 @@ class DocsFilesMixin:
             meta={
                 "event": "text_saved",
                 "version_id": str(version.id),
-                "size_bytes": int(len(payload)),
+                "size_bytes": len(payload),
             },
         )
         with suppress(Exception):

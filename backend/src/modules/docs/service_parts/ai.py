@@ -55,6 +55,12 @@ class DocsAIMixin:
             raise DocsModuleError(code="PROMPT_TOO_LARGE", message="Слишком длинный prompt для генерации документа")
 
         normalized_type = self._resolve_generated_file_type(file_type)
+        if normalized_type.value == "pdf":
+            raise DocsModuleError(
+                code="PDF_DISABLED",
+                message="Генерация PDF отключена. Используйте DOCX.",
+                status_code=422,
+            )
         normalized_template = str(template).strip() if template else None
         normalized_language = str(language).strip() if language else "ru"
         doc_title = (str(title or "").strip() or f"AI {normalized_type.value.upper()} документ")[:500]

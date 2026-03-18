@@ -7,6 +7,7 @@ import asyncio
 import base64
 import binascii
 import logging
+import os
 import uuid
 from collections.abc import Iterable
 from contextlib import suppress
@@ -41,8 +42,10 @@ from src.modules.audit.models import AuditLog
 from src.modules.billing.token_wallet import spend_tokens
 from src.modules.docs.ai_generator import DEFAULT_AI_DOCUMENT_GENERATOR
 from src.modules.docs.antivirus import AntivirusScanResult, build_antivirus_provider
+from src.modules.docs.doc_editor_provider import DEFAULT_DOC_EDITOR_PROVIDER
 from src.modules.docs.document_render import render_document_bytes
 from src.modules.docs.domain import FileStatus, FileType
+from src.modules.docs.errors import DocsModuleError
 from src.modules.docs.magic_bytes import validate_magic_bytes
 from src.modules.docs.models import DocsAIGenerationJob, FileVersion, OrgStorageUsage
 from src.modules.docs.pdf_stamper import PdfStampInput, stamp_pdf_with_signature
@@ -95,7 +98,54 @@ def scan_version(version_id: str) -> dict[str, str]:
             _inc_scan_metric("status_not_scanning")
             return {"status": "skipped", "reason": "status_not_scanning"}
 
+        initial_uploaded_size = int(file_obj.size or 0)
         scan_result = _scan_payload(file_obj=file_obj, version=version)
+        if (
+            scan_result.result == "clean"
+            and file_obj.type == FileType.PDF.value
+            and bool(getattr(settings, "DOCS_PDF_AUTO_CONVERT_TO_DOCX", False))
+        ):
+            try:
+                presigned_url = DEFAULT_STORAGE_PROVIDER.generate_internal_presigned_get_url(
+                    bucket=version.s3_bucket,
+                    key=version.s3_key,
+                    expires_in=900,
+                )
+                converted_docx = _run_async_on_worker_loop(
+                    DEFAULT_DOC_EDITOR_PROVIDER.convert_to_docx(file_url=presigned_url, file_type="pdf")
+                )
+                converted_scan = _scan_payload_bytes(file_type=FileType.DOCX, payload=converted_docx)
+                if converted_scan.result != "clean":
+                    scan_result = AntivirusScanResult(
+                        result=converted_scan.result,
+                        details=f"pdf_to_docx_scan_failed: {converted_scan.details}",
+                        threat_name=converted_scan.threat_name,
+                    )
+                else:
+                    DEFAULT_STORAGE_PROVIDER.put_object_bytes(
+                        bucket=version.s3_bucket,
+                        key=version.s3_key,
+                        payload=converted_docx,
+                        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    )
+                    file_obj.type = FileType.DOCX.value
+                    file_obj.content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    file_obj.size = len(converted_docx)
+                    file_obj.filename = _to_docx_filename(file_obj.filename)
+                    file_obj.original_name = _to_docx_filename(file_obj.original_name or file_obj.filename)
+                    version.size_bytes = len(converted_docx)
+                    version.mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    version.sha256 = sha256(converted_docx).hexdigest()
+                    version_meta = version.meta_json if isinstance(version.meta_json, dict) else {}
+                    version_meta["conversion"] = {
+                        "source_format": "pdf",
+                        "target_format": "docx",
+                        "converted_at": datetime.now(UTC).isoformat(),
+                    }
+                    version.meta_json = version_meta
+            except (DocsModuleError, httpx.HTTPError, RuntimeError, TypeError, ValueError) as exc:
+                scan_result = AntivirusScanResult(result="error", details=f"pdf_to_docx_convert_failed: {exc}")
+
         final_status = FileStatus.READY.value if scan_result.result == "clean" else FileStatus.BLOCKED.value
 
         usage = (
@@ -121,11 +171,12 @@ def scan_version(version_id: str) -> dict[str, str]:
             session.add(usage)
             session.flush()
 
-        usage.reserved_bytes = max(0, int(usage.reserved_bytes) - int(file_obj.size))
+        usage.reserved_bytes = max(0, int(usage.reserved_bytes) - int(initial_uploaded_size))
         version_meta = version.meta_json if isinstance(version.meta_json, dict) else {}
         replaced_ready_size = int(version_meta.get("replaced_ready_size") or 0)
+        final_file_size = int(file_obj.size or 0)
         if final_status == FileStatus.READY.value:
-            usage.used_bytes = max(0, int(usage.used_bytes) + int(file_obj.size) - replaced_ready_size)
+            usage.used_bytes = max(0, int(usage.used_bytes) + final_file_size - replaced_ready_size)
         elif replaced_ready_size > 0:
             usage.used_bytes = max(0, int(usage.used_bytes) - replaced_ready_size)
 
@@ -298,7 +349,7 @@ def pdf_stamp_sign(version_id: str, payload: dict, requested_by: str | None = No
             session.flush()
 
             old_size = int(source_version.size_bytes or file_obj.size or 0)
-            new_size = int(len(stamped_pdf))
+            new_size = len(stamped_pdf)
             usage.used_bytes = max(0, int(usage.used_bytes) + new_size - old_size)
 
             file_obj.current_version_id = new_version.id
@@ -500,7 +551,7 @@ async def run_ai_generate_inline(*, job_id: str, task_id: str = "inline") -> dic
         text=generated.text,
         title=snapshot["title"],
     )
-    payload_size = int(len(payload))
+    payload_size = len(payload)
     max_upload_bytes = int(max(1, int(settings.FILE_MAX_UPLOAD_MB)) * 1024 * 1024)
     if payload_size > max_upload_bytes:
         async with UnitOfWork() as uow:
@@ -970,6 +1021,16 @@ def _iter_payload_chunks(payload: bytes, *, chunk_size: int) -> Iterable[bytes]:
     while offset < len(payload):
         yield payload[offset : offset + chunk_size]
         offset += chunk_size
+
+
+def _to_docx_filename(raw_name: str | None) -> str:
+    """Нормализовать имя файла к расширению .docx."""
+    name = str(raw_name or "").strip()
+    if not name:
+        return "document.docx"
+    stem, _ = os.path.splitext(name)
+    safe_stem = (stem or name).strip() or "document"
+    return f"{safe_stem}.docx"
 
 
 def _inc_scan_metric(result: str) -> None:

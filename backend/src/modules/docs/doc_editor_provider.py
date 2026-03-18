@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import quote
+from xml.etree import ElementTree
 
 import httpx
 import jwt
@@ -97,6 +98,14 @@ class OnlyOfficeDocumentEditorProvider:
 
     async def convert_to_pdf(self, *, file_url: str, file_type: str) -> bytes:
         """Сконвертировать файл в PDF через ConvertService.ashx OnlyOffice."""
+        return await self._convert_file_bytes(file_url=file_url, file_type=file_type, output_type="pdf")
+
+    async def convert_to_docx(self, *, file_url: str, file_type: str) -> bytes:
+        """Сконвертировать файл в DOCX через ConvertService.ashx OnlyOffice."""
+        return await self._convert_file_bytes(file_url=file_url, file_type=file_type, output_type="docx")
+
+    async def _convert_file_bytes(self, *, file_url: str, file_type: str, output_type: str) -> bytes:
+        """Сконвертировать файл через ConvertService и вернуть bytes результата."""
         self.ensure_configured()
 
         convert_url = f"{self.document_server_url}/ConvertService.ashx"
@@ -104,7 +113,7 @@ class OnlyOfficeDocumentEditorProvider:
             "async": False,
             "filetype": str(file_type).replace(".", "").lower(),
             "key": str(int(datetime.now(UTC).timestamp())),
-            "outputtype": "pdf",
+            "outputtype": str(output_type).replace(".", "").lower(),
             "url": file_url,
         }
 
@@ -116,22 +125,41 @@ class OnlyOfficeDocumentEditorProvider:
         async with httpx.AsyncClient(timeout=httpx.Timeout(timeout_s), follow_redirects=True) as client:
             response = await client.post(convert_url, json=payload, headers={"Accept": "application/json"})
             response.raise_for_status()
-            data = response.json()
+            data: dict | None = None
+            file_url_out: str | None = None
+            error_code: str | int | None = None
+            try:
+                data = response.json()
+            except ValueError:
+                data = None
 
-            if data.get("error"):
+            if isinstance(data, dict):
+                error_code = data.get("error")
+                file_url_out = str(data.get("fileUrl") or "").strip() or None
+            else:
+                try:
+                    root = ElementTree.fromstring(response.text or "")
+                    error_code = (root.findtext("Error") or "").strip() or None
+                    file_url_out = (root.findtext("FileUrl") or "").strip() or None
+                except ElementTree.ParseError as exc:
+                    raise DocsModuleError(
+                        code="ONLYOFFICE_CONVERT_ERROR",
+                        message="OnlyOffice вернул некорректный ответ конвертации",
+                    ) from exc
+
+            if error_code not in (None, "", 0, "0"):
                 raise DocsModuleError(
-                    code="ONLYOFFICE_CONVERT_ERROR", message=f"Ошибка конвертации OnlyOffice: {data.get('error')}"
+                    code="ONLYOFFICE_CONVERT_ERROR", message=f"Ошибка конвертации OnlyOffice: {error_code}"
                 )
 
-            file_url = data.get("fileUrl")
-            if not file_url:
+            if not file_url_out:
                 raise DocsModuleError(
                     code="ONLYOFFICE_CONVERT_ERROR", message="OnlyOffice не вернул ссылку на сконвертированный файл"
                 )
 
-            pdf_resp = await client.get(file_url)
-            pdf_resp.raise_for_status()
-            return bytes(pdf_resp.content)
+            converted_resp = await client.get(file_url_out)
+            converted_resp.raise_for_status()
+            return bytes(converted_resp.content)
 
     def build_open_docx_payload(
         self,

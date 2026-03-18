@@ -197,34 +197,6 @@ class FileVersionOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class PdfSignRequest(BaseModel):
-    """Запрос на наложение подписи на PDF."""
-
-    page: int = Field(ge=1)
-    x: float = Field(ge=0)
-    y: float = Field(ge=0)
-    width: float = Field(gt=0)
-    height: float = Field(gt=0)
-    image: str = Field(min_length=10, max_length=2_000_000)
-    author: str | None = Field(default=None, max_length=120)
-
-    @field_validator("author", mode="before")
-    @classmethod
-    def _normalize_author(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        normalized = str(value).strip()
-        return normalized or None
-
-    @field_validator("image", mode="before")
-    @classmethod
-    def _normalize_image(cls, value: str) -> str:
-        normalized = str(value).strip()
-        if not normalized:
-            raise ValueError("Поле image не может быть пустым")
-        return normalized
-
-
 class OpenDocxOut(BaseModel):
     """Ответ открытия DOCX редактора OnlyOffice."""
 

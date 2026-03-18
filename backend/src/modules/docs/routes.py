@@ -38,13 +38,12 @@ from src.modules.docs.schemas import (
     InitUploadRequest,
     MoveFileRequest,
     OpenDocxOut,
-    PdfSignRequest,
     SaveTextRequest,
     UpdateFolderRequest,
     UsageOut,
 )
 from src.modules.docs.service import DocsService
-from src.modules.docs.tasks import ai_generate, pdf_stamp_sign, run_ai_generate_inline, scan_version
+from src.modules.docs.tasks import ai_generate, run_ai_generate_inline, scan_version
 from src.modules.files.storage import get_s3_client
 
 router = APIRouter(prefix="/docs", tags=["docs"])
@@ -391,45 +390,6 @@ async def list_file_versions(
     return ApiResponse(data=payload)
 
 
-@router.post("/files/{file_id}/pdf/sign", response_model=ApiResponse[FileOut])
-async def sign_pdf(
-    file_id: uuid.UUID,
-    body: PdfSignRequest,
-    current_user: CurrentUser = Depends(
-        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE),
-    ),
-    _: None = Depends(require_access(resource_type="files", permission="can_write", resource_id_param="file_id")),
-):
-    """Запустить пайплайн подписи PDF (stamp -> scan -> ready/blocked)."""
-    async with UnitOfWork() as uow:
-        service = DocsService(uow.session)
-        try:
-            result = await service.request_pdf_sign(
-                org_id=current_user.org_id,
-                user_id=current_user.user_id,
-                file_id=file_id,
-            )
-        except DocsModuleError as error:
-            return _error_response(error)
-        await uow.session.refresh(result.file)
-        await uow.commit()
-        try:
-            pdf_stamp_sign.delay(
-                str(result.source_version_id),
-                body.model_dump(),
-                str(current_user.user_id),
-            )
-        except (OperationalError, OSError, RuntimeError):
-            logger.exception("docs_pdf_sign_enqueue_failed", extra={"file_id": str(file_id)})
-            pdf_stamp_sign.run(
-                str(result.source_version_id),
-                body.model_dump(),
-                str(current_user.user_id),
-            )
-        item = FileOut.model_validate(result.file)
-    return ApiResponse(data=item)
-
-
 @router.post("/files/{file_id}/open-docx", response_model=ApiResponse[OpenDocxOut])
 async def open_docx(
     file_id: uuid.UUID,
@@ -508,6 +468,50 @@ async def internal_download(version_id: uuid.UUID, token: str):
         raise
     except (BotoCoreError, ClientError, KeyError, OSError) as err:
         logger.error(f"S3 download failed internally: {err}")
+        raise HTTPException(status_code=500, detail="Storage error") from err
+
+
+@router.get("/files/internal-source-download/{version_id}")
+async def internal_source_download(version_id: uuid.UUID, token: str):
+    """Внутренний роут для скачивания исходника конвертации (pdf/txt/docx)."""
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+        if payload.get("action") != "internal_download_source" or payload.get("sub") != str(version_id):
+            raise HTTPException(status_code=403, detail="Invalid token scope")
+    except jwt.InvalidTokenError as err:
+        raise HTTPException(status_code=403, detail="Invalid token") from err
+
+    async with UnitOfWork() as uow:
+        service = DocsService(uow.session)
+        try:
+            version = await service.repo.get_file_version_by_id(version_id=version_id)
+            if not version or not version.s3_key:
+                raise HTTPException(status_code=404, detail="Version not found")
+        except DocsModuleError as err:
+            raise HTTPException(status_code=404, detail="Version not found") from err
+
+    s3 = get_s3_client()
+    try:
+        resp = s3.get_object(Bucket=version.s3_bucket, Key=version.s3_key)
+        payload = bytes(resp["Body"].read())
+        media_type = str(resp.get("ContentType", "application/octet-stream") or "application/octet-stream")
+        extension = "bin"
+        if media_type == "application/pdf":
+            extension = "pdf"
+        elif media_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            extension = "docx"
+        elif media_type == "text/plain":
+            extension = "txt"
+        return Response(
+            content=payload,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''source.{extension}",
+                "Cache-Control": "no-store",
+            },
+        )
+    except (BotoCoreError, ClientError, KeyError, OSError) as err:
+        logger.error(f"S3 source download failed internally: {err}")
         raise HTTPException(status_code=500, detail="Storage error") from err
 
 

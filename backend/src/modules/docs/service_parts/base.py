@@ -40,12 +40,6 @@ class FinishUploadResult:
 
 
 @dataclass(slots=True)
-class PdfSignRequestResult:
-    file: File
-    source_version_id: uuid.UUID
-
-
-@dataclass(slots=True)
 class OpenDocxResult:
     file: File
     document_server_url: str

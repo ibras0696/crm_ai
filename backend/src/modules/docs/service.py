@@ -11,7 +11,6 @@ from src.modules.docs.service_parts.base import (
     DocsServiceBase,
     FinishUploadResult,
     OpenDocxResult,
-    PdfSignRequestResult,
 )
 from src.modules.docs.service_parts.editing import DocsEditingMixin
 from src.modules.docs.service_parts.files import DocsFilesMixin
@@ -26,7 +25,6 @@ __all__ = [
     "DocsService",
     "FinishUploadResult",
     "OpenDocxResult",
-    "PdfSignRequestResult",
     "check_ai_limits",
 ]
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import os
 import uuid
 from contextlib import contextmanager
@@ -16,7 +15,6 @@ import httpx
 import pytest
 from botocore.exceptions import EndpointConnectionError
 from httpx import AsyncClient
-from PIL import Image, ImageDraw
 from reportlab.pdfgen import canvas
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -27,7 +25,7 @@ from src.modules.audit.models import AuditLog
 from src.modules.billing.models import Plan
 from src.modules.docs.ai_generator import AIGeneratedDocument, AIGenerationRuntime
 from src.modules.docs.models import FileVersion
-from src.modules.docs.tasks import cleanup_old_doc_versions, pdf_stamp_sign, run_ai_generate_inline, scan_version
+from src.modules.docs.tasks import cleanup_old_doc_versions, run_ai_generate_inline, scan_version
 from src.modules.files.models import File
 
 
@@ -139,17 +137,6 @@ def _make_pdf_bytes(text: str = "Docs PDF") -> bytes:
     c.showPage()
     c.save()
     return stream.getvalue()
-
-
-def _make_signature_data_url() -> str:
-    """Сгенерировать валидную PNG-подпись (data-url)."""
-    image = Image.new("RGBA", (220, 90), (255, 255, 255, 0))
-    draw = ImageDraw.Draw(image)
-    draw.line((8, 60, 70, 20, 120, 70, 210, 30), fill=(20, 20, 20, 255), width=4)
-    stream = BytesIO()
-    image.save(stream, format="PNG")
-    encoded = base64.b64encode(stream.getvalue()).decode("ascii")
-    return f"data:image/png;base64,{encoded}"
 
 
 def _make_docx_bytes(text: str = "Hello DOCX") -> bytes:
@@ -1171,183 +1158,34 @@ async def test_docs_minio_upload_scan_and_download_integration(client: AsyncClie
 
 
 @pytest.mark.asyncio
-async def test_docs_pdf_sign_creates_new_version_and_ready(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+async def test_docs_pdf_upload_is_converted_to_docx(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
     token = await _register_owner(client)
+
+    async def _fake_convert_to_docx(*, file_url: str, file_type: str) -> bytes:
+        _ = file_url
+        assert file_type == "pdf"
+        return _make_docx_bytes("Converted from PDF")
+
+    monkeypatch.setattr("src.modules.docs.tasks.DEFAULT_DOC_EDITOR_PROVIDER.convert_to_docx", _fake_convert_to_docx)
+
     pdf_bytes = _make_pdf_bytes("Sprint4 PDF")
-    file_id, source_version_id = await _create_ready_pdf_file(
+    file_id, _ = await _create_ready_pdf_file(
         client,
         token,
         monkeypatch,
         pdf_bytes=pdf_bytes,
     )
 
-    storage_map: dict[str, bytes] = {}
-
-    def _put_object_bytes(*, bucket: str, key: str, payload: bytes, content_type: str) -> None:
-        _ = bucket, content_type
-        storage_map[key] = payload
-
-    def _get_object_bytes(*, bucket: str, key: str) -> bytes:
-        _ = bucket
-        if key in storage_map:
-            return storage_map[key]
-        raise KeyError(key)
-
-    async with UnitOfWork() as uow:
-        file_row = (
-            await uow.session.execute(
-                select(File).where(File.id == uuid.UUID(file_id)).limit(1),
-            )
-        ).scalar_one()
-        src_version = (
-            await uow.session.execute(
-                select(FileVersion).where(FileVersion.id == uuid.UUID(source_version_id)).limit(1),
-            )
-        ).scalar_one()
-        storage_map[file_row.s3_key] = pdf_bytes
-        storage_map[src_version.s3_key] = pdf_bytes
-
-    monkeypatch.setattr("src.modules.docs.tasks.sync_session_factory", _build_test_sync_session_factory())
-    monkeypatch.setattr("src.modules.docs.tasks.DEFAULT_STORAGE_PROVIDER.put_object_bytes", _put_object_bytes)
-    monkeypatch.setattr("src.modules.docs.tasks.DEFAULT_STORAGE_PROVIDER.get_object_bytes", _get_object_bytes)
-    monkeypatch.setattr("src.modules.docs.routes.pdf_stamp_sign.delay", lambda *_args, **_kwargs: None)
-
-    signature_png = _make_signature_data_url()
-
-    sign_resp = await client.post(
-        f"/api/v1/docs/files/{file_id}/pdf/sign",
-        json={
-            "page": 1,
-            "x": 120,
-            "y": 140,
-            "width": 180,
-            "height": 80,
-            "image": signature_png,
-            "author": "QA",
-        },
-        headers=_headers(token),
-    )
-    assert sign_resp.status_code == 200
-    assert sign_resp.json()["ok"] is True
-    assert sign_resp.json()["data"]["status"] == "scanning"
-
-    result = pdf_stamp_sign.run(
-        source_version_id,
-        {
-            "page": 1,
-            "x": 120,
-            "y": 140,
-            "width": 180,
-            "height": 80,
-            "image": signature_png,
-            "author": "QA",
-        },
-        None,
-    )
-    assert result["status"] == "ready"
-
     file_out = await client.get(f"/api/v1/docs/files/{file_id}", headers=_headers(token))
     assert file_out.status_code == 200
     assert file_out.json()["ok"] is True
     assert file_out.json()["data"]["status"] == "ready"
-    first_signed_version_id = file_out.json()["data"]["current_version_id"]
-    assert first_signed_version_id != source_version_id
-
-    # Повторно: подпись на 5-й странице с другими координатами.
-    sign_resp_2 = await client.post(
-        f"/api/v1/docs/files/{file_id}/pdf/sign",
-        json={
-            "page": 5,
-            "x": 80,
-            "y": 200,
-            "width": 140,
-            "height": 60,
-            "image": signature_png,
-            "author": "QA2",
-        },
-        headers=_headers(token),
+    assert file_out.json()["data"]["type"] == "docx"
+    assert (
+        file_out.json()["data"]["content_type"]
+        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
-    assert sign_resp_2.status_code == 200
-    assert sign_resp_2.json()["ok"] is True
-    assert sign_resp_2.json()["data"]["status"] == "scanning"
-
-    result_2 = pdf_stamp_sign.run(
-        first_signed_version_id,
-        {
-            "page": 5,
-            "x": 80,
-            "y": 200,
-            "width": 140,
-            "height": 60,
-            "image": signature_png,
-            "author": "QA2",
-        },
-        None,
-    )
-    assert result_2["status"] == "ready"
-
-    file_out_2 = await client.get(f"/api/v1/docs/files/{file_id}", headers=_headers(token))
-    assert file_out_2.status_code == 200
-    assert file_out_2.json()["ok"] is True
-    assert file_out_2.json()["data"]["status"] == "ready"
-    assert file_out_2.json()["data"]["current_version_id"] != first_signed_version_id
-
-    versions = await client.get(f"/api/v1/docs/files/{file_id}/versions", headers=_headers(token))
-    assert versions.status_code == 200
-    assert versions.json()["ok"] is True
-    assert len(versions.json()["data"]) >= 3
-    assert versions.json()["data"][0]["meta_json"] is not None
-    assert "signatures" in versions.json()["data"][0]["meta_json"]
-
-
-@pytest.mark.asyncio
-async def test_docs_pdf_sign_forbidden_for_not_ready_status(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
-    token = await _register_owner(client)
-    _disable_scan_queue(monkeypatch)
-    monkeypatch.setattr(
-        "src.modules.docs.service.DEFAULT_STORAGE_PROVIDER.generate_presigned_put_url",
-        lambda **kwargs: ("https://example.local/put", {"Content-Type": kwargs["content_type"]}),
-    )
-
-    pdf_bytes = _make_pdf_bytes("Pending")
-    init_upload = await client.post(
-        "/api/v1/docs/files/init-upload",
-        json={
-            "filename": "pending-sign.pdf",
-            "content_type": "application/pdf",
-            "size_bytes": len(pdf_bytes),
-        },
-        headers=_headers(token),
-    )
-    assert init_upload.status_code == 200
-    assert init_upload.json()["ok"] is True
-    file_id = str(init_upload.json()["data"]["file_id"])
-
-    finish = await client.post(
-        "/api/v1/docs/files/finish-upload",
-        json={"file_id": file_id, "size_bytes": len(pdf_bytes)},
-        headers=_headers(token),
-    )
-    assert finish.status_code == 200
-    assert finish.json()["ok"] is True
-    assert finish.json()["data"]["status"] == "scanning"
-
-    signature_png = _make_signature_data_url()
-    sign_resp = await client.post(
-        f"/api/v1/docs/files/{file_id}/pdf/sign",
-        json={
-            "page": 1,
-            "x": 100,
-            "y": 100,
-            "width": 120,
-            "height": 60,
-            "image": signature_png,
-        },
-        headers=_headers(token),
-    )
-    assert sign_resp.status_code == 200
-    assert sign_resp.json()["ok"] is False
-    assert sign_resp.json()["error"]["code"] == "FILE_NOT_READY"
+    assert str(file_out.json()["data"]["original_name"]).lower().endswith(".docx")
 
 
 @pytest.mark.asyncio

@@ -72,16 +72,6 @@ export interface DocsFileVersion {
 }
 
 
-export interface DocsPdfSignPayload {
-  page: number
-  x: number
-  y: number
-  width: number
-  height: number
-  image: string
-  author?: string | null
-}
-
 export interface DocsOpenDocxResult {
   file: DocsFile
   document_server_url: string
@@ -146,8 +136,6 @@ export const docsApi = {
     api.patch<ApiResponse<DocsFile>>(`/docs/files/${fileId}`, payload),
   getFile: (fileId: string) => api.get<ApiResponse<DocsFile>>(`/docs/files/${fileId}`),
   listFileVersions: (fileId: string) => api.get<ApiResponse<DocsFileVersion[]>>(`/docs/files/${fileId}/versions`),
-  signPdf: (fileId: string, payload: DocsPdfSignPayload) =>
-    api.post<ApiResponse<DocsFile>>(`/docs/files/${fileId}/pdf/sign`, payload),
   openDocx: (fileId: string) => api.post<ApiResponse<DocsOpenDocxResult>>(`/docs/files/${fileId}/open-docx`, {}),
   aiGenerate: (payload: DocsAIGeneratePayload) =>
     api.post<ApiResponse<DocsAIGenerateResult>>('/docs/files/ai/generate', payload),

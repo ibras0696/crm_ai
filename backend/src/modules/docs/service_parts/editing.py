@@ -12,49 +12,10 @@ from src.modules.docs.doc_editor_provider import DEFAULT_DOC_EDITOR_PROVIDER, On
 from src.modules.docs.domain import FileStatus, FileType
 from src.modules.docs.errors import DocsModuleError, InvalidTypeError
 from src.modules.docs.models import FileVersion
-from src.modules.docs.service_parts.base import (
-    OpenDocxResult,
-    PdfSignRequestResult,
-    _inc_upload_metric,
-    _inc_version_metric,
-)
+from src.modules.docs.service_parts.base import OpenDocxResult, _inc_upload_metric, _inc_version_metric
 
 
 class DocsEditingMixin:
-    async def request_pdf_sign(
-        self,
-        *,
-        org_id: uuid.UUID,
-        user_id: uuid.UUID,
-        file_id: uuid.UUID,
-    ) -> PdfSignRequestResult:
-        file_obj = await self.get_file(org_id=org_id, file_id=file_id)
-        if file_obj.type != FileType.PDF.value:
-            raise InvalidTypeError("Подпись поддерживается только для PDF")
-        if file_obj.status != FileStatus.READY.value:
-            raise DocsModuleError(
-                code="FILE_NOT_READY",
-                message="Нельзя подписывать PDF в статусе, отличном от READY",
-            )
-        if file_obj.current_version_id is None:
-            raise DocsModuleError(code="FILE_VERSION_NOT_FOUND", message="У файла отсутствует текущая версия")
-
-        file_obj.status = FileStatus.SCANNING.value
-        await self.repo.update_file(file_obj)
-        await self.audit_repo.log(
-            org_id=org_id,
-            actor_id=user_id,
-            action=AuditAction.UPDATE,
-            entity_type="docs_file",
-            entity_id=str(file_obj.id),
-            meta={
-                "event": "pdf_sign_requested",
-                "source_version_id": str(file_obj.current_version_id),
-            },
-        )
-        _inc_upload_metric("scanning")
-        return PdfSignRequestResult(file=file_obj, source_version_id=file_obj.current_version_id)
-
     async def open_docx(
         self,
         *,

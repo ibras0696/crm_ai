@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import binascii
 import logging
 import os
 import uuid
@@ -16,6 +14,7 @@ from hashlib import sha256
 from typing import Any
 
 import httpx
+import jwt
 from botocore.exceptions import BotoCoreError, ClientError
 from kombu.exceptions import OperationalError
 from sqlalchemy import delete, func, select
@@ -48,7 +47,6 @@ from src.modules.docs.domain import FileStatus, FileType
 from src.modules.docs.errors import DocsModuleError
 from src.modules.docs.magic_bytes import validate_magic_bytes
 from src.modules.docs.models import DocsAIGenerationJob, FileVersion, OrgStorageUsage
-from src.modules.docs.pdf_stamper import PdfStampInput, stamp_pdf_with_signature
 from src.modules.docs.repository import DocsRepository
 from src.modules.docs.storage import DEFAULT_STORAGE_PROVIDER
 from src.modules.files.models import File
@@ -103,16 +101,17 @@ def scan_version(version_id: str) -> dict[str, str]:
         if (
             scan_result.result == "clean"
             and file_obj.type == FileType.PDF.value
-            and bool(getattr(settings, "DOCS_PDF_AUTO_CONVERT_TO_DOCX", False))
         ):
             try:
-                presigned_url = DEFAULT_STORAGE_PROVIDER.generate_internal_presigned_get_url(
-                    bucket=version.s3_bucket,
-                    key=version.s3_key,
-                    expires_in=900,
-                )
+                token_payload = {
+                    "sub": str(version.id),
+                    "action": "internal_download_source",
+                    "exp": datetime.now(UTC) + timedelta(minutes=15),
+                }
+                internal_token = jwt.encode(token_payload, settings.SECRET_KEY, algorithm="HS256")
+                source_url = f"http://api:8000/api/v1/docs/files/internal-source-download/{version.id}?token={internal_token}"
                 converted_docx = _run_async_on_worker_loop(
-                    DEFAULT_DOC_EDITOR_PROVIDER.convert_to_docx(file_url=presigned_url, file_type="pdf")
+                    DEFAULT_DOC_EDITOR_PROVIDER.convert_to_docx(file_url=source_url, file_type="pdf")
                 )
                 converted_scan = _scan_payload_bytes(file_type=FileType.DOCX, payload=converted_docx)
                 if converted_scan.result != "clean":
@@ -221,188 +220,6 @@ def scan_version(version_id: str) -> dict[str, str]:
         "status": final_status,
         "scan_result": scan_result.result,
         "version_id": str(version_uuid),
-    }
-
-
-@celery.task(name="pdf_stamp_sign")
-def pdf_stamp_sign(version_id: str, payload: dict, requested_by: str | None = None) -> dict[str, str]:
-    """Наложить подпись на PDF, создать новую версию и прогнать AV-gating."""
-    try:
-        source_version_id = uuid.UUID(str(version_id))
-    except (TypeError, ValueError, AttributeError):
-        _inc_scan_metric("invalid_version_id")
-        return {"status": "error", "reason": "invalid_version_id"}
-
-    file_status = FileStatus.BLOCKED.value
-    with sync_session_factory() as session:
-        row = session.execute(
-            select(FileVersion, File)
-            .join(File, File.id == FileVersion.file_id)
-            .where(FileVersion.id == source_version_id)
-            .limit(1)
-        ).first()
-        if row is None:
-            _inc_scan_metric("version_not_found")
-            return {"status": "error", "reason": "version_not_found"}
-
-        source_version, file_obj = row
-        if file_obj.type != FileType.PDF.value:
-            _inc_scan_metric("invalid_file_type")
-            return {"status": "error", "reason": "invalid_file_type"}
-        if file_obj.status != FileStatus.SCANNING.value:
-            _inc_scan_metric("status_not_scanning")
-            return {"status": "skipped", "reason": "status_not_scanning"}
-
-        try:
-            source_pdf = DEFAULT_STORAGE_PROVIDER.get_object_bytes(
-                bucket=source_version.s3_bucket,
-                key=source_version.s3_key,
-            )
-            signature_png = _decode_signature_png(str(payload.get("image") or ""))
-            stamp_input = PdfStampInput(
-                page=int(payload.get("page") or 1),
-                x=float(payload.get("x") or 0),
-                y=float(payload.get("y") or 0),
-                width=float(payload.get("width") or 0),
-                height=float(payload.get("height") or 0),
-                author=str(payload.get("author") or "").strip() or None,
-            )
-            stamped_pdf, stamp_meta = stamp_pdf_with_signature(
-                source_pdf=source_pdf,
-                signature_png=signature_png,
-                stamp=stamp_input,
-            )
-        except (BotoCoreError, ClientError, OSError, TypeError, ValueError, binascii.Error) as exc:
-            file_obj.status = FileStatus.BLOCKED.value
-            session.add(file_obj)
-            session.add(
-                AuditLog(
-                    org_id=file_obj.org_id,
-                    actor_id=_safe_uuid(requested_by) or file_obj.uploaded_by,
-                    action=AuditAction.UPDATE,
-                    entity_type="docs_file",
-                    entity_id=str(file_obj.id),
-                    meta={
-                        "event": "pdf_sign_failed",
-                        "source_version_id": str(source_version.id),
-                        "reason": str(exc)[:300],
-                    },
-                )
-            )
-            session.commit()
-            _inc_scan_metric("error")
-            _inc_upload_metric(FileStatus.BLOCKED.value)
-            return {"status": "blocked", "reason": "pdf_stamp_failed"}
-
-        scan_result = _scan_payload_bytes(file_type=FileType.PDF, payload=stamped_pdf)
-        final_status = FileStatus.READY.value if scan_result.result == "clean" else FileStatus.BLOCKED.value
-
-        usage = (
-            session.execute(
-                select(OrgStorageUsage).where(OrgStorageUsage.org_id == file_obj.org_id).with_for_update().limit(1)
-            )
-            .scalars()
-            .first()
-        )
-        if usage is None:
-            used_bytes = int(
-                session.execute(
-                    select(func.coalesce(func.sum(File.size), 0)).where(
-                        File.org_id == file_obj.org_id,
-                        File.type.in_([FileType.TXT.value, FileType.PDF.value, FileType.DOCX.value]),
-                        File.status == FileStatus.READY.value,
-                        File.current_version_id.is_not(None),
-                    )
-                ).scalar_one()
-                or 0
-            )
-            usage = OrgStorageUsage(org_id=file_obj.org_id, used_bytes=used_bytes, reserved_bytes=0)
-            session.add(usage)
-            session.flush()
-
-        actor_id = _safe_uuid(requested_by) or file_obj.uploaded_by
-        if final_status == FileStatus.READY.value:
-            new_version_id = uuid.uuid4()
-            new_key = DEFAULT_STORAGE_PROVIDER.build_version_key(
-                org_id=file_obj.org_id,
-                file_id=file_obj.id,
-                version_id=new_version_id,
-            )
-            DEFAULT_STORAGE_PROVIDER.put_object_bytes(
-                bucket=source_version.s3_bucket,
-                key=new_key,
-                payload=stamped_pdf,
-                content_type="application/pdf",
-            )
-            new_version = FileVersion(
-                id=new_version_id,
-                file_id=file_obj.id,
-                s3_key=new_key,
-                s3_bucket=source_version.s3_bucket,
-                size_bytes=len(stamped_pdf),
-                sha256=sha256(stamped_pdf).hexdigest(),
-                mime="application/pdf",
-                meta_json={"signatures": [stamp_meta]},
-                created_by=actor_id,
-            )
-            session.add(new_version)
-            session.flush()
-
-            old_size = int(source_version.size_bytes or file_obj.size or 0)
-            new_size = len(stamped_pdf)
-            usage.used_bytes = max(0, int(usage.used_bytes) + new_size - old_size)
-
-            file_obj.current_version_id = new_version.id
-            file_obj.s3_key = new_key
-            file_obj.s3_bucket = source_version.s3_bucket
-            file_obj.size = new_size
-            file_obj.status = FileStatus.READY.value
-
-            session.add(
-                AuditLog(
-                    org_id=file_obj.org_id,
-                    actor_id=actor_id,
-                    action=AuditAction.CREATE,
-                    entity_type="docs_file_version",
-                    entity_id=str(new_version.id),
-                    meta={
-                        "event": "version_created",
-                        "source": "pdf_sign",
-                        "file_id": str(file_obj.id),
-                        "size_bytes": int(new_size),
-                    },
-                )
-            )
-
-        else:
-            file_obj.status = FileStatus.BLOCKED.value
-        file_status = str(file_obj.status or final_status)
-
-        session.add(
-            AuditLog(
-                org_id=file_obj.org_id,
-                actor_id=actor_id,
-                action=AuditAction.UPDATE,
-                entity_type="docs_file",
-                entity_id=str(file_obj.id),
-                meta={
-                    "event": "pdf_sign_result",
-                    "source_version_id": str(source_version.id),
-                    "status": file_obj.status,
-                    "scan_result": scan_result.result,
-                    "threat_name": scan_result.threat_name,
-                    "details": scan_result.details,
-                },
-            )
-        )
-        session.commit()
-
-    _inc_scan_metric(scan_result.result)
-    _inc_upload_metric(file_status)
-    return {
-        "status": file_status,
-        "scan_result": scan_result.result,
-        "source_version_id": str(source_version_id),
     }
 
 
@@ -973,25 +790,6 @@ def _scan_payload_bytes(*, file_type: FileType, payload: bytes) -> AntivirusScan
     if av_result.result == "clean":
         return AntivirusScanResult(result="clean", details=magic_reason)
     return AntivirusScanResult(result="error", details=av_result.details or "scan_error")
-
-
-def _decode_signature_png(raw: str) -> bytes:
-    """Декодировать подпись из data-url/base64 строки."""
-    value = str(raw or "").strip()
-    if not value:
-        raise ValueError("empty_signature")
-
-    if value.startswith("data:"):
-        _, _, value = value.partition(",")
-    try:
-        decoded = base64.b64decode(value, validate=True)
-    except (binascii.Error, TypeError, ValueError) as exc:
-        raise ValueError("invalid_signature_base64") from exc
-    if len(decoded) < 20:
-        raise ValueError("signature_too_small")
-    if not decoded.startswith(b"\x89PNG\r\n\x1a\n"):
-        raise ValueError("signature_not_png")
-    return decoded
 
 
 def _safe_uuid(raw: str | None) -> uuid.UUID | None:

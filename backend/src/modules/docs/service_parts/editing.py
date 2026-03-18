@@ -75,6 +75,12 @@ class DocsEditingMixin:
         if version is None:
             raise DocsModuleError(code="FILE_VERSION_NOT_FOUND", message="Текущая версия файла не найдена")
 
+        document_title = str(file_obj.original_name or file_obj.title or "document.docx").strip()
+        if not document_title.lower().endswith(".docx"):
+            document_title = f"{document_title}.docx"
+        version_stamp = int(version.created_at.timestamp()) if getattr(version, "created_at", None) else 0
+        document_key = f"{version.id}-{version_stamp}"
+
         token_payload = {
             "sub": str(version.id),
             "action": "internal_download",
@@ -90,8 +96,8 @@ class DocsEditingMixin:
             ttl_seconds=7200,
         )
         open_payload: OnlyOfficeOpenDocxResult = DEFAULT_DOC_EDITOR_PROVIDER.build_open_docx_payload(
-            document_key=str(version.id),
-            title=file_obj.title or file_obj.original_name,
+            document_key=document_key,
+            title=document_title,
             file_url=download_url,
             callback_state_token=state_token,
             user_id=str(user_id),
@@ -168,7 +174,7 @@ class DocsEditingMixin:
             file_id=file_obj.id,
             s3_key=key,
             s3_bucket=source_version.s3_bucket,
-            size_bytes=int(len(docx_bytes)),
+            size_bytes=len(docx_bytes),
             sha256=sha256(docx_bytes).hexdigest(),
             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             meta_json={
@@ -188,7 +194,7 @@ class DocsEditingMixin:
         file_obj.s3_key = key
         file_obj.s3_bucket = source_version.s3_bucket
         file_obj.content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        file_obj.size = int(len(docx_bytes))
+        file_obj.size = len(docx_bytes)
         file_obj.status = FileStatus.SCANNING.value
         await self.repo.update_file(file_obj)
 
@@ -202,7 +208,7 @@ class DocsEditingMixin:
                 "event": "version_created",
                 "source": "onlyoffice_callback",
                 "file_id": str(file_obj.id),
-                "size_bytes": int(len(docx_bytes)),
+                "size_bytes": len(docx_bytes),
             },
         )
         await self.audit_repo.log(

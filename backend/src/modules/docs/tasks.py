@@ -110,6 +110,15 @@ def scan_version(version_id: str) -> dict[str, str]:
                 }
                 internal_token = jwt.encode(token_payload, settings.SECRET_KEY, algorithm="HS256")
                 source_url = f"http://api:8000/api/v1/docs/files/internal-source-download/{version.id}?token={internal_token}"
+                logger.info(
+                    "docs_pdf_to_docx_convert_started",
+                    extra={
+                        "file_id": str(file_obj.id),
+                        "version_id": str(version.id),
+                        "source": "internal_source_download",
+                        "source_url_path": f"/api/v1/docs/files/internal-source-download/{version.id}",
+                    },
+                )
                 converted_docx = _run_async_on_worker_loop(
                     DEFAULT_DOC_EDITOR_PROVIDER.convert_to_docx(file_url=source_url, file_type="pdf")
                 )
@@ -142,7 +151,23 @@ def scan_version(version_id: str) -> dict[str, str]:
                         "converted_at": datetime.now(UTC).isoformat(),
                     }
                     version.meta_json = version_meta
+                    logger.info(
+                        "docs_pdf_to_docx_convert_ok",
+                        extra={
+                            "file_id": str(file_obj.id),
+                            "version_id": str(version.id),
+                            "size_bytes": len(converted_docx),
+                        },
+                    )
             except (DocsModuleError, httpx.HTTPError, RuntimeError, TypeError, ValueError) as exc:
+                logger.error(
+                    "docs_pdf_to_docx_convert_failed",
+                    extra={
+                        "file_id": str(file_obj.id),
+                        "version_id": str(version.id),
+                        "error": str(exc)[:300],
+                    },
+                )
                 scan_result = AntivirusScanResult(result="error", details=f"pdf_to_docx_convert_failed: {exc}")
 
         final_status = FileStatus.READY.value if scan_result.result == "clean" else FileStatus.BLOCKED.value
@@ -640,6 +665,134 @@ def cleanup_old_doc_versions(self) -> dict[str, int | str]:
         session.commit()
     _inc_retention_metric("ok")
     return {"status": "ok", "deleted": int(deleted_count), "scanned_files": int(scanned_files)}
+
+
+@celery.task(name="docs_repair_docx_storage_integrity")
+def docs_repair_docx_storage_integrity(*, dry_run: bool = False, limit: int = 500) -> dict[str, int | str]:
+    """Проверить целостность текущих DOCX-версий в S3 и восстановить `create_empty` объекты."""
+    safe_limit = max(1, min(int(limit or 500), 5000))
+    checked = 0
+    issues = 0
+    recovered = 0
+    blocked = 0
+
+    with sync_session_factory() as session:
+        rows = (
+            session.execute(
+                select(File, FileVersion)
+                .join(FileVersion, FileVersion.id == File.current_version_id)
+                .where(
+                    File.type == FileType.DOCX.value,
+                    File.current_version_id.is_not(None),
+                )
+                .order_by(File.updated_at.desc())
+                .limit(safe_limit)
+            )
+        ).all()
+
+        for file_obj, version in rows:
+            checked += 1
+            payload: bytes | None = None
+            integrity_reason: str | None = None
+            try:
+                payload = DEFAULT_STORAGE_PROVIDER.get_object_bytes(bucket=version.s3_bucket, key=version.s3_key)
+            except (BotoCoreError, ClientError, KeyError, OSError, ValueError) as exc:
+                integrity_reason = f"storage_read_error:{type(exc).__name__}"
+
+            if payload is not None:
+                magic_ok, magic_reason = validate_magic_bytes(FileType.DOCX, payload)
+                if magic_ok:
+                    continue
+                integrity_reason = f"magic_mismatch:{magic_reason}"
+
+            issues += 1
+            version_meta = version.meta_json if isinstance(version.meta_json, dict) else {}
+            source = str(version_meta.get("source") or "").strip().lower()
+            if source == "create_empty":
+                if dry_run:
+                    continue
+
+                title = str(file_obj.title or file_obj.original_name or "Документ").strip() or "Документ"
+                regenerated, content_type, _ = render_document_bytes(file_type=FileType.DOCX, text="", title=title)
+                DEFAULT_STORAGE_PROVIDER.put_object_bytes(
+                    bucket=version.s3_bucket,
+                    key=version.s3_key,
+                    payload=regenerated,
+                    content_type=content_type,
+                )
+                file_obj.size = len(regenerated)
+                file_obj.content_type = content_type
+                version.size_bytes = len(regenerated)
+                version.mime = content_type
+                version.sha256 = sha256(regenerated).hexdigest()
+                version_meta["storage_recovery"] = {
+                    "strategy": "regenerate_empty_docx",
+                    "recovered_at": datetime.now(UTC).isoformat(),
+                    "reason": integrity_reason,
+                }
+                version.meta_json = version_meta
+                session.add(
+                    AuditLog(
+                        org_id=file_obj.org_id,
+                        actor_id=file_obj.uploaded_by,
+                        action=AuditAction.UPDATE,
+                        entity_type="docs_file",
+                        entity_id=str(file_obj.id),
+                        meta={
+                            "event": "docx_storage_repair_recovered",
+                            "version_id": str(version.id),
+                            "reason": integrity_reason,
+                        },
+                    )
+                )
+                recovered += 1
+                continue
+
+            if dry_run:
+                continue
+
+            file_obj.status = FileStatus.BLOCKED.value
+            version_meta["integrity_error"] = {
+                "reason": integrity_reason,
+                "detected_at": datetime.now(UTC).isoformat(),
+            }
+            version.meta_json = version_meta
+            session.add(
+                AuditLog(
+                    org_id=file_obj.org_id,
+                    actor_id=file_obj.uploaded_by,
+                    action=AuditAction.UPDATE,
+                    entity_type="docs_file",
+                    entity_id=str(file_obj.id),
+                    meta={
+                        "event": "docx_storage_repair_blocked",
+                        "version_id": str(version.id),
+                        "reason": integrity_reason,
+                    },
+                )
+            )
+            blocked += 1
+
+        session.commit()
+
+    logger.info(
+        "docs_repair_docx_storage_integrity_done",
+        extra={
+            "checked": checked,
+            "issues": issues,
+            "recovered": recovered,
+            "blocked": blocked,
+            "dry_run": bool(dry_run),
+            "limit": safe_limit,
+        },
+    )
+    return {
+        "status": "ok",
+        "checked": checked,
+        "issues": issues,
+        "recovered": recovered,
+        "blocked": blocked,
+    }
 
 
 @celery.task(name="docs_cleanup_stale_files", bind=True, base=BaseTaskWithRetry)

@@ -456,6 +456,16 @@ async def internal_download(version_id: uuid.UUID, token: str):
                 },
             )
             raise HTTPException(status_code=409, detail="Invalid DOCX payload")
+        logger.info(
+            "docs_internal_download_ok",
+            extra={
+                "version_id": str(version_id),
+                "bucket": version.s3_bucket,
+                "key": version.s3_key,
+                "size_bytes": len(payload),
+                "magic_reason": magic_reason,
+            },
+        )
         return Response(
             content=payload,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -502,6 +512,16 @@ async def internal_source_download(version_id: uuid.UUID, token: str):
             extension = "docx"
         elif media_type == "text/plain":
             extension = "txt"
+        logger.info(
+            "docs_internal_source_download_ok",
+            extra={
+                "version_id": str(version_id),
+                "bucket": version.s3_bucket,
+                "key": version.s3_key,
+                "media_type": media_type,
+                "size_bytes": len(payload),
+            },
+        )
         return Response(
             content=payload,
             media_type=media_type,

@@ -78,9 +78,11 @@ class DocsEditingMixin:
         document_title = str(file_obj.original_name or file_obj.title or "document.docx").strip()
         if not document_title.lower().endswith(".docx"):
             document_title = f"{document_title}.docx"
+        # Keep key dash-free to avoid possible downstream key normalization issues
+        # in document server cache/indexing layers.
         version_stamp = int(version.created_at.timestamp()) if getattr(version, "created_at", None) else 0
-        open_session_nonce = uuid.uuid4().hex[:12]
-        document_key = f"{version.id}-{version_stamp}-{open_session_nonce}"
+        open_session_nonce = uuid.uuid4().hex
+        document_key = f"{str(version.id).replace('-', '')}{version_stamp}{open_session_nonce}"
 
         token_payload = {
             "sub": str(version.id),

@@ -1379,6 +1379,48 @@ async def test_docs_open_docx_returns_editor_config(client: AsyncClient, monkeyp
 
 
 @pytest.mark.asyncio
+async def test_docs_internal_download_returns_docx_response(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    token = await _register_owner(client)
+    docx_bytes = _make_docx_bytes("Download DOCX")
+    file_id, _ = await _create_ready_docx_file(client, token, monkeypatch, docx_bytes=docx_bytes)
+
+    monkeypatch.setattr(settings, "DOCS_ONLYOFFICE_ENABLED", True)
+    monkeypatch.setattr(settings, "DOCS_ONLYOFFICE_DOCUMENT_SERVER_URL", "http://onlyoffice:80")
+    monkeypatch.setattr(
+        settings,
+        "DOCS_ONLYOFFICE_CALLBACK_URL",
+        "http://api:8000/api/v1/docs/integrations/onlyoffice/callback",
+    )
+    monkeypatch.setattr(settings, "DOCS_ONLYOFFICE_JWT_SECRET", "")
+
+    class _Body:
+        def __init__(self, payload: bytes):
+            self._payload = payload
+
+        def read(self):
+            return self._payload
+
+    class _S3Client:
+        def get_object(self, **_kwargs):
+            return {"Body": _Body(docx_bytes), "ContentType": "application/octet-stream"}
+
+    monkeypatch.setattr("src.modules.docs.routes.get_s3_client", lambda: _S3Client())
+
+    open_docx = await client.post(f"/api/v1/docs/files/{file_id}/open-docx", headers=_headers(token))
+    assert open_docx.status_code == 200
+    assert open_docx.json()["ok"] is True
+    document_url = open_docx.json()["data"]["config"]["document"]["url"]
+    parsed = urlparse(document_url)
+    response = await client.get(f"{parsed.path}?{parsed.query}")
+    assert response.status_code == 200
+    assert response.content == docx_bytes
+    assert response.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert "document.docx" in response.headers.get("content-disposition", "")
+
+
+@pytest.mark.asyncio
 async def test_docs_onlyoffice_callback_creates_new_version(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
     token = await _register_owner(client)
     original_docx = _make_docx_bytes("Original DOCX")

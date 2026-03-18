@@ -79,7 +79,8 @@ class DocsEditingMixin:
         if not document_title.lower().endswith(".docx"):
             document_title = f"{document_title}.docx"
         version_stamp = int(version.created_at.timestamp()) if getattr(version, "created_at", None) else 0
-        document_key = f"{version.id}-{version_stamp}"
+        open_session_nonce = uuid.uuid4().hex[:12]
+        document_key = f"{version.id}-{version_stamp}-{open_session_nonce}"
 
         token_payload = {
             "sub": str(version.id),

@@ -9,7 +9,7 @@ import httpx
 import jwt
 from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response
 from kombu.exceptions import OperationalError
 
 from src.common.enums import UserRole
@@ -18,7 +18,9 @@ from src.config import settings
 from src.infrastructure.uow import UnitOfWork
 from src.modules.access.dependencies import require_access
 from src.modules.auth.dependencies import CurrentUser, require_roles
+from src.modules.docs.domain import FileType
 from src.modules.docs.errors import DocsModuleError
+from src.modules.docs.magic_bytes import validate_magic_bytes
 from src.modules.docs.schemas import (
     AIGenerateOut,
     AIGenerateRequest,
@@ -481,11 +483,29 @@ async def internal_download(version_id: uuid.UUID, token: str):
     s3 = get_s3_client()
     try:
         resp = s3.get_object(Bucket=version.s3_bucket, Key=version.s3_key)
-        body = resp["Body"]
-        return StreamingResponse(
-            body,
-            media_type=resp.get("ContentType", "application/octet-stream"),
+        payload = bytes(resp["Body"].read())
+        magic_ok, magic_reason = validate_magic_bytes(FileType.DOCX, payload)
+        if not magic_ok:
+            logger.error(
+                "docs_internal_download_magic_mismatch",
+                extra={
+                    "version_id": str(version_id),
+                    "reason": magic_reason,
+                    "payload_head_hex": payload[:16].hex(),
+                    "payload_size": len(payload),
+                },
+            )
+            raise HTTPException(status_code=409, detail="Invalid DOCX payload")
+        return Response(
+            content=payload,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={
+                "Content-Disposition": "attachment; filename*=UTF-8''document.docx",
+                "Cache-Control": "no-store",
+            },
         )
+    except HTTPException:
+        raise
     except (BotoCoreError, ClientError, KeyError, OSError) as err:
         logger.error(f"S3 download failed internally: {err}")
         raise HTTPException(status_code=500, detail="Storage error") from err

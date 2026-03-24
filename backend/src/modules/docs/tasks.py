@@ -78,7 +78,7 @@ def _run_async_in_isolated_thread(coro_factory: Callable[[], Awaitable[Any]]) ->
     return result["value"]
 
 
-def _run_async_on_worker_loop(coro_factory: Callable[[], Awaitable[Any]]) -> Any:
+def _run_async_on_worker_loop(coro_or_factory: Awaitable[Any] | Callable[[], Awaitable[Any]]) -> Any:
     """Выполнить async-код на стабильном loop процесса Celery worker.
 
     ``asyncio.run`` создаёт новый event loop на каждый task. Для asyncpg это
@@ -86,6 +86,14 @@ def _run_async_on_worker_loop(coro_factory: Callable[[], Awaitable[Any]]) -> Any
     ``Future attached to a different loop`` / ``another operation is in progress``.
     Держим один loop на процесс worker и выполняем все async docs-task'и на нём.
     """
+    if callable(coro_or_factory):
+        coro_factory: Callable[[], Awaitable[Any]] = coro_or_factory
+    else:
+        async_obj = coro_or_factory
+
+        def coro_factory() -> Awaitable[Any]:
+            return async_obj
+
     try:
         running_loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -152,7 +160,7 @@ def scan_version(version_id: str) -> dict[str, str]:
                     },
                 )
                 converted_docx = _run_async_on_worker_loop(
-                    lambda: DEFAULT_DOC_EDITOR_PROVIDER.convert_to_docx(file_url=source_url, file_type="pdf")
+                    DEFAULT_DOC_EDITOR_PROVIDER.convert_to_docx(file_url=source_url, file_type="pdf")
                 )
                 converted_scan = _scan_payload_bytes(file_type=FileType.DOCX, payload=converted_docx)
                 if converted_scan.result != "clean":
@@ -285,7 +293,7 @@ def ai_generate(self, job_id: str) -> dict[str, str]:
     """Сгенерировать документ через AI и запустить AV-пайплайн версии."""
     task_id = str(getattr(getattr(self, "request", None), "id", "") or "")
     try:
-        return _run_async_on_worker_loop(lambda: run_ai_generate_inline(job_id=job_id, task_id=task_id)) or {
+        return _run_async_on_worker_loop(run_ai_generate_inline(job_id=job_id, task_id=task_id)) or {
             "status": "failed",
             "reason": "empty_result",
         }

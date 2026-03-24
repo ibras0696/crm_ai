@@ -1284,7 +1284,7 @@ async def test_docs_onlyoffice_callback_creates_new_version(client: AsyncClient,
         _ = bucket
         if key in storage_map:
             return storage_map[key]
-        raise KeyError(key)
+        return original_docx
 
     monkeypatch.setattr("src.modules.docs.service.DEFAULT_STORAGE_PROVIDER.put_object_bytes", _put_object_bytes)
     monkeypatch.setattr("src.modules.docs.tasks.DEFAULT_STORAGE_PROVIDER.get_object_bytes", _get_object_bytes)

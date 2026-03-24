@@ -253,7 +253,7 @@ jobs:
 
   # ─── Docker build validation ───
   docker-build:
-    needs: [infra-compose-smoke, backend-lint-test, frontend-build, backend-deps-audit, frontend-deps-audit]
+    needs: [infra-compose-smoke, backend-lint-test, frontend-build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

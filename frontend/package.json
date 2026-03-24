@@ -60,7 +60,7 @@
   },
   "overrides": {
     "dompurify": "3.3.2",
-    "flatted": "3.4.0",
+    "flatted": "3.4.2",
     "rollup": "4.59.0"
   },
   "optionalDependencies": {

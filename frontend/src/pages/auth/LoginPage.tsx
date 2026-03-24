@@ -167,6 +167,11 @@ export default function LoginPage() {
                 <p className="text-xs text-red-400">{fieldErrors.password}</p>
               )}
             </div>
+            <div className="flex justify-end">
+              <Link to="/auth/forgot-password" className="text-sm text-primary hover:underline font-medium">
+                Забыли пароль?
+              </Link>
+            </div>
             <Button type="submit" className="w-full h-11 gradient-primary border-0 text-white font-semibold" disabled={loading}>
               {loading ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />

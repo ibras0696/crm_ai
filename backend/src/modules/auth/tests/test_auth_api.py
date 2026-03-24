@@ -213,3 +213,126 @@ async def test_logout(client: AsyncClient):
     # Refresh should fail after logout.
     resp2 = await client.post("/api/v1/auth/refresh", json={"refresh_token": refresh_tok})
     assert resp2.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_password_reset_flow_changes_password_and_revokes_refresh_tokens(client: AsyncClient):
+    email = f"reset-{uuid.uuid4().hex[:8]}@example.com"
+    old_password = "StrongPass123!"
+    new_password = "NewStrongPass123!"
+
+    reg = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": old_password,
+            "first_name": "Reset",
+            "last_name": "User",
+            "org_name": "Reset Org",
+            "accepted_privacy_policy": True,
+        },
+    )
+    assert reg.status_code == 201
+    old_refresh = reg.json()["data"]["refresh_token"]
+
+    captured: dict[str, str] = {}
+
+    def _capture_password_reset_email(*, to_email: str, reset_token: str, reset_url: str | None = None):
+        _ = reset_url
+        captured["to_email"] = to_email
+        captured["token"] = reset_token
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "src.modules.auth.services.password.queue_password_reset_email",
+            _capture_password_reset_email,
+        )
+        forgot = await client.post("/api/v1/auth/forgot-password", json={"email": email})
+
+    assert forgot.status_code == 200
+    assert forgot.json()["ok"] is True
+    assert captured["to_email"] == email
+    assert captured["token"]
+
+    reset = await client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": captured["token"], "new_password": new_password},
+    )
+    assert reset.status_code == 200
+    assert reset.json()["ok"] is True
+
+    old_login = await client.post("/api/v1/auth/login", json={"email": email, "password": old_password})
+    assert old_login.status_code == 401
+
+    new_login = await client.post("/api/v1/auth/login", json={"email": email, "password": new_password})
+    assert new_login.status_code == 200
+    assert new_login.json()["ok"] is True
+
+    old_refresh_resp = await client.post("/api/v1/auth/refresh", json={"refresh_token": old_refresh})
+    assert old_refresh_resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_password_reset_token_is_one_time(client: AsyncClient):
+    email = f"reset-once-{uuid.uuid4().hex[:8]}@example.com"
+    reg = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "StrongPass123!",
+            "first_name": "Reset",
+            "last_name": "Once",
+            "org_name": "Reset Org",
+            "accepted_privacy_policy": True,
+        },
+    )
+    assert reg.status_code == 201
+
+    captured: dict[str, str] = {}
+
+    def _capture_password_reset_email(*, to_email: str, reset_token: str, reset_url: str | None = None):
+        _ = to_email, reset_url
+        captured["token"] = reset_token
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "src.modules.auth.services.password.queue_password_reset_email",
+            _capture_password_reset_email,
+        )
+        forgot = await client.post("/api/v1/auth/forgot-password", json={"email": email})
+
+    assert forgot.status_code == 200
+    assert captured["token"]
+
+    first_reset = await client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": captured["token"], "new_password": "NewStrongPass123!"},
+    )
+    assert first_reset.status_code == 200
+
+    second_reset = await client.post(
+        "/api/v1/auth/reset-password",
+        json={"token": captured["token"], "new_password": "AnotherPass123!"},
+    )
+    assert second_reset.status_code == 400
+    assert second_reset.json()["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_forgot_password_unknown_email_returns_success_and_sends_no_email(client: AsyncClient):
+    calls: list[dict[str, str]] = []
+
+    def _capture_password_reset_email(*, to_email: str, reset_token: str, reset_url: str | None = None):
+        _ = reset_url
+        calls.append({"to_email": to_email, "reset_token": reset_token})
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "src.modules.auth.services.password.queue_password_reset_email",
+            _capture_password_reset_email,
+        )
+        forgot = await client.post("/api/v1/auth/forgot-password", json={"email": "unknown-user@example.com"})
+
+    assert forgot.status_code == 200
+    assert forgot.json()["ok"] is True
+    assert calls == []

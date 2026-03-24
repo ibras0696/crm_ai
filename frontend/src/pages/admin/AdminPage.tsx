@@ -123,7 +123,16 @@ export default function AdminPage() {
   const mapInviteError = (err: any): string => {
     const code = err?.response?.data?.error?.code
     const message = err?.response?.data?.error?.message
-    if (code === 'CONFLICT') return 'Пользователь уже в организации или приглашение уже отправлено.'
+    if (code === 'CONFLICT') {
+      const normalized = String(message || '').toLowerCase()
+      if (normalized.includes('pending invite already exists')) {
+        return 'Для этого email уже есть активное приглашение.'
+      }
+      if (normalized.includes('already a member')) {
+        return 'Пользователь уже состоит в организации.'
+      }
+      return 'Конфликт данных приглашения. Проверьте email.'
+    }
     if (code === 'VALIDATION_ERROR') return message || 'Проверьте email и попробуйте снова.'
     if (code === 'RATE_LIMIT' || code === 'RATE_LIMITED') return 'Слишком много приглашений. Попробуйте через минуту.'
     return message || 'Не удалось отправить приглашение.'

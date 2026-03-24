@@ -40,6 +40,7 @@ def test_send_invite_email_sends_when_validation_passes(monkeypatch):
         assert to_email == "user@example.com"
         assert "Приглашение в организацию" in subject
         assert "Test Org" in body
+        assert "/auth/accept-invite?token=inv-token" in body
         assert kind == "invite"
         return {"status": "sent", "to": to_email}
 

@@ -42,6 +42,7 @@ export default function App() {
       <Route path="/auth/forgot-password" element={<ForgotPasswordPage />} />
       <Route path="/auth/reset-password" element={<ResetPasswordPage />} />
       <Route path="/auth/accept-invite" element={<AcceptInvitePage />} />
+      <Route path="/invite/accept" element={<AcceptInvitePage />} />
       <Route path="/privacy-policy" element={<PrivacyPolicyPage />} />
       <Route path="/personal-data-consent" element={<PersonalDataConsentPage />} />
       <Route path="/product/:slug" element={<PublicContentPage />} />

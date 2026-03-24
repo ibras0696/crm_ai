@@ -149,7 +149,7 @@ def send_invite_email(self, to_email: str, org_name: str, invite_token: str, inv
         logger.info("Invite email skipped: to=%s reason=%s", to_email, reason)
         return {"status": "skipped", "to": to_email, "reason": reason}
 
-    url = invite_url or f"{settings.FRONTEND_URL.rstrip('/')}/invite/accept?token={invite_token}"
+    url = invite_url or f"{settings.FRONTEND_URL.rstrip('/')}/auth/accept-invite?token={invite_token}"
     subject = f"Приглашение в организацию: {org_name}"
     body = (
         f'Вас пригласили в организацию "{org_name}".\n\n'

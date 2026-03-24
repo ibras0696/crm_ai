@@ -201,6 +201,17 @@ class Settings(BaseSettings):
             return "lax"
         return s
 
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def _normalize_debug_bool(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            s = v.strip().lower()
+            if s in {"release", "prod", "production"}:
+                return False
+            if s in {"debug", "dev", "development"}:
+                return True
+        return v
+
     # SMTP / Email
     SMTP_HOST: str = "smtp.gmail.com"
     SMTP_PORT: int = 587

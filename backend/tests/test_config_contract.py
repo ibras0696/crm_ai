@@ -34,3 +34,9 @@ def test_settings_support_file_backed_secret_values(tmp_path: Path, monkeypatch)
     test_settings = Settings()
 
     assert test_settings.SECRET_KEY == "file-secret-value"
+
+
+def test_settings_accepts_release_alias_for_debug(monkeypatch) -> None:
+    monkeypatch.setenv("DEBUG", "release")
+    test_settings = Settings()
+    assert test_settings.DEBUG is False

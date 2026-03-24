@@ -76,7 +76,7 @@ class OrgInviteService:
                 role=role,
                 token=token,
                 invited_by=invited_by,
-                expires_at=datetime.now(UTC) + timedelta(days=7),
+                expires_at=datetime.now(UTC) + timedelta(minutes=15),
             )
             invite = await invite_repo.create(invite)
 
@@ -116,7 +116,7 @@ class OrgInviteService:
             if not invite:
                 raise NotFoundError("Invite")
 
-            new_expiry = datetime.now(UTC) + timedelta(days=7)
+            new_expiry = datetime.now(UTC) + timedelta(minutes=15)
             await invite_repo.bump_expiry(invite.id, expires_at=new_expiry)
 
             await audit_repo.log(

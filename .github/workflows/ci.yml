@@ -307,7 +307,21 @@ jobs:
 
             # Build and deploy
             docker compose -f docker-compose.prod.yml build --no-cache api frontend
+            set +e
             docker compose -f docker-compose.prod.yml up -d
+            DEPLOY_UP_EXIT=$?
+            set -e
+            if [ "$DEPLOY_UP_EXIT" -ne 0 ]; then
+              echo "docker compose up failed with exit code: $DEPLOY_UP_EXIT"
+              docker compose -f docker-compose.prod.yml ps || true
+              echo "=== bootstrap logs ==="
+              docker compose -f docker-compose.prod.yml logs --no-color --tail=200 bootstrap || true
+              echo "=== api logs ==="
+              docker compose -f docker-compose.prod.yml logs --no-color --tail=200 api || true
+              echo "=== celery_worker logs ==="
+              docker compose -f docker-compose.prod.yml logs --no-color --tail=200 celery_worker || true
+              exit "$DEPLOY_UP_EXIT"
+            fi
 
             # Wait for containers to stabilize
             echo "Waiting 30s for containers to stabilize..."

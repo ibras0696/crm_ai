@@ -257,6 +257,14 @@ services:
   # Nginx service is assumed to be configured externally or via a separate compose file for ingress
   # to avoid conflicts with local folder structures.
 
+networks:
+  default:
+    driver: bridge
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: ${DOCKER_NETWORK_IPV6_SUBNET:-fd00:dead:beef::/64}
+
 volumes:
   pg_data_prod:
   redis_data_prod:

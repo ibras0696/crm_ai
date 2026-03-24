@@ -1,4 +1,5 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
@@ -7,6 +8,7 @@ from sqlalchemy import select
 from src.infrastructure.uow import UnitOfWork
 from src.modules.ai.models import AIOrgLimit, AIUserLimit
 from src.modules.billing.models import Plan
+from src.modules.org.models import Invite
 
 
 def _headers(token: str) -> dict:
@@ -139,6 +141,68 @@ async def test_create_invite_and_accept(client: AsyncClient):
     members = await client.get("/api/v1/orgs/members", headers=_headers(owner_tokens["access_token"]))
     assert members.status_code == 200
     assert len(members.json()["data"]) == 2
+
+
+@pytest.mark.asyncio
+async def test_pending_invite_not_counted_as_membership(client: AsyncClient):
+    owner_tokens = await _register(client, org_name="Invite Pending Membership Guard")
+    invite_email = f"pending-{uuid.uuid4().hex[:8]}@example.com"
+
+    inv_resp = await client.post(
+        "/api/v1/orgs/invites",
+        json={"email": invite_email, "role": "employee"},
+        headers=_headers(owner_tokens["access_token"]),
+    )
+    assert inv_resp.status_code == 201
+
+    # User must not be considered an organization member until invite is accepted/registered.
+    members = await client.get("/api/v1/orgs/members", headers=_headers(owner_tokens["access_token"]))
+    assert members.status_code == 200
+    items = members.json()["data"]
+    assert len(items) == 1
+    assert all((m.get("user_email") or "").lower() != invite_email.lower() for m in items)
+
+    # Duplicate invite must fail due existing pending invite, not due "already member".
+    duplicate = await client.post(
+        "/api/v1/orgs/invites",
+        json={"email": invite_email, "role": "employee"},
+        headers=_headers(owner_tokens["access_token"]),
+    )
+    assert duplicate.status_code == 409
+    err_message = str(duplicate.json().get("error", {}).get("message", ""))
+    assert "pending invite already exists" in err_message.lower()
+
+
+@pytest.mark.asyncio
+async def test_expired_pending_invite_does_not_block_new_invite(client: AsyncClient):
+    owner_tokens = await _register(client, org_name="Invite Expired Pending Guard")
+    invite_email = f"expired-{uuid.uuid4().hex[:8]}@example.com"
+
+    first = await client.post(
+        "/api/v1/orgs/invites",
+        json={"email": invite_email, "role": "employee"},
+        headers=_headers(owner_tokens["access_token"]),
+    )
+    assert first.status_code == 201
+    first_token = first.json()["data"]["token"]
+
+    async with UnitOfWork() as uow:
+        invite = (
+            await uow.session.execute(select(Invite).where(Invite.token == first_token).limit(1))
+        ).scalar_one_or_none()
+        assert invite is not None
+        invite.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+        await uow.commit()
+
+    second = await client.post(
+        "/api/v1/orgs/invites",
+        json={"email": invite_email, "role": "employee"},
+        headers=_headers(owner_tokens["access_token"]),
+    )
+    assert second.status_code == 201
+    second_token = second.json()["data"]["token"]
+    assert second_token
+    assert second_token != first_token
 
 
 @pytest.mark.asyncio

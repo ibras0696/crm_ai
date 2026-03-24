@@ -110,6 +110,7 @@ class InviteRepository:
             Invite.email == email,
             Invite.org_id == org_id,
             Invite.status == InviteStatus.PENDING,
+            Invite.expires_at > datetime.now(UTC),
         )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()

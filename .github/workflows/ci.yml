@@ -306,7 +306,7 @@ jobs:
             git pull origin main
 
             # Build and deploy
-            docker compose -f docker-compose.prod.yml build --no-cache api frontend
+            docker compose -f docker-compose.prod.yml build api frontend
             set +e
             docker compose -f docker-compose.prod.yml up -d
             DEPLOY_UP_EXIT=$?
@@ -323,44 +323,56 @@ jobs:
               exit "$DEPLOY_UP_EXIT"
             fi
 
-            # Wait for containers to stabilize
-            echo "Waiting 30s for containers to stabilize..."
-            sleep 30
+            # Wait for containers and endpoints to stabilize (handles rolling warm-shutdowns)
+            HEALTHY=false
+            for i in {1..24}; do
+              echo "Health probe attempt $i/24..."
+              BAD=0
+              for svc in api frontend db redis celery_worker celery_beat; do
+                STATUS=$(docker compose -f docker-compose.prod.yml ps --format '{{.Status}}' "$svc" 2>/dev/null || echo "missing")
+                if echo "$STATUS" | grep -qiE "exit|dead|restart|missing"; then
+                  echo "UNHEALTHY: $svc — $STATUS"
+                  BAD=1
+                else
+                  echo "OK: $svc — $STATUS"
+                fi
+              done
 
-            # Health check
-            HEALTHY=true
-            for svc in api frontend db redis celery_worker celery_beat; do
-              STATUS=$(docker compose -f docker-compose.prod.yml ps --format '{{.Status}}' $svc 2>/dev/null || echo "missing")
-              if echo "$STATUS" | grep -qiE "exit|dead|restart|missing"; then
-                echo "UNHEALTHY: $svc — $STATUS"
-                HEALTHY=false
-              else
-                echo "OK: $svc — $STATUS"
+              API_STATUS=$(curl -sf http://localhost:8000/api/health | jq -r '.status' 2>/dev/null || echo "error")
+              FRONT_STATUS=1
+              if curl -sf http://localhost:5173/ >/dev/null; then
+                FRONT_STATUS=0
               fi
+
+              if [ "$BAD" -eq 0 ] && { [ "$API_STATUS" = "ok" ] || [ "$API_STATUS" = "degraded" ]; } && [ "$FRONT_STATUS" -eq 0 ]; then
+                HEALTHY=true
+                break
+              fi
+              sleep 5
             done
 
-            # API endpoint health check
-            API_STATUS=$(curl -sf http://localhost:8000/api/health | jq -r '.status' 2>/dev/null || echo "error")
-            if [ "$API_STATUS" != "ok" ] && [ "$API_STATUS" != "degraded" ]; then
-              echo "API health check failed: $API_STATUS"
-              HEALTHY=false
-            fi
-
-            if ! curl -sf http://localhost:5173/ >/dev/null; then
-              echo "Frontend health check failed"
-              HEALTHY=false
-            else
-              echo "Frontend HTTP check OK"
-            fi
-
             if [ "$HEALTHY" = false ]; then
+              echo "=== deployment unhealthy, collecting logs before rollback ==="
+              docker compose -f docker-compose.prod.yml ps || true
+              echo "=== bootstrap logs ==="
+              docker compose -f docker-compose.prod.yml logs --no-color --tail=200 bootstrap || true
+              echo "=== api logs ==="
+              docker compose -f docker-compose.prod.yml logs --no-color --tail=200 api || true
+              echo "=== celery_worker logs ==="
+              docker compose -f docker-compose.prod.yml logs --no-color --tail=200 celery_worker || true
               echo "=== ROLLBACK: reverting to $PREV_COMMIT ==="
               git checkout $PREV_COMMIT
-              docker compose -f docker-compose.prod.yml build --no-cache api frontend
+              docker compose -f docker-compose.prod.yml build api frontend
               docker compose -f docker-compose.prod.yml up -d
               echo "Rollback complete. Waiting 20s..."
               sleep 20
               exit 1
             fi
+
+            echo "Cleanup dangling docker artifacts..."
+            docker image prune -f || true
+            docker builder prune -f --filter "until=168h" || true
+            docker container prune -f || true
+            docker system df || true
 
             echo "Deploy successful!"

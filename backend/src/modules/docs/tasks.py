@@ -6,8 +6,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 import uuid
-from collections.abc import Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -56,7 +57,28 @@ logger = logging.getLogger(__name__)
 _WORKER_EVENT_LOOP: asyncio.AbstractEventLoop | None = None
 
 
-def _run_async_on_worker_loop(coro: Any) -> Any:
+def _run_async_in_isolated_thread(coro_factory: Callable[[], Awaitable[Any]]) -> Any:
+    result: dict[str, Any] = {"value": None, "error": None}
+
+    def _runner() -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result["value"] = loop.run_until_complete(coro_factory())
+        except BaseException as exc:  # pragma: no cover - propagated to caller thread
+            result["error"] = exc
+        finally:
+            loop.close()
+
+    thread = threading.Thread(target=_runner, daemon=True)
+    thread.start()
+    thread.join()
+    if result["error"] is not None:
+        raise result["error"]
+    return result["value"]
+
+
+def _run_async_on_worker_loop(coro_factory: Callable[[], Awaitable[Any]]) -> Any:
     """Выполнить async-код на стабильном loop процесса Celery worker.
 
     ``asyncio.run`` создаёт новый event loop на каждый task. Для asyncpg это
@@ -64,11 +86,21 @@ def _run_async_on_worker_loop(coro: Any) -> Any:
     ``Future attached to a different loop`` / ``another operation is in progress``.
     Держим один loop на процесс worker и выполняем все async docs-task'и на нём.
     """
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+
+    if running_loop is not None and running_loop.is_running():
+        # For tests (or any non-celery async caller), run on a separate thread loop
+        # to avoid "Cannot run the event loop while another loop is running".
+        return _run_async_in_isolated_thread(coro_factory)
+
     global _WORKER_EVENT_LOOP
     if _WORKER_EVENT_LOOP is None or _WORKER_EVENT_LOOP.is_closed():
         _WORKER_EVENT_LOOP = asyncio.new_event_loop()
     asyncio.set_event_loop(_WORKER_EVENT_LOOP)
-    return _WORKER_EVENT_LOOP.run_until_complete(coro)
+    return _WORKER_EVENT_LOOP.run_until_complete(coro_factory())
 
 
 @celery.task(name="scan_version")
@@ -120,7 +152,7 @@ def scan_version(version_id: str) -> dict[str, str]:
                     },
                 )
                 converted_docx = _run_async_on_worker_loop(
-                    DEFAULT_DOC_EDITOR_PROVIDER.convert_to_docx(file_url=source_url, file_type="pdf")
+                    lambda: DEFAULT_DOC_EDITOR_PROVIDER.convert_to_docx(file_url=source_url, file_type="pdf")
                 )
                 converted_scan = _scan_payload_bytes(file_type=FileType.DOCX, payload=converted_docx)
                 if converted_scan.result != "clean":
@@ -253,7 +285,7 @@ def ai_generate(self, job_id: str) -> dict[str, str]:
     """Сгенерировать документ через AI и запустить AV-пайплайн версии."""
     task_id = str(getattr(getattr(self, "request", None), "id", "") or "")
     try:
-        return _run_async_on_worker_loop(run_ai_generate_inline(job_id=job_id, task_id=task_id)) or {
+        return _run_async_on_worker_loop(lambda: run_ai_generate_inline(job_id=job_id, task_id=task_id)) or {
             "status": "failed",
             "reason": "empty_result",
         }

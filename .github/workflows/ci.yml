@@ -254,8 +254,8 @@ jobs:
             git checkout main
             git pull origin main
 
-            # Build and deploy
-            docker compose -f docker-compose.prod.yml build api frontend
+            # Build and deploy (all backend runtime services must be rebuilt together)
+            docker compose -f docker-compose.prod.yml build api bootstrap celery_worker celery_beat frontend
             set +e
             docker compose -f docker-compose.prod.yml up -d
             DEPLOY_UP_EXIT=$?
@@ -264,11 +264,11 @@ jobs:
               echo "docker compose up failed with exit code: $DEPLOY_UP_EXIT"
               docker compose -f docker-compose.prod.yml ps || true
               echo "=== bootstrap logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --tail=200 bootstrap || true
+              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 bootstrap || true
               echo "=== api logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --tail=200 api || true
+              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 api || true
               echo "=== celery_worker logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --tail=200 celery_worker || true
+              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_worker || true
               exit "$DEPLOY_UP_EXIT"
             fi
 
@@ -277,7 +277,7 @@ jobs:
             for i in {1..24}; do
               echo "Health probe attempt $i/24..."
               BAD=0
-              for svc in api frontend db redis celery_worker celery_beat; do
+              for svc in api frontend db redis rabbitmq minio; do
                 STATUS=$(docker compose -f docker-compose.prod.yml ps --format '{{.Status}}' "$svc" 2>/dev/null || echo "missing")
                 if echo "$STATUS" | grep -qiE "exit|dead|restart|missing"; then
                   echo "UNHEALTHY: $svc — $STATUS"
@@ -304,14 +304,14 @@ jobs:
               echo "=== deployment unhealthy, collecting logs before rollback ==="
               docker compose -f docker-compose.prod.yml ps || true
               echo "=== bootstrap logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --tail=200 bootstrap || true
+              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 bootstrap || true
               echo "=== api logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --tail=200 api || true
+              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 api || true
               echo "=== celery_worker logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --tail=200 celery_worker || true
+              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_worker || true
               echo "=== ROLLBACK: reverting to $PREV_COMMIT ==="
               git checkout $PREV_COMMIT
-              docker compose -f docker-compose.prod.yml build api frontend
+              docker compose -f docker-compose.prod.yml build api bootstrap celery_worker celery_beat frontend
               docker compose -f docker-compose.prod.yml up -d
               echo "Rollback complete. Waiting 20s..."
               sleep 20

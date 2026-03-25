@@ -60,14 +60,34 @@ jobs:
           docker compose -f docker-compose.yml exec -T celery_worker sh -lc "celery -A src.infrastructure.celery_app inspect ping -t 5 | grep -q OK"
           docker compose -f docker-compose.yml exec -T celery_beat sh -lc "ps aux | grep -q '[c]elery.*beat'"
           docker compose -f docker-compose.yml exec -T api python - <<'PY'
-          from src.modules.schedule.tasks import dispatch_schedule_reminders
+          import time
+          from src.infrastructure.celery_app import celery
           from src.modules.billing.tasks import process_billing_lifecycle
-          a = dispatch_schedule_reminders.delay().id
-          b = process_billing_lifecycle.delay().id
-          print(a, b)
+          from src.modules.schedule.tasks import dispatch_schedule_reminders
+
+          task_ids = [
+              dispatch_schedule_reminders.delay().id,
+              process_billing_lifecycle.delay().id,
+          ]
+          print("queued task ids:", *task_ids)
+
+          deadline = time.time() + 60
+          while time.time() < deadline:
+              states = [celery.AsyncResult(task_id).state for task_id in task_ids]
+              print("states:", states)
+              if all(state in {"SUCCESS", "FAILURE"} for state in states):
+                  break
+              time.sleep(2)
+
+          failed = []
+          for task_id in task_ids:
+              result = celery.AsyncResult(task_id)
+              print(f"task={task_id} state={result.state} result={result.result}")
+              if result.state != "SUCCESS":
+                  failed.append(task_id)
+          if failed:
+              raise SystemExit(f"Celery smoke failed tasks: {failed}")
           PY
-          sleep 5
-          docker compose -f docker-compose.yml logs --since=1m celery_worker | grep -E "dispatch_schedule_reminders|process_billing_lifecycle"
 
       - name: Dump logs on failure
         if: failure()

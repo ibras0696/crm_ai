@@ -1,20 +1,30 @@
 from __future__ import annotations
 
 import asyncio
+import socket
+import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from alembic import command
 from alembic.config import Config
 from alembic.script import ScriptDirectory
 from alembic.util.exc import CommandError
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError, OperationalError
 
 from src.config import settings
 from src.infrastructure.bootstrap_lock import advisory_lock
 from src.infrastructure.database import async_session_factory
 from src.modules.billing.seed import upsert_default_plans, upsert_default_token_packages
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 BOOTSTRAP_LOCK_KEY = 914_270_001  # stable int for pg_advisory_lock
+DB_STARTUP_TIMEOUT_SECONDS = 90
+DB_STARTUP_POLL_SECONDS = 2.0
 
 
 def _alembic_config() -> Config:
@@ -33,6 +43,65 @@ def _database_url_sync() -> str:
         return settings.DATABASE_URL_SYNC
     # Fallback: derive sync URL from async URL (best-effort)
     return settings.DATABASE_URL.replace("+asyncpg", "")
+
+
+def _extract_db_host_port(url: str) -> tuple[str | None, int]:
+    parsed = make_url(url)
+    host = parsed.host
+    port = int(parsed.port or 5432)
+    return host, port
+
+
+def _probe_db_connection(url: str) -> None:
+    parsed = make_url(url)
+    engine_kwargs: dict[str, object] = {"pool_pre_ping": True}
+    if parsed.get_backend_name().startswith("postgresql"):
+        engine_kwargs["connect_args"] = {"connect_timeout": 3}
+    eng = create_engine(url, **engine_kwargs)
+    try:
+        with eng.connect() as conn:
+            conn.execute(text("select 1"))
+    finally:
+        eng.dispose()
+
+
+def _wait_for_db_ready(
+    url: str,
+    timeout_seconds: int = DB_STARTUP_TIMEOUT_SECONDS,
+    interval_seconds: float = DB_STARTUP_POLL_SECONDS,
+    *,
+    dns_probe: Callable[[str, int], object] | None = None,
+    db_probe: Callable[[str], None] | None = None,
+    sleep_fn: Callable[[float], None] | None = None,
+    now_fn: Callable[[], float] | None = None,
+) -> None:
+    dns_probe = dns_probe or (lambda host, port: socket.getaddrinfo(host, port, type=socket.SOCK_STREAM))
+    db_probe = db_probe or _probe_db_connection
+    sleep_fn = sleep_fn or time.sleep
+    now_fn = now_fn or time.monotonic
+
+    host, port = _extract_db_host_port(url)
+    deadline = now_fn() + timeout_seconds
+    attempt = 0
+    last_exc: Exception | None = None
+
+    while now_fn() < deadline:
+        attempt += 1
+        try:
+            if host:
+                dns_probe(host, port)
+            db_probe(url)
+            print(f"[bootstrap] database reachable (attempt={attempt}, host={host or 'n/a'}, port={port})")
+            return
+        except (socket.gaierror, OSError, OperationalError, DBAPIError) as exc:
+            last_exc = exc
+            print(f"[bootstrap] waiting for database (attempt={attempt}): {type(exc).__name__}: {exc}")
+            sleep_fn(interval_seconds)
+
+    raise RuntimeError(
+        f"database is not reachable after {timeout_seconds}s "
+        f"(host={host or 'n/a'}, port={port})"
+    ) from last_exc
 
 
 async def _run_seed() -> None:
@@ -137,6 +206,7 @@ def _run_migrations() -> None:
 
 async def main() -> None:
     db_sync = _database_url_sync()
+    await asyncio.to_thread(_wait_for_db_ready, db_sync)
     async with advisory_lock(db_sync, BOOTSTRAP_LOCK_KEY):
         # Run migrations (sync, fast, protected by advisory lock).
         await asyncio.to_thread(_run_migrations)

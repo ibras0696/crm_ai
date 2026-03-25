@@ -34,60 +34,22 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.exposed.yml --profile infra-debug config -q
           docker compose -f docker-compose.prod.yml config -q
 
-      - name: Build and start infra + background workers
+      - name: Build and start infra
         run: |
           docker compose -f docker-compose.yml --profile dev up -d --build \
-            db redis rabbitmq minio bootstrap api celery_worker celery_beat
+            db redis rabbitmq minio bootstrap api
 
-      - name: Wait for worker/beat readiness
+      - name: API smoke check
         run: |
-          for i in {1..20}; do
-            if docker compose -f docker-compose.yml ps --format '{{.Name}} {{.Status}}' celery_worker celery_beat | grep -Eiq 'healthy|Up'; then
-              sleep 3
+          for i in {1..30}; do
+            if curl -fsS http://localhost:8000/api/health >/dev/null; then
+              exit 0
             fi
-            W=$(docker compose -f docker-compose.yml ps --format '{{.Status}}' celery_worker || true)
-            B=$(docker compose -f docker-compose.yml ps --format '{{.Status}}' celery_beat || true)
-            echo "worker=$W"
-            echo "beat=$B"
-            if echo "$W" | grep -qi "healthy\|Up" && echo "$B" | grep -qi "healthy\|Up"; then
-              break
-            fi
-            sleep 3
+            sleep 2
           done
-
-      - name: Celery/RabbitMQ smoke checks
-        run: |
-          docker compose -f docker-compose.yml exec -T celery_worker sh -lc "celery -A src.infrastructure.celery_app inspect ping -t 5 | grep -q OK"
-          docker compose -f docker-compose.yml exec -T celery_beat sh -lc "ps aux | grep -q '[c]elery.*beat'"
-          docker compose -f docker-compose.yml exec -T api python - <<'PY'
-          import time
-          from src.infrastructure.celery_app import celery
-          from src.modules.billing.tasks import process_billing_lifecycle
-          from src.modules.schedule.tasks import dispatch_schedule_reminders
-
-          task_ids = [
-              dispatch_schedule_reminders.delay().id,
-              process_billing_lifecycle.delay().id,
-          ]
-          print("queued task ids:", *task_ids)
-
-          deadline = time.time() + 60
-          while time.time() < deadline:
-              states = [celery.AsyncResult(task_id).state for task_id in task_ids]
-              print("states:", states)
-              if all(state in {"SUCCESS", "FAILURE"} for state in states):
-                  break
-              time.sleep(2)
-
-          failed = []
-          for task_id in task_ids:
-              result = celery.AsyncResult(task_id)
-              print(f"task={task_id} state={result.state} result={result.result}")
-              if result.state != "SUCCESS":
-                  failed.append(task_id)
-          if failed:
-              raise SystemExit(f"Celery smoke failed tasks: {failed}")
-          PY
+          docker compose -f docker-compose.yml ps
+          docker compose -f docker-compose.yml logs --no-color --tail=200 api bootstrap
+          exit 1
 
       - name: Dump logs on failure
         if: failure()

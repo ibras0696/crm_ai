@@ -254,14 +254,19 @@ jobs:
             git checkout main
             git pull origin main
 
-            # Build and deploy (all backend runtime services must be rebuilt together)
+            # Build all images used in production deploy flow
             docker compose -f docker-compose.prod.yml build api bootstrap celery_worker celery_beat frontend
+
+            # Phase 1: start infra first
+            docker compose -f docker-compose.prod.yml up -d db redis rabbitmq minio onlyoffice
+
+            # Phase 2: run bootstrap as explicit one-off task
             set +e
-            docker compose -f docker-compose.prod.yml up -d
-            DEPLOY_UP_EXIT=$?
+            docker compose -f docker-compose.prod.yml run --rm bootstrap
+            BOOTSTRAP_EXIT=$?
             set -e
-            if [ "$DEPLOY_UP_EXIT" -ne 0 ]; then
-              echo "docker compose up failed with exit code: $DEPLOY_UP_EXIT"
+            if [ "$BOOTSTRAP_EXIT" -ne 0 ]; then
+              echo "bootstrap failed with exit code: $BOOTSTRAP_EXIT"
               docker compose -f docker-compose.prod.yml ps || true
               echo "=== bootstrap logs ==="
               docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 bootstrap || true
@@ -269,6 +274,27 @@ jobs:
               docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 api || true
               echo "=== celery_worker logs ==="
               docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_worker || true
+              echo "=== celery_beat logs ==="
+              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_beat || true
+              exit "$BOOTSTRAP_EXIT"
+            fi
+
+            # Phase 3: start runtime services without re-running dependency graph
+            set +e
+            docker compose -f docker-compose.prod.yml up -d --no-deps api celery_worker celery_beat frontend
+            DEPLOY_UP_EXIT=$?
+            set -e
+            if [ "$DEPLOY_UP_EXIT" -ne 0 ]; then
+              echo "runtime compose up failed with exit code: $DEPLOY_UP_EXIT"
+              docker compose -f docker-compose.prod.yml ps || true
+              echo "=== bootstrap logs ==="
+              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 bootstrap || true
+              echo "=== api logs ==="
+              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 api || true
+              echo "=== celery_worker logs ==="
+              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_worker || true
+              echo "=== celery_beat logs ==="
+              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_beat || true
               exit "$DEPLOY_UP_EXIT"
             fi
 
@@ -309,10 +335,14 @@ jobs:
               docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 api || true
               echo "=== celery_worker logs ==="
               docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_worker || true
+              echo "=== celery_beat logs ==="
+              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_beat || true
               echo "=== ROLLBACK: reverting to $PREV_COMMIT ==="
               git checkout $PREV_COMMIT
               docker compose -f docker-compose.prod.yml build api bootstrap celery_worker celery_beat frontend
-              docker compose -f docker-compose.prod.yml up -d
+              docker compose -f docker-compose.prod.yml up -d db redis rabbitmq minio onlyoffice
+              docker compose -f docker-compose.prod.yml run --rm bootstrap
+              docker compose -f docker-compose.prod.yml up -d --no-deps api celery_worker celery_beat frontend
               echo "Rollback complete. Waiting 20s..."
               sleep 20
               exit 1

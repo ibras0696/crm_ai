@@ -97,6 +97,10 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    networks:
+      default:
+        aliases:
+          - db
 
   redis:
     image: redis:7-alpine
@@ -108,6 +112,10 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    networks:
+      default:
+        aliases:
+          - redis
 
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
@@ -122,6 +130,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    networks:
+      default:
+        aliases:
+          - rabbitmq
 
   minio:
     image: minio/minio:RELEASE.2025-01-20T14-49-07Z
@@ -137,6 +149,10 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+    networks:
+      default:
+        aliases:
+          - minio
 
   onlyoffice:
     image: onlyoffice/documentserver:7.5.1
@@ -156,6 +172,10 @@ services:
       interval: 15s
       timeout: 5s
       retries: 5
+    networks:
+      default:
+        aliases:
+          - onlyoffice
 
   bootstrap:
     build:
@@ -196,6 +216,10 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
+    networks:
+      default:
+        aliases:
+          - api
 
   celery_worker:
     build:

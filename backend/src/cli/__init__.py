@@ -1,1 +1,1 @@
-"""CLI commands for operational tasks (bootstrap, maintenance, etc.)."""
+"""CLI commands for operational tasks (migrations, bootstrap, maintenance)."""

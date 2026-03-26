@@ -126,7 +126,8 @@ up-full:
 	$(COMPOSE_DEV) -f docker-compose.exposed.yml --profile infra-debug up -d --build
 
 bootstrap:
-	$(COMPOSE_DEV) run --rm bootstrap
+	@echo "[WARN] make bootstrap is deprecated. Use make migrate."
+	$(COMPOSE_DEV) run --rm migrate
 
 down:
 	$(COMPOSE_DEV) down
@@ -173,7 +174,7 @@ gen-prod-secrets:
 
 ## Migrations / Shell (dev)
 migrate:
-	$(COMPOSE_DEV) exec api alembic upgrade head
+	$(COMPOSE_DEV) run --rm migrate
 
 migration:
 	@if [ -z "$(m)" ]; then echo "[WARN] Укажи m='название миграции'"; exit 1; fi

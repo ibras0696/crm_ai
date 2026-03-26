@@ -177,12 +177,12 @@ services:
         aliases:
           - onlyoffice
 
-  bootstrap:
+  migrate:
     build:
       context: ./backend
       dockerfile: Dockerfile
     restart: "no"
-    command: python -m src.cli.bootstrap
+    command: python -m src.cli.migrate
     environment:
       <<: *backend_env
     depends_on:
@@ -201,7 +201,7 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      bootstrap:
+      migrate:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -230,7 +230,7 @@ services:
     environment:
       <<: *backend_env
     depends_on:
-      bootstrap:
+      migrate:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
@@ -252,7 +252,7 @@ services:
     environment:
       <<: *backend_env
     depends_on:
-      bootstrap:
+      migrate:
         condition: service_completed_successfully
       redis:
         condition: service_healthy

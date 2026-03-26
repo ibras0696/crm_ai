@@ -37,7 +37,7 @@ jobs:
       - name: Build and start infra
         run: |
           docker compose -f docker-compose.yml --profile dev up -d --build \
-            db redis rabbitmq minio bootstrap api
+            db redis rabbitmq minio migrate api
 
       - name: API smoke check
         run: |
@@ -48,7 +48,7 @@ jobs:
             sleep 2
           done
           docker compose -f docker-compose.yml ps
-          docker compose -f docker-compose.yml logs --no-color --tail=200 api bootstrap
+          docker compose -f docker-compose.yml logs --no-color --tail=200 api migrate
           exit 1
 
       - name: Dump logs on failure
@@ -255,28 +255,28 @@ jobs:
             git pull origin main
 
             # Build all images used in production deploy flow
-            docker compose -f docker-compose.prod.yml build api bootstrap celery_worker celery_beat frontend
+            docker compose -f docker-compose.prod.yml build api migrate celery_worker celery_beat frontend
 
             # Phase 1: start infra first
             docker compose -f docker-compose.prod.yml up -d db redis rabbitmq minio onlyoffice
 
-            # Phase 2: run bootstrap as explicit one-off task
+            # Phase 2: run migrations as explicit one-off task
             set +e
-            docker compose -f docker-compose.prod.yml run --rm bootstrap
-            BOOTSTRAP_EXIT=$?
+            docker compose -f docker-compose.prod.yml run --rm migrate
+            MIGRATE_EXIT=$?
             set -e
-            if [ "$BOOTSTRAP_EXIT" -ne 0 ]; then
-              echo "bootstrap failed with exit code: $BOOTSTRAP_EXIT"
+            if [ "$MIGRATE_EXIT" -ne 0 ]; then
+              echo "migrate failed with exit code: $MIGRATE_EXIT"
               docker compose -f docker-compose.prod.yml ps || true
-              echo "=== bootstrap logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 bootstrap || true
+              echo "=== migrate logs ==="
+              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 migrate || true
               echo "=== api logs ==="
               docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 api || true
               echo "=== celery_worker logs ==="
               docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_worker || true
               echo "=== celery_beat logs ==="
               docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_beat || true
-              exit "$BOOTSTRAP_EXIT"
+              exit "$MIGRATE_EXIT"
             fi
 
             # Phase 3: start runtime services without re-running dependency graph
@@ -287,8 +287,8 @@ jobs:
             if [ "$DEPLOY_UP_EXIT" -ne 0 ]; then
               echo "runtime compose up failed with exit code: $DEPLOY_UP_EXIT"
               docker compose -f docker-compose.prod.yml ps || true
-              echo "=== bootstrap logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 bootstrap || true
+              echo "=== migrate logs ==="
+              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 migrate || true
               echo "=== api logs ==="
               docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 api || true
               echo "=== celery_worker logs ==="
@@ -329,8 +329,8 @@ jobs:
             if [ "$HEALTHY" = false ]; then
               echo "=== deployment unhealthy, collecting logs before rollback ==="
               docker compose -f docker-compose.prod.yml ps || true
-              echo "=== bootstrap logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 bootstrap || true
+              echo "=== migrate logs ==="
+              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 migrate || true
               echo "=== api logs ==="
               docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 api || true
               echo "=== celery_worker logs ==="
@@ -339,9 +339,9 @@ jobs:
               docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_beat || true
               echo "=== ROLLBACK: reverting to $PREV_COMMIT ==="
               git checkout $PREV_COMMIT
-              docker compose -f docker-compose.prod.yml build api bootstrap celery_worker celery_beat frontend
+              docker compose -f docker-compose.prod.yml build api migrate celery_worker celery_beat frontend
               docker compose -f docker-compose.prod.yml up -d db redis rabbitmq minio onlyoffice
-              docker compose -f docker-compose.prod.yml run --rm bootstrap
+              docker compose -f docker-compose.prod.yml run --rm migrate
               docker compose -f docker-compose.prod.yml up -d --no-deps api celery_worker celery_beat frontend
               echo "Rollback complete. Waiting 20s..."
               sleep 20

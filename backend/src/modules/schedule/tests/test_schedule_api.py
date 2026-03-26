@@ -244,7 +244,7 @@ async def test_schedule_rejects_invalid_participant_and_reminder_offset(client: 
 
 
 @pytest.mark.asyncio
-async def test_schedule_dispatch_skips_recurrence_events(client: AsyncClient):
+async def test_schedule_dispatch_skips_unsupported_recurrence_events(client: AsyncClient):
     token = await _register_owner(client)
 
     create = await client.post(
@@ -271,3 +271,50 @@ async def test_schedule_dispatch_skips_recurrence_events(client: AsyncClient):
     assert dispatch.status_code == 200
     assert dispatch.json()["ok"] is True
     assert dispatch.json()["data"]["created_notifications"] == 0
+
+
+@pytest.mark.asyncio
+async def test_schedule_dispatch_supports_simple_daily_recurrence(client: AsyncClient):
+    token = await _register_owner(client)
+
+    create = await client.post(
+        "/api/v1/schedule/events",
+        json={
+            "title": "Daily standup",
+            "description": "Recurring reminders must work",
+            "start_at": "2026-03-03T12:00:00Z",
+            "end_at": "2026-03-03T12:30:00Z",
+            "all_day": False,
+            "recurrence": "daily",
+            "reminder_offsets_minutes": [60],
+        },
+        headers=_headers(token),
+    )
+    assert create.status_code == 200
+    assert create.json()["ok"] is True
+    event_id = create.json()["data"]["id"]
+
+    # Reminder for occurrence on 2026-03-04 12:00Z.
+    d1 = await client.post(
+        "/api/v1/schedule/events/dispatch-reminders",
+        json={"now": "2026-03-04T11:00:00Z"},
+        headers=_headers(token),
+    )
+    assert d1.status_code == 200
+    assert d1.json()["ok"] is True
+    assert d1.json()["data"]["created_notifications"] == 1
+
+    # Re-dispatch same instant: no duplicates.
+    d1_repeat = await client.post(
+        "/api/v1/schedule/events/dispatch-reminders",
+        json={"now": "2026-03-04T11:00:00Z"},
+        headers=_headers(token),
+    )
+    assert d1_repeat.status_code == 200
+    assert d1_repeat.json()["ok"] is True
+    assert d1_repeat.json()["data"]["created_notifications"] == 0
+
+    notifs = await client.get("/api/v1/notifications/?limit=50&offset=0", headers=_headers(token))
+    assert notifs.status_code == 200
+    event_notifs = [n for n in notifs.json()["data"] if (n.get("meta") or {}).get("event_id") == event_id]
+    assert len(event_notifs) == 1

@@ -336,8 +336,9 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
         )
 
     first_turn = len(db_messages) == 0
-    # Один вход роутинга: action-режим выводим только из IntentDecision.
-    action_mode = bool(first_turn) or intent_decision.mode in {"create", "update", "delete"}
+    # action-режим включаем только когда реально ожидается изменение данных.
+    ui_intent_create = str(body.ui_intent or "").strip().lower().startswith("create_")
+    action_mode = bool(intent_decision.is_action or ui_intent_create)
     turn_system_prompt = build_turn_system_prompt(
         base_system_prompt=system_prompt,
         first_turn=first_turn,
@@ -394,8 +395,9 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
     # - в timeweb_native цепочка идет через parent_message_id на стороне провайдера;
     # - в openai-compatible работаем как stateless turn (без локального history-tail).
     history_rows: list[dict[str, str]] = []
-    # На каждом ходу отправляем system prompt: на 1-м полный, далее компактный.
-    include_system_prompt = True
+    # По умолчанию отправляем system prompt только на первом ходу (настраивается флагом).
+    send_once = bool(getattr(settings, "AI_SEND_SYSTEM_PROMPT_ONCE_PER_CHAT", True))
+    include_system_prompt = first_turn if send_once else True
     # Тяжелые action-инструкции включаем на первом ходу и на action-запросах.
     messages = build_messages(
         turn_system_prompt,

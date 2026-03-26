@@ -9,6 +9,12 @@ from src.common.enums import NotificationStatus, NotificationType
 from src.modules.notifications.models import Notification
 from src.modules.schedule.errors import ScheduleModuleError
 from src.modules.schedule.models import Event
+from src.modules.schedule.reminders import (
+    build_recurrence_marker,
+    iter_occurrences_within_window,
+    normalize_simple_recurrence,
+    prune_recurrence_markers,
+)
 from src.modules.schedule.repository import ScheduleRepository
 from src.modules.schedule.schemas import CreateEventRequest, UpdateEventRequest
 
@@ -149,19 +155,62 @@ class ScheduleService:
         created_notifications = 0
 
         for event in events:
-            if event.recurrence:
-                # Пока напоминания поддерживаются только для базовых (не виртуальных) событий.
-                continue
-
             offsets = event.reminder_offsets_minutes
             if not offsets:
                 continue
-            sent_offsets = set(event.reminder_sent_offsets_minutes)
             participants = event.participant_ids
             if not participants:
                 continue
 
-            for offset in offsets:
+            recurrence = normalize_simple_recurrence(event.recurrence)
+            if recurrence:
+                recurring_markers = set(event.recurring_reminder_markers)
+                max_offset = max(int(x) for x in offsets)
+                occurrences = iter_occurrences_within_window(
+                    base_start=event.start_at,
+                    recurrence=recurrence,
+                    window_start=target_now - timedelta(minutes=max_offset),
+                    window_end=target_now + timedelta(minutes=max_offset),
+                )
+                for occurrence_start in occurrences:
+                    for raw_offset in offsets:
+                        offset = int(raw_offset)
+                        marker = build_recurrence_marker(occurrence_start=occurrence_start, offset_minutes=offset)
+                        if marker in recurring_markers:
+                            continue
+                        reminder_at = occurrence_start - timedelta(minutes=offset)
+                        if reminder_at <= target_now <= occurrence_start:
+                            for user_id in participants:
+                                self.session.add(
+                                    Notification(
+                                        org_id=event.org_id,
+                                        user_id=user_id,
+                                        type=NotificationType.IN_APP,
+                                        status=NotificationStatus.PENDING,
+                                        title=f"Скоро событие: {event.title}",
+                                        body=self._build_reminder_text(offset),
+                                        meta={
+                                            "event_id": str(event.id),
+                                            "start_at": occurrence_start.isoformat(),
+                                            "offset_minutes": offset,
+                                            "is_recurring": True,
+                                        },
+                                    )
+                                )
+                                created_notifications += 1
+                            recurring_markers.add(marker)
+                event.set_meta_fields(
+                    recurring_reminder_markers=prune_recurrence_markers(recurring_markers, now=target_now)
+                )
+                continue
+
+            if event.recurrence:
+                # Неподдерживаемые recurrence форматы (например RRULE) пока пропускаем.
+                continue
+
+            sent_offsets = set(event.reminder_sent_offsets_minutes)
+            for raw_offset in offsets:
+                offset = int(raw_offset)
                 if offset in sent_offsets:
                     continue
                 reminder_at = event.start_at - timedelta(minutes=offset)

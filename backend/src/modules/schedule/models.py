@@ -65,12 +65,23 @@ class Event(BaseDBModel):
                 continue
         return result
 
+    @property
+    def recurring_reminder_markers(self) -> list[str]:
+        raw = (self.meta or {}).get("recurring_reminder_markers") or []
+        result: list[str] = []
+        for value in raw:
+            text = str(value).strip()
+            if text:
+                result.append(text)
+        return result
+
     def set_meta_fields(
         self,
         *,
         participant_ids: list[uuid.UUID] | None = None,
         reminder_offsets_minutes: list[int] | None = None,
         reminder_sent_offsets_minutes: list[int] | None = None,
+        recurring_reminder_markers: list[str] | None = None,
     ) -> None:
         next_meta: dict[str, Any] = dict(self.meta or {})
         if participant_ids is not None:
@@ -79,4 +90,6 @@ class Event(BaseDBModel):
             next_meta["reminder_offsets_minutes"] = reminder_offsets_minutes
         if reminder_sent_offsets_minutes is not None:
             next_meta["reminder_sent_offsets_minutes"] = reminder_sent_offsets_minutes
+        if recurring_reminder_markers is not None:
+            next_meta["recurring_reminder_markers"] = recurring_reminder_markers
         self.meta = next_meta

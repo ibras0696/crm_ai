@@ -313,9 +313,9 @@ jobs:
                 fi
               done
 
-              API_STATUS=$(curl -sf http://localhost:8000/api/health | jq -r '.status' 2>/dev/null || echo "error")
+              API_STATUS=$(curl -sf http://127.0.0.1:8000/api/health | jq -r '.status' 2>/dev/null || echo "error")
               FRONT_STATUS=1
-              if curl -sf http://localhost:5173/ >/dev/null; then
+              if curl -sf http://127.0.0.1:5173/ >/dev/null; then
                 FRONT_STATUS=0
               fi
 

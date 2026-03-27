@@ -29,6 +29,19 @@ if TYPE_CHECKING:
 
 
 class DocsFilesMixin:
+    def _resolve_download_filename(self, file_obj: File) -> str:
+        raw_name = (str(file_obj.original_name or "").strip() or str(file_obj.filename or "").strip())
+        sanitized = raw_name.split("/")[-1].split("\\")[-1].strip()
+        if sanitized:
+            return sanitized
+
+        extension = "bin"
+        try:
+            _, extension = self._resolve_mime_and_ext(FileType(file_obj.type))
+        except (ValueError, TypeError):
+            extension = "bin"
+        return self._build_filename_by_type(title=file_obj.title or "Документ", extension=extension)
+
     async def delete_file(
         self,
         *,
@@ -548,11 +561,13 @@ class DocsFilesMixin:
         if version is None:
             raise DocsModuleError(code="FILE_VERSION_NOT_FOUND", message="Текущая версия файла не найдена")
 
+        download_filename = self._resolve_download_filename(file_obj)
         try:
             url = self.storage.generate_presigned_get_url(
                 bucket=version.s3_bucket,
                 key=version.s3_key,
                 expires_in=expires_in,
+                filename=download_filename,
             )
         except (BotoCoreError, ClientError, KeyError, OSError, ValueError) as exc:
             raise DocsModuleError(

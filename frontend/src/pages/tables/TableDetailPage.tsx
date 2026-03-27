@@ -829,7 +829,7 @@ function TableDetailPageContent() {
 
       {/* Search + Filter toolbar */}
       <div className="flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-0 w-full sm:max-w-xs">
+        <div className="relative flex-1 min-w-[180px] max-w-xs max-md:w-full max-md:min-w-0">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <input
             value={search}
@@ -866,12 +866,12 @@ function TableDetailPageContent() {
 
       {/* Filter panel */}
       {showFilter && (
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2 p-3 rounded-lg border border-border bg-secondary/20">
+        <div className="flex items-center gap-2 p-3 rounded-lg border border-border bg-secondary/20 max-sm:flex-col max-sm:items-stretch">
           <span className="text-xs text-muted-foreground whitespace-nowrap">Столбец:</span>
           <select
             value={filterCol}
             onChange={e => { setFilterCol(e.target.value); setFilterVal(''); setPage(0) }}
-            className="h-8 w-full sm:w-auto px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary"
+            className="h-8 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary max-sm:w-full"
           >
             <option value="">— выберите —</option>
             {columns.map(col => <option key={col.id} value={col.id}>{col.name}</option>)}
@@ -882,13 +882,13 @@ function TableDetailPageContent() {
             onChange={e => { setFilterVal(e.target.value); setPage(0) }}
             placeholder="Значение..."
             disabled={!filterCol}
-            className="w-full sm:flex-1 h-8 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary disabled:opacity-50"
+            className="flex-1 h-8 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary disabled:opacity-50 max-sm:w-full"
           />
         </div>
       )}
 
       <div className="border border-border rounded-lg overflow-x-auto">
-        <table className="min-w-[760px] table-fixed text-sm">
+        <table className="min-w-full max-md:min-w-[760px] table-fixed text-sm">
           <colgroup>
             <col className="w-10" />
             {columns.map((col: ColumnInfo) => (
@@ -918,15 +918,15 @@ function TableDetailPageContent() {
                       >
                         <span>{col.name}</span>
                         <SortIcon className={`h-3 w-3 ${
-                          isSorted ? 'opacity-100' : 'opacity-40 md:opacity-0 md:group-hover:opacity-40'
+                          isSorted ? 'opacity-100' : 'opacity-0 group-hover:opacity-40 max-md:opacity-40'
                         }`} />
                       </button>
-                      <button onClick={() => openEditColumnDialog(col)} className={`hover:text-foreground transition-opacity ${isEditing ? 'opacity-100 text-primary' : 'opacity-100 md:opacity-0 md:group-hover:opacity-100'}`} title="Изменить поле">
+                      <button onClick={() => openEditColumnDialog(col)} className={`hover:text-foreground transition-opacity ${isEditing ? 'opacity-100 text-primary' : 'opacity-0 group-hover:opacity-100 max-md:opacity-100'}`} title="Изменить поле">
                         <Pencil className="h-3 w-3" />
                       </button>
                       {col.is_required && <span className="text-destructive text-xs">*</span>}
                       {!col.is_primary && (
-                        <button onClick={() => handleDeleteColumn(col.id)} className="ml-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 hover:text-destructive transition-opacity">
+                        <button onClick={() => handleDeleteColumn(col.id)} className="ml-1 opacity-0 group-hover:opacity-100 max-md:opacity-100 hover:text-destructive transition-opacity">
                           <Trash2 className="h-3 w-3" />
                         </button>
                       )}
@@ -1006,7 +1006,7 @@ function TableDetailPageContent() {
                     <button
                       onClick={() => handleMoveRecord(record.id, 'up')}
                       disabled={!canManualReorder || !!movingRecordId || (page * PAGE_SIZE + idx) === 0}
-                      className="h-7 w-7 flex items-center justify-center opacity-100 md:opacity-0 md:group-hover/row:opacity-100 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-opacity"
+                      className="h-7 w-7 flex items-center justify-center opacity-0 group-hover/row:opacity-100 max-md:opacity-100 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-opacity"
                       title={canManualReorder ? 'Переместить вверх' : 'Отключено при сортировке/фильтре/поиске'}
                     >
                       <ArrowUp className="h-3.5 w-3.5" />
@@ -1014,12 +1014,12 @@ function TableDetailPageContent() {
                     <button
                       onClick={() => handleMoveRecord(record.id, 'down')}
                       disabled={!canManualReorder || !!movingRecordId || (page * PAGE_SIZE + idx) === (processedRecords.length - 1)}
-                      className="h-7 w-7 flex items-center justify-center opacity-100 md:opacity-0 md:group-hover/row:opacity-100 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-opacity"
+                      className="h-7 w-7 flex items-center justify-center opacity-0 group-hover/row:opacity-100 max-md:opacity-100 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-opacity"
                       title={canManualReorder ? 'Переместить вниз' : 'Отключено при сортировке/фильтре/поиске'}
                     >
                       <ArrowDown className="h-3.5 w-3.5" />
                     </button>
-                    <button onClick={() => handleDeleteRecord(record.id)} className="h-7 w-7 flex items-center justify-center opacity-100 md:opacity-0 md:group-hover/row:opacity-100 text-muted-foreground hover:text-destructive transition-opacity">
+                    <button onClick={() => handleDeleteRecord(record.id)} className="h-7 w-7 flex items-center justify-center opacity-0 group-hover/row:opacity-100 max-md:opacity-100 text-muted-foreground hover:text-destructive transition-opacity">
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </div>
@@ -1060,11 +1060,11 @@ function TableDetailPageContent() {
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+        <div className="flex items-center justify-between max-sm:flex-col max-sm:items-start gap-2">
           <span className="text-xs text-muted-foreground">
             Страница {page + 1} из {totalPages} · {processedRecords.length} записей
           </span>
-          <div className="flex items-center gap-1 overflow-x-auto pb-1 w-full sm:w-auto">
+          <div className="flex items-center gap-1 max-sm:overflow-x-auto max-sm:pb-1 max-sm:w-full">
             <button
               onClick={() => setPage(0)}
               disabled={page === 0}

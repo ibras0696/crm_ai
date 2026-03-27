@@ -525,7 +525,10 @@ export default function ChatPage() {
         }
       }
 
-      const message = controller.signal.aborted ? 'Загрузка отменена' : extractApiError(error, 'Не удалось загрузить файл')
+      let message = controller.signal.aborted ? 'Загрузка отменена' : extractApiError(error, 'Не удалось загрузить файл')
+      if (error instanceof TypeError && /fetch/i.test(error.message)) {
+        message = 'Не удалось загрузить файл в хранилище. Проверьте сеть/CORS и повторите попытку.'
+      }
       setComposerAttachments((prev) =>
         prev.map((item) =>
           item.clientId === clientId

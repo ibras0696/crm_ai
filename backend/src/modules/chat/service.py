@@ -7,6 +7,7 @@ from src.modules.chat.errors import ChatModuleError
 from src.modules.chat.models import Chat, ChatMember, ChatMessage
 from src.modules.chat.repository import ChatRepository
 from src.modules.chat.schemas import (
+    CHAT_MESSAGE_MAX_CHARS,
     AddChatMemberRequest,
     CreateChatRequest,
     SendChatMessageRequest,
@@ -123,13 +124,22 @@ class ChatService:
                 status_code=403,
             )
 
+        trimmed_body = body.body.strip()
+        if not trimmed_body:
+            raise ChatServiceError(code="VALIDATION_ERROR", message="Сообщение не может быть пустым")
+        if len(trimmed_body) > CHAT_MESSAGE_MAX_CHARS:
+            raise ChatServiceError(
+                code="VALIDATION_ERROR",
+                message=f"Сообщение не должно превышать {CHAT_MESSAGE_MAX_CHARS} символов",
+            )
+
         seq_no = await self.repo.next_seq_no(chat_id=chat.id)
         message = ChatMessage(
             org_id=chat.org_id,
             chat_id=chat.id,
             sender_id=actor_id,
             seq_no=seq_no,
-            body=body.body.strip(),
+            body=trimmed_body,
             body_type=(body.body_type or "text_markdown").strip(),
             meta=body.meta,
         )

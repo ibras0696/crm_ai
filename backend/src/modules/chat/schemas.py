@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+CHAT_MESSAGE_MAX_CHARS = 500
+
 
 class CreateChatRequest(BaseModel):
     chat_type: Literal["direct", "group", "channel"] = "group"
@@ -21,7 +23,7 @@ class AddChatMemberRequest(BaseModel):
 
 
 class SendChatMessageRequest(BaseModel):
-    body: str = Field(min_length=1)
+    body: str = Field(min_length=1, max_length=CHAT_MESSAGE_MAX_CHARS)
     body_type: str = Field(default="text_markdown", max_length=40)
     meta: dict | None = None
 
@@ -65,4 +67,3 @@ class ReadCursorOut(BaseModel):
     chat_id: uuid.UUID
     user_id: uuid.UUID
     last_read_seq_no: int
-

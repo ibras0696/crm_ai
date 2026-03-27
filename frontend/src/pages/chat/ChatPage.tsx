@@ -16,6 +16,7 @@ function extractApiError(e: unknown, fallback: string): string {
 }
 
 const MESSAGE_PAGE_SIZE = 50
+const MESSAGE_MAX_CHARS = 500
 
 export default function ChatPage() {
   const { members, user } = useAuth()
@@ -319,11 +320,16 @@ export default function ChatPage() {
   }
 
   const handleSend = async () => {
-    if (!selectedChatId || !draft.trim() || sending) return
+    const trimmedDraft = draft.trim()
+    if (!selectedChatId || !trimmedDraft || sending) return
+    if (trimmedDraft.length > MESSAGE_MAX_CHARS) {
+      setErrorText(`Сообщение не должно превышать ${MESSAGE_MAX_CHARS} символов`)
+      return
+    }
     setSending(true)
     setErrorText('')
     try {
-      const response = await chatApi.sendMessage(selectedChatId, { body: draft.trim() })
+      const response = await chatApi.sendMessage(selectedChatId, { body: trimmedDraft })
       if (response.data.ok && response.data.data) {
         const created = response.data.data
         setMessages((prev) => (prev.some((x) => x.id === created.id) ? prev : [...prev, created]))
@@ -521,7 +527,7 @@ export default function ChatPage() {
                               : 'border-border/70 bg-muted/30'
                           }`}
                         >
-                          <div className="whitespace-pre-wrap break-words">{message.body}</div>
+                          <div className="whitespace-pre-wrap break-all">{message.body}</div>
                           <div className="mt-1 text-[11px] text-muted-foreground">
                             #{message.seq_no} · {new Date(message.created_at).toLocaleString('ru-RU')}
                           </div>
@@ -537,6 +543,7 @@ export default function ChatPage() {
                   <Input
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
+                    maxLength={MESSAGE_MAX_CHARS}
                     placeholder={selectedChat ? 'Введите сообщение' : 'Сначала выберите чат'}
                     disabled={!selectedChat || sending}
                     onKeyDown={(e) => {
@@ -546,10 +553,18 @@ export default function ChatPage() {
                       }
                     }}
                   />
-                  <Button onClick={() => void handleSend()} disabled={!selectedChat || !draft.trim() || sending}>
+                  <Button
+                    onClick={() => void handleSend()}
+                    disabled={!selectedChat || !draft.trim() || draft.trim().length > MESSAGE_MAX_CHARS || sending}
+                  >
                     {sending ? '...' : 'Отправить'}
                   </Button>
                 </div>
+                {selectedChat && (
+                  <div className="mt-2 text-right text-xs text-muted-foreground">
+                    {draft.trim().length}/{MESSAGE_MAX_CHARS}
+                  </div>
+                )}
               </div>
             </div>
         </CardContent>

@@ -142,3 +142,37 @@ async def test_chat_core_flow_with_members_messages_and_read_cursor(client: Asyn
     assert after_delete.status_code == 200
     assert after_delete.json()["ok"] is False
     assert after_delete.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_chat_message_length_and_empty_validation(client: AsyncClient):
+    token = await _register_owner(client, org_name="Chat Validation Org")
+
+    created = await client.post(
+        "/api/v1/chat/chats",
+        json={
+            "chat_type": "group",
+            "title": "Validation Chat",
+            "member_ids": [],
+        },
+        headers=_headers(token),
+    )
+    assert created.status_code == 200, f"Create chat failed: {created.text}"
+    chat_id = created.json()["data"]["id"]
+
+    too_long = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/messages",
+        json={"body": "a" * 501},
+        headers=_headers(token),
+    )
+    assert too_long.status_code == 422, f"Expected 422 for too long message, got: {too_long.text}"
+
+    only_spaces = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/messages",
+        json={"body": "   "},
+        headers=_headers(token),
+    )
+    assert only_spaces.status_code == 200, f"Spaces-only message request failed: {only_spaces.text}"
+    payload = only_spaces.json()
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "VALIDATION_ERROR"

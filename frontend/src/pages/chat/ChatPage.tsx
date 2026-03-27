@@ -15,6 +15,8 @@ function extractApiError(e: unknown, fallback: string): string {
   return fallback
 }
 
+const MESSAGE_PAGE_SIZE = 50
+
 export default function ChatPage() {
   const { members, user } = useAuth()
   const [chats, setChats] = useState<ChatInfo[]>([])
@@ -22,6 +24,8 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<ChatMessageInfo[]>([])
   const [loadingChats, setLoadingChats] = useState(false)
   const [loadingMessages, setLoadingMessages] = useState(false)
+  const [loadingOlderMessages, setLoadingOlderMessages] = useState(false)
+  const [hasMoreMessages, setHasMoreMessages] = useState(true)
   const [errorText, setErrorText] = useState('')
 
   const [newChatTitle, setNewChatTitle] = useState('')
@@ -33,6 +37,7 @@ export default function ChatPage() {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const selectedChatIdRef = useRef<string | null>(null)
+  const messagesViewportRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId
@@ -47,6 +52,12 @@ export default function ChatPage() {
   const selectedChat = useMemo(() => {
     return chats.find((x) => x.id === selectedChatId) || null
   }, [chats, selectedChatId])
+
+  const scrollMessagesToBottom = () => {
+    const viewport = messagesViewportRef.current
+    if (!viewport) return
+    viewport.scrollTop = viewport.scrollHeight
+  }
 
   useEffect(() => {
     const loadChats = async () => {
@@ -82,25 +93,35 @@ export default function ChatPage() {
     const loadMessages = async () => {
       if (!selectedChatId) {
         setMessages([])
+        setHasMoreMessages(true)
         return
       }
       setLoadingMessages(true)
+      setLoadingOlderMessages(false)
+      setHasMoreMessages(true)
       setErrorText('')
       try {
-        const response = await chatApi.listMessages(selectedChatId, 200, 0)
+        const response = await chatApi.listMessages(selectedChatId, {
+          limit: MESSAGE_PAGE_SIZE,
+          latest: true,
+        })
         if (response.data.ok && response.data.data) {
           const nextMessages = response.data.data
           setMessages(nextMessages)
+          setHasMoreMessages(nextMessages.length === MESSAGE_PAGE_SIZE)
           const lastSeqNo = nextMessages[nextMessages.length - 1]?.seq_no
           if (typeof lastSeqNo === 'number') {
             await chatApi.updateReadCursor(selectedChatId, { last_read_seq_no: lastSeqNo })
           }
+          requestAnimationFrame(scrollMessagesToBottom)
         } else {
           setMessages([])
+          setHasMoreMessages(true)
           setErrorText(response.data.error?.message || 'Не удалось загрузить сообщения')
         }
       } catch (e) {
         setMessages([])
+        setHasMoreMessages(true)
         setErrorText(extractApiError(e, 'Не удалось загрузить сообщения'))
       } finally {
         setLoadingMessages(false)
@@ -108,6 +129,55 @@ export default function ChatPage() {
     }
     void loadMessages()
   }, [selectedChatId])
+
+  const loadOlderMessages = async () => {
+    if (!selectedChatId || loadingMessages || loadingOlderMessages || !hasMoreMessages || messages.length === 0) return
+    const beforeSeqNo = messages[0]?.seq_no
+    if (typeof beforeSeqNo !== 'number') return
+
+    const viewport = messagesViewportRef.current
+    const prevScrollHeight = viewport?.scrollHeight ?? 0
+    const prevScrollTop = viewport?.scrollTop ?? 0
+
+    setLoadingOlderMessages(true)
+    setErrorText('')
+    try {
+      const response = await chatApi.listMessages(selectedChatId, {
+        limit: MESSAGE_PAGE_SIZE,
+        before_seq_no: beforeSeqNo,
+      })
+      if (response.data.ok && response.data.data) {
+        const older = response.data.data
+        setMessages((prev) => {
+          const existingIds = new Set(prev.map((x) => x.id))
+          const uniqueOlder = older.filter((x) => !existingIds.has(x.id))
+          return [...uniqueOlder, ...prev]
+        })
+        setHasMoreMessages(older.length === MESSAGE_PAGE_SIZE)
+
+        requestAnimationFrame(() => {
+          const el = messagesViewportRef.current
+          if (!el) return
+          const newScrollHeight = el.scrollHeight
+          el.scrollTop = newScrollHeight - prevScrollHeight + prevScrollTop
+        })
+      } else {
+        setErrorText(response.data.error?.message || 'Не удалось загрузить предыдущие сообщения')
+      }
+    } catch (e) {
+      setErrorText(extractApiError(e, 'Не удалось загрузить предыдущие сообщения'))
+    } finally {
+      setLoadingOlderMessages(false)
+    }
+  }
+
+  const handleMessagesScroll = () => {
+    const viewport = messagesViewportRef.current
+    if (!viewport) return
+    if (viewport.scrollTop <= 64) {
+      void loadOlderMessages()
+    }
+  }
 
   useEffect(() => {
     let socket: WebSocket | null = null
@@ -169,10 +239,17 @@ export default function ChatPage() {
           })
 
           if (selectedChatIdRef.current !== payload.chat_id) return
+          const viewport = messagesViewportRef.current
+          const shouldStickToBottom = viewport
+            ? viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 120
+            : false
           setMessages((prev) => {
             if (prev.some((x) => x.id === incomingMessage.id)) return prev
             return [...prev, incomingMessage]
           })
+          if (shouldStickToBottom) {
+            requestAnimationFrame(scrollMessagesToBottom)
+          }
         } catch {
           // Ignore non-JSON and unrelated ws frames.
         }
@@ -251,6 +328,7 @@ export default function ChatPage() {
         const created = response.data.data
         setMessages((prev) => (prev.some((x) => x.id === created.id) ? prev : [...prev, created]))
         setDraft('')
+        requestAnimationFrame(scrollMessagesToBottom)
         await chatApi.updateReadCursor(selectedChatId, { last_read_seq_no: created.seq_no })
       } else {
         setErrorText(response.data.error?.message || 'Не удалось отправить сообщение')
@@ -413,7 +491,14 @@ export default function ChatPage() {
                 )}
               </div>
 
-              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
+              <div
+                ref={messagesViewportRef}
+                onScroll={handleMessagesScroll}
+                className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3"
+              >
+                {loadingOlderMessages && (
+                  <div className="pb-1 text-center text-xs text-muted-foreground">Загрузка предыдущих сообщений...</div>
+                )}
                 {!selectedChat ? (
                   <div className="text-sm text-muted-foreground">Откройте чат слева</div>
                 ) : loadingMessages ? (
@@ -421,24 +506,29 @@ export default function ChatPage() {
                 ) : messages.length === 0 ? (
                   <div className="text-sm text-muted-foreground">Сообщений пока нет</div>
                 ) : (
-                  messages.map((message) => {
-                    const own = message.sender_id === user?.id
-                    return (
-                      <div
-                        key={message.id}
-                        className={`max-w-[80%] rounded-lg border px-3 py-2 text-sm ${
-                          own
-                            ? 'ml-auto border-primary/40 bg-primary/10'
-                            : 'border-border/70 bg-muted/30'
-                        }`}
-                      >
-                        <div className="whitespace-pre-wrap break-words">{message.body}</div>
-                        <div className="mt-1 text-[11px] text-muted-foreground">
-                          #{message.seq_no} · {new Date(message.created_at).toLocaleString('ru-RU')}
+                  <>
+                    {!hasMoreMessages && (
+                      <div className="pb-1 text-center text-xs text-muted-foreground">Начало переписки</div>
+                    )}
+                    {messages.map((message) => {
+                      const own = message.sender_id === user?.id
+                      return (
+                        <div
+                          key={message.id}
+                          className={`max-w-[80%] rounded-lg border px-3 py-2 text-sm ${
+                            own
+                              ? 'ml-auto border-primary/40 bg-primary/10'
+                              : 'border-border/70 bg-muted/30'
+                          }`}
+                        >
+                          <div className="whitespace-pre-wrap break-words">{message.body}</div>
+                          <div className="mt-1 text-[11px] text-muted-foreground">
+                            #{message.seq_no} · {new Date(message.created_at).toLocaleString('ru-RU')}
+                          </div>
                         </div>
-                      </div>
-                    )
-                  })
+                      )
+                    })}
+                  </>
                 )}
               </div>
 

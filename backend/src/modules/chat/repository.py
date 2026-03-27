@@ -63,7 +63,37 @@ class ChatRepository:
         current = int((await self.session.execute(stmt)).scalar_one())
         return current + 1
 
-    async def list_messages(self, *, chat_id: uuid.UUID, limit: int, offset: int) -> list[ChatMessage]:
+    async def list_messages(
+        self,
+        *,
+        chat_id: uuid.UUID,
+        limit: int,
+        offset: int,
+        before_seq_no: int | None = None,
+        latest: bool = False,
+    ) -> list[ChatMessage]:
+        if before_seq_no is not None:
+            stmt = (
+                select(ChatMessage)
+                .where(ChatMessage.chat_id == chat_id, ChatMessage.seq_no < before_seq_no)
+                .order_by(ChatMessage.seq_no.desc())
+                .limit(limit)
+            )
+            items = list((await self.session.execute(stmt)).scalars().all())
+            items.reverse()
+            return items
+
+        if latest:
+            stmt = (
+                select(ChatMessage)
+                .where(ChatMessage.chat_id == chat_id)
+                .order_by(ChatMessage.seq_no.desc())
+                .limit(limit)
+            )
+            items = list((await self.session.execute(stmt)).scalars().all())
+            items.reverse()
+            return items
+
         stmt = (
             select(ChatMessage)
             .where(ChatMessage.chat_id == chat_id)
@@ -89,4 +119,3 @@ class ChatRepository:
     async def delete_chat(self, chat: Chat) -> None:
         await self.session.delete(chat)
         await self.session.flush()
-

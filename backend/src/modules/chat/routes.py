@@ -193,6 +193,8 @@ async def list_messages(
     chat_id: uuid.UUID,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    before_seq_no: int | None = Query(default=None, ge=1),
+    latest: bool = Query(default=False),
     current_user: CurrentUser = Depends(
         require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY),
     ),
@@ -213,6 +215,8 @@ async def list_messages(
                 user_id=current_user.user_id,
                 limit=limit,
                 offset=offset,
+                before_seq_no=before_seq_no,
+                latest=latest,
             )
         except ChatServiceError as error:
             return _service_error(error)

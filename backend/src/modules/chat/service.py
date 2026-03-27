@@ -136,12 +136,25 @@ class ChatService:
         return await self.repo.create_message(message)
 
     async def list_messages_for_user(
-        self, *, chat: Chat, user_id: uuid.UUID, limit: int, offset: int
+        self,
+        *,
+        chat: Chat,
+        user_id: uuid.UUID,
+        limit: int,
+        offset: int,
+        before_seq_no: int | None = None,
+        latest: bool = False,
     ) -> list[ChatMessage]:
         member = await self.repo.get_chat_member(chat_id=chat.id, user_id=user_id)
         if member is None:
             raise ChatServiceError(code="FORBIDDEN", message="Нет доступа к сообщениям этого чата", status_code=403)
-        return await self.repo.list_messages(chat_id=chat.id, limit=limit, offset=offset)
+        return await self.repo.list_messages(
+            chat_id=chat.id,
+            limit=limit,
+            offset=offset,
+            before_seq_no=before_seq_no,
+            latest=latest,
+        )
 
     async def update_read_cursor(
         self, *, chat: Chat, user_id: uuid.UUID, last_read_seq_no: int

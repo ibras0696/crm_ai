@@ -43,8 +43,17 @@ export const chatApi = {
   deleteChat: (chatId: string) => api.delete<ApiResponse<null>>(`/chat/chats/${chatId}`),
   addMember: (chatId: string, data: { user_id: string; role?: 'owner' | 'admin' | 'member' | 'readonly' }) =>
     api.post<ApiResponse<ChatMemberInfo>>(`/chat/chats/${chatId}/members`, data),
-  listMessages: (chatId: string, limit = 100, offset = 0) =>
-    api.get<ApiResponse<ChatMessageInfo[]>>(`/chat/chats/${chatId}/messages?limit=${limit}&offset=${offset}`),
+  listMessages: (
+    chatId: string,
+    params: { limit?: number; offset?: number; before_seq_no?: number; latest?: boolean } = {},
+  ) => {
+    const query = new URLSearchParams()
+    query.set('limit', String(params.limit ?? 100))
+    query.set('offset', String(params.offset ?? 0))
+    if (typeof params.before_seq_no === 'number') query.set('before_seq_no', String(params.before_seq_no))
+    if (params.latest) query.set('latest', 'true')
+    return api.get<ApiResponse<ChatMessageInfo[]>>(`/chat/chats/${chatId}/messages?${query.toString()}`)
+  },
   sendMessage: (chatId: string, data: { body: string; body_type?: string; meta?: Record<string, unknown> }) =>
     api.post<ApiResponse<ChatMessageInfo>>(`/chat/chats/${chatId}/messages`, data),
   updateReadCursor: (chatId: string, data: { last_read_seq_no: number }) =>
@@ -53,4 +62,3 @@ export const chatApi = {
       data,
     ),
 }
-

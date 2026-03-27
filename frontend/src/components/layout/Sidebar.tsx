@@ -5,6 +5,7 @@ import {
   Settings,
   FileText,
   Folder,
+  MessageSquare,
   Calendar,
   Brain,
   BarChart3,
@@ -30,6 +31,7 @@ const mainNav = [
 
 const moduleNav = [
   { to: '/tables', icon: FileText, label: 'Таблицы' },
+  { to: '/chat', icon: MessageSquare, label: 'Чат' },
   { to: '/docs', icon: Folder, label: 'Документы' },
   { to: '/knowledge', icon: BookOpen, label: 'База знаний' },
   { to: '/schedule', icon: Calendar, label: 'Расписание' },

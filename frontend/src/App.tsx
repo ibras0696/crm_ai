@@ -24,6 +24,7 @@ import KnowledgePage from './pages/knowledge/KnowledgePage'
 import SchedulePage from './pages/schedule/SchedulePage'
 import ReportsPage from './pages/reports/ReportsPage'
 import AIPage from './pages/ai/AIPage'
+import ChatPage from './pages/chat/ChatPage'
 import AppLayout from './components/layout/AppLayout'
 import { useAuth } from './contexts/AuthContext'
 import { ErrorBoundary } from './components/common/ErrorBoundary'
@@ -57,6 +58,7 @@ export default function App() {
         <Route path="/tables/:tableId" element={<TableDetailPage />} />
         <Route path="/docs" element={<DocsPage />} />
         <Route path="/knowledge" element={<KnowledgePage />} />
+        <Route path="/chat" element={<ChatPage />} />
         <Route path="/schedule" element={<SchedulePage />} />
         <Route path="/reports" element={<ReportsPage />} />
         <Route path="/ai" element={<AIPage />} />

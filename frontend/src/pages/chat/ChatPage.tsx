@@ -48,6 +48,8 @@ const MESSAGE_MAX_CHARS = 500
 const TYPING_TTL_MS = 3000
 const CHAT_SIDEBAR_COLLAPSED_STORAGE_KEY = 'chat.sidebar.collapsed.v1'
 const ATTACHMENT_URL_REFRESH_BUFFER_MS = 30_000
+const CHAT_ATTACHMENT_MAX_MB = 10
+const CHAT_ATTACHMENT_MAX_BYTES = CHAT_ATTACHMENT_MAX_MB * 1024 * 1024
 
 type ComposerAttachmentStatus = 'uploading' | 'ready' | 'error'
 
@@ -419,9 +421,22 @@ export default function ChatPage() {
       setErrorText('Сначала выберите чат')
       return
     }
+    if (composerAttachments.length >= 1) {
+      setErrorText('Можно прикрепить только 1 файл')
+      return
+    }
+
+    const contentType = file.type || 'application/octet-stream'
+    if (!isMediaAttachment(contentType)) {
+      setErrorText('Разрешены только фото и видео')
+      return
+    }
+    if (file.size > CHAT_ATTACHMENT_MAX_BYTES) {
+      setErrorText(`Максимальный размер файла: ${CHAT_ATTACHMENT_MAX_MB} MB`)
+      return
+    }
 
     const clientId = crypto.randomUUID()
-    const contentType = file.type || 'application/octet-stream'
     setComposerAttachments((prev) => [
       ...prev,
       {
@@ -537,8 +552,10 @@ export default function ChatPage() {
       setErrorText('Сначала выберите чат')
       return
     }
-
-    await Promise.all(files.map((file) => uploadComposerAttachment(file)))
+    if (files.length > 1) {
+      setErrorText('Можно выбрать только 1 файл')
+    }
+    await uploadComposerAttachment(files[0]!)
   }
 
   useEffect(() => {
@@ -1560,11 +1577,14 @@ export default function ChatPage() {
                     })}
                   </div>
                 )}
+                <div className="mb-2 text-xs text-muted-foreground">
+                  Вложения: только фото/видео, 1 файл, до {CHAT_ATTACHMENT_MAX_MB} MB.
+                </div>
 
                 <input
                   ref={attachmentInputRef}
                   type="file"
-                  multiple
+                  accept="image/*,video/*"
                   className="hidden"
                   onChange={(event) => void handleAttachmentInputChange(event)}
                 />
@@ -1581,7 +1601,7 @@ export default function ChatPage() {
                       }
                       attachmentInputRef.current?.click()
                     }}
-                    disabled={!selectedChatId || sending}
+                    disabled={!selectedChatId || sending || composerAttachments.length >= 1}
                     aria-label="Прикрепить файлы"
                     title="Прикрепить файлы"
                   >

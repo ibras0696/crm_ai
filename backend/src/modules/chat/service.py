@@ -191,6 +191,9 @@ class ChatService:
         if not content_type:
             raise ChatServiceError(code="VALIDATION_ERROR", message="content_type не может быть пустым")
 
+        if not self._is_media_mime(content_type):
+            raise ChatServiceError(code="UNSUPPORTED_MIME", message="Разрешены только фото и видео")
+
         allowed_mimes = self._attachment_allowed_mime_types()
         if allowed_mimes and content_type not in allowed_mimes:
             raise ChatServiceError(code="UNSUPPORTED_MIME", message="Недопустимый тип вложения")
@@ -521,6 +524,11 @@ class ChatService:
     @staticmethod
     def _attachment_allowed_mime_types() -> set[str]:
         return {str(x).strip().lower() for x in (settings.CHAT_ATTACHMENT_ALLOWED_MIME_TYPES or []) if str(x).strip()}
+
+    @staticmethod
+    def _is_media_mime(content_type: str) -> bool:
+        mime = str(content_type or "").strip().lower()
+        return mime.startswith(("image/", "video/"))
 
     async def _enforce_storage_limit(self, *, org_id: uuid.UUID, incoming_size: int) -> None:
         plan = await self.files_repo.resolve_effective_plan(org_id=org_id)

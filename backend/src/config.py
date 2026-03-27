@@ -35,18 +35,10 @@ class Settings(BaseSettings):
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "application/vnd.ms-excel",
     ]
-    CHAT_ATTACHMENT_MAX_UPLOAD_MB: int = 100
-    CHAT_ATTACHMENT_MAX_FILES_PER_MESSAGE: int = 8
+    CHAT_ATTACHMENT_MAX_UPLOAD_MB: int = 10
+    CHAT_ATTACHMENT_MAX_FILES_PER_MESSAGE: int = 1
     CHAT_ATTACHMENT_PRESIGNED_TTL_S: int = 900
-    CHAT_ATTACHMENT_ALLOWED_MIME_TYPES: list[str] = [
-        "image/png",
-        "image/jpeg",
-        "image/gif",
-        "image/webp",
-        "video/mp4",
-        "video/webm",
-        "video/quicktime",
-    ]
+    CHAT_ATTACHMENT_ALLOWED_MIME_TYPES: list[str] = []
     # --------------------------------------------------------------------------
     # Docs Module Security & Pipeline
     # --------------------------------------------------------------------------

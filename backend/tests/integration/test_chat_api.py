@@ -251,3 +251,63 @@ async def test_chat_attachment_init_finish_send_and_download_url(client: AsyncCl
     assert download_url.status_code == 200, f"Get download URL failed: {download_url.text}"
     assert download_url.json()["ok"] is True
     assert download_url.json()["data"]["url"] == "https://download.example.com/get"
+
+
+@pytest.mark.asyncio
+async def test_chat_attachment_limits_media_only_one_file_and_10mb(client: AsyncClient):
+    token = await _register_owner(client, org_name="Chat Attachments Limits Org")
+
+    created = await client.post(
+        "/api/v1/chat/chats",
+        json={
+            "chat_type": "group",
+            "title": "Attachments Limits Chat",
+            "member_ids": [],
+        },
+        headers=_headers(token),
+    )
+    assert created.status_code == 200, f"Create chat failed: {created.text}"
+    chat_id = created.json()["data"]["id"]
+
+    wrong_mime = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/attachments/init-upload",
+        json={
+            "filename": "note.txt",
+            "size_bytes": 10,
+            "content_type": "text/plain",
+        },
+        headers=_headers(token),
+    )
+    assert wrong_mime.status_code == 200, f"Wrong mime request failed: {wrong_mime.text}"
+    assert wrong_mime.json()["ok"] is False
+    assert wrong_mime.json()["error"]["code"] == "UNSUPPORTED_MIME"
+
+    too_large = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/attachments/init-upload",
+        json={
+            "filename": "big.mp4",
+            "size_bytes": 11 * 1024 * 1024,
+            "content_type": "video/mp4",
+        },
+        headers=_headers(token),
+    )
+    assert too_large.status_code == 200, f"Too large request failed: {too_large.text}"
+    assert too_large.json()["ok"] is False
+    assert too_large.json()["error"]["code"] == "FILE_TOO_LARGE"
+
+    too_many_attachment_ids = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/messages",
+        json={
+            "body": "has attachments",
+            "meta": {
+                "attachment_ids": [
+                    str(uuid.uuid4()),
+                    str(uuid.uuid4()),
+                ],
+            },
+        },
+        headers=_headers(token),
+    )
+    assert too_many_attachment_ids.status_code == 200, f"Too many attachment IDs failed: {too_many_attachment_ids.text}"
+    assert too_many_attachment_ids.json()["ok"] is False
+    assert too_many_attachment_ids.json()["error"]["code"] == "VALIDATION_ERROR"

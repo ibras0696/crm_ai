@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { BookOpen, Database, Layers } from 'lucide-react'
 import type { AIContextOptions, AIContextSourcePage, AIContextSourceTable, FolderInfo } from '@/lib/api'
 import KbPageTreeSelect from '@/components/common/KbPageTreeSelect'
@@ -31,6 +31,7 @@ export default function ContextHoverPickers({
 }: Props) {
   const [openPicker, setOpenPicker] = useState<PickerType>(null)
   const closeTimerRef = useRef<number | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
 
   const selectedTableIds = contextOptions.selected_table_ids ?? []
   const selectedKbIds = contextOptions.selected_kb_page_ids ?? []
@@ -51,6 +52,10 @@ export default function ContextHoverPickers({
     clearCloseTimer()
     setOpenPicker(type)
   }
+  const toggle = (type: Exclude<PickerType, null>) => {
+    clearCloseTimer()
+    setOpenPicker((prev) => (prev === type ? null : type))
+  }
 
   const scheduleClose = () => {
     clearCloseTimer()
@@ -59,14 +64,26 @@ export default function ContextHoverPickers({
 
   const disableContext = !includeContext
 
+  useEffect(() => {
+    const onMouseDown = (event: MouseEvent) => {
+      if (!rootRef.current) return
+      if (!rootRef.current.contains(event.target as Node)) {
+        setOpenPicker(null)
+      }
+    }
+    document.addEventListener('mousedown', onMouseDown)
+    return () => document.removeEventListener('mousedown', onMouseDown)
+  }, [])
+
   return (
-    <div className="relative">
+    <div className="relative" ref={rootRef}>
       <div className="flex items-center gap-2">
         <button
           type="button"
           onMouseEnter={() => open('tables')}
           onMouseLeave={scheduleClose}
           onFocus={() => open('tables')}
+          onClick={() => toggle('tables')}
           className="h-8 px-2.5 rounded-md border border-border/80 bg-card/70 hover:bg-secondary/50 transition-colors inline-flex items-center gap-1.5 text-xs"
           title="Выбрать таблицы для контекста"
         >
@@ -80,6 +97,7 @@ export default function ContextHoverPickers({
           onMouseEnter={() => open('kb')}
           onMouseLeave={scheduleClose}
           onFocus={() => open('kb')}
+          onClick={() => toggle('kb')}
           className="h-8 px-2.5 rounded-md border border-border/80 bg-card/70 hover:bg-secondary/50 transition-colors inline-flex items-center gap-1.5 text-xs"
           title="Выбрать страницы базы знаний для контекста"
         >

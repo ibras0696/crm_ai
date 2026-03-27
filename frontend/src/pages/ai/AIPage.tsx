@@ -91,6 +91,7 @@ export default function AIPage() {
   const [loadingChats, setLoadingChats] = useState(false)
   const [historyMobileOpen, setHistoryMobileOpen] = useState(false)
   const [language, setLanguage] = useState<'ru' | 'ce' | 'en'>('ru')
+  const [languageMenuOpen, setLanguageMenuOpen] = useState(false)
 
   const [contextSources, setContextSources] = useState<{ kb_pages: AIContextSourcePage[]; tables: AIContextSourceTable[] }>({ kb_pages: [], tables: [] })
   const [contextTableFolders, setContextTableFolders] = useState<FolderInfo[]>([])
@@ -110,6 +111,7 @@ export default function AIPage() {
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const languageMenuRef = useRef<HTMLDivElement>(null)
   const [uiIntent, setUiIntent] = useState<{ type: string; params?: Record<string, unknown> } | null>(null)
   const [pendingActionLocks, setPendingActionLocks] = useState<Record<string, boolean>>({})
   const clearUiIntent = useCallback(() => setUiIntent(null), [])
@@ -199,6 +201,16 @@ export default function AIPage() {
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
   useEffect(() => { loadChatMessages(currentChatId) }, [currentChatId, loadChatMessages])
+  useEffect(() => {
+    const onMouseDown = (event: MouseEvent) => {
+      if (!languageMenuRef.current) return
+      if (!languageMenuRef.current.contains(event.target as Node)) {
+        setLanguageMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onMouseDown)
+    return () => document.removeEventListener('mousedown', onMouseDown)
+  }, [])
 
   const handleSend = async (preset?: string) => {
     const messageText = (preset ?? input).trim()
@@ -293,7 +305,7 @@ export default function AIPage() {
   })()
 
   return (
-    <div className="flex flex-col h-[calc(100vh-8rem)] gap-0">
+    <div className="flex flex-col min-h-[calc(100dvh-8rem)] md:h-[calc(100vh-8rem)] gap-0">
       <div className="flex items-center gap-3 pb-4 flex-wrap">
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-bold flex items-center gap-2"><Bot className="h-6 w-6 text-primary" /> AI Агент</h1>
@@ -357,18 +369,42 @@ export default function AIPage() {
                     tableFolders={contextTableFolders}
                     tableFolderById={contextTableFolderById}
                   />
-                  <div className="relative group">
-                    <button className="h-8 flex items-center gap-1.5 px-2 rounded-md border border-border bg-card hover:bg-secondary transition-colors text-sm">
+                  <div className="relative" ref={languageMenuRef}>
+                    <button
+                      type="button"
+                      onClick={() => setLanguageMenuOpen((prev) => !prev)}
+                      className="h-8 flex items-center gap-1.5 px-2 rounded-md border border-border bg-card hover:bg-secondary transition-colors text-sm"
+                    >
                       <Languages className="h-4 w-4" />
                       <span className="hidden sm:inline">
                         {language === 'ru' ? 'Русский' : language === 'ce' ? 'Нохчийн' : 'English'}
                       </span>
                     </button>
-                    <div className="absolute top-full left-0 mt-1 w-36 bg-popover border border-border shadow-lg rounded-md overflow-hidden z-[60] opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all">
-                      <button onClick={() => setLanguage('ru')} className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary ${language === 'ru' ? 'font-medium bg-secondary/50' : ''}`}>Русский</button>
-                      <button onClick={() => setLanguage('ce')} className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary ${language === 'ce' ? 'font-medium bg-secondary/50' : ''}`}>Нохчийн</button>
-                      <button onClick={() => setLanguage('en')} className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary ${language === 'en' ? 'font-medium bg-secondary/50' : ''}`}>English</button>
-                    </div>
+                    {languageMenuOpen && (
+                      <div className="absolute top-full left-0 mt-1 w-36 bg-popover border border-border shadow-lg rounded-md overflow-hidden z-[60]">
+                        <button
+                          type="button"
+                          onClick={() => { setLanguage('ru'); setLanguageMenuOpen(false) }}
+                          className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary ${language === 'ru' ? 'font-medium bg-secondary/50' : ''}`}
+                        >
+                          Русский
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setLanguage('ce'); setLanguageMenuOpen(false) }}
+                          className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary ${language === 'ce' ? 'font-medium bg-secondary/50' : ''}`}
+                        >
+                          Нохчийн
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setLanguage('en'); setLanguageMenuOpen(false) }}
+                          className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary ${language === 'en' ? 'font-medium bg-secondary/50' : ''}`}
+                        >
+                          English
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <button
@@ -403,7 +439,7 @@ export default function AIPage() {
                       <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-primary text-white' : 'bg-secondary'}`}>
                         {msg.role === 'user' ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
                       </div>
-                      <div className={`ai-message min-w-0 max-w-[88%] rounded-2xl px-4 py-3 text-sm ${msg.role === 'user' ? 'bg-primary text-white rounded-tr-sm' : 'bg-secondary rounded-tl-sm'}`}>
+                      <div className={`ai-message min-w-0 max-w-[94%] sm:max-w-[88%] rounded-2xl px-4 py-3 text-sm ${msg.role === 'user' ? 'bg-primary text-white rounded-tr-sm' : 'bg-secondary rounded-tl-sm'}`}>
                         {msg.role === 'user' ? (
                           <p className="whitespace-pre-wrap leading-relaxed [overflow-wrap:anywhere]">{msg.content}</p>
                         ) : (

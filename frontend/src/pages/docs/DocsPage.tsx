@@ -1137,7 +1137,7 @@ export default function DocsPage() {
             <Folder className="h-4 w-4 text-amber-500" />
             <span className="truncate">{folder.name}</span>
           </div>
-          <div className="ml-auto hidden items-center gap-1 group-hover:flex">
+          <div className="ml-auto flex items-center gap-1 md:hidden md:group-hover:flex">
             <button
               className="text-muted-foreground hover:text-foreground"
               onClick={() => openCreateFileDialog(folder.id)}
@@ -1180,7 +1180,7 @@ export default function DocsPage() {
 
   if (loading) {
     return (
-      <div className="flex h-[calc(100vh-8rem)] items-center justify-center">
+      <div className="flex min-h-[calc(100dvh-8rem)] items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
       </div>
     )
@@ -1371,7 +1371,7 @@ export default function DocsPage() {
       {errorText && <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{errorText}</div>}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-1">
+        <Card className="lg:col-span-1 min-w-0">
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center justify-between">
               <span>Структура</span>
@@ -1427,7 +1427,7 @@ export default function DocsPage() {
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-2">
+        <Card className="lg:col-span-2 min-w-0">
           <CardHeader className="pb-2">
             <CardTitle className="text-base">
               Файлы {selectedFolderId ? `в папке «${folderMap.get(selectedFolderId)?.name ?? ''}»` : 'в корне'}
@@ -1447,7 +1447,7 @@ export default function DocsPage() {
                   return (
                     <div
                       key={file.id}
-                      className={`flex items-center gap-3 rounded-lg border border-border px-3 py-2 ${draggedFileId === file.id ? 'opacity-50' : ''}`}
+                      className={`flex flex-col items-start gap-3 rounded-lg border border-border px-3 py-2 sm:flex-row sm:items-center ${draggedFileId === file.id ? 'opacity-50' : ''}`}
                       draggable
                       onDragStart={(event) => {
                         event.dataTransfer.effectAllowed = 'move'
@@ -1469,29 +1469,31 @@ export default function DocsPage() {
                           <p className={`text-xs ${statusClass(visualState.status)}`}>{visualState.helperText}</p>
                         )}
                       </div>
-                      {file.type === 'docx' && (
-                        <Button variant="outline" size="sm" onClick={() => void onDocxOpen(file)} disabled={file.status !== 'ready' || docxLoading || docxEditorFile?.id === file.id}>
-                          <Pencil className="mr-1 h-4 w-4" /> Открыть в редакторе
+                      <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+                        {file.type === 'docx' && (
+                          <Button variant="outline" size="sm" onClick={() => void onDocxOpen(file)} disabled={file.status !== 'ready' || docxLoading || docxEditorFile?.id === file.id}>
+                            <Pencil className="mr-1 h-4 w-4" /> Открыть в редакторе
+                          </Button>
+                        )}
+                        {file.status === 'uploading' && (
+                          <Button variant="outline" size="sm" onClick={() => void abortUploadingFile(file)}>
+                            <X className="mr-1 h-4 w-4" /> Отменить
+                          </Button>
+                        )}
+                        <Button variant="outline" size="sm" onClick={() => void downloadFile(file)} disabled={file.status !== 'ready'}>
+                          <Download className="mr-1 h-4 w-4" /> Скачать
                         </Button>
-                      )}
-                      {file.status === 'uploading' && (
-                        <Button variant="outline" size="sm" onClick={() => void abortUploadingFile(file)}>
-                          <X className="mr-1 h-4 w-4" /> Отменить
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
+                          onClick={() => requestDeleteFile(file)}
+                          disabled={docxEditorFile?.id === file.id || deletingTargetId === file.id}
+                        >
+                          <Trash2 className="mr-1 h-4 w-4" /> Удалить
                         </Button>
-                      )}
-                      <Button variant="outline" size="sm" onClick={() => void downloadFile(file)} disabled={file.status !== 'ready'}>
-                        <Download className="mr-1 h-4 w-4" /> Скачать
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-destructive hover:bg-destructive hover:text-destructive-foreground"
-                        onClick={() => requestDeleteFile(file)}
-                        disabled={docxEditorFile?.id === file.id || deletingTargetId === file.id}
-                      >
-                        <Trash2 className="mr-1 h-4 w-4" /> Удалить
-                      </Button>
-                      <span className={`text-xs font-medium ${statusClass(visualState.status)}`}>{visualStatusLabel(visualState.status)}</span>
+                        <span className={`text-xs font-medium ${statusClass(visualState.status)}`}>{visualStatusLabel(visualState.status)}</span>
+                      </div>
                     </div>
                   )
                 })}

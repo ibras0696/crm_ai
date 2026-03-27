@@ -223,6 +223,9 @@ export default function KnowledgePage() {
 
   const handleSelect = (p: KBPage) => {
     setSelected(p); setDraft({ title: p.title, content: p.content }); setEditing(false)
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches) {
+      setSidebarOpen(false)
+    }
   }
 
   const handleSave = async () => {
@@ -329,13 +332,13 @@ export default function KnowledgePage() {
   const roots = buildTree(filtered)
 
   return (
-    <div className="flex h-[calc(100vh-8rem)] gap-0 rounded-xl border border-border overflow-hidden bg-card">
+    <div className="flex flex-col md:flex-row min-h-[calc(100dvh-8rem)] md:h-[calc(100vh-8rem)] gap-0 rounded-xl border border-border overflow-hidden bg-card">
       {/* Sidebar */}
       <div className={cn(
-        'shrink-0 border-r border-border flex flex-col transition-all duration-300 overflow-hidden',
-        sidebarOpen ? 'w-64' : 'w-0 border-r-0'
+        'border-b md:border-b-0 md:border-r border-border md:shrink-0 flex flex-col transition-all duration-300 overflow-hidden',
+        sidebarOpen ? 'w-full md:w-64' : 'hidden md:flex md:w-0 md:border-r-0'
       )}>
-        <div className="p-3 border-b border-border space-y-2 min-w-[256px]">
+        <div className="p-3 border-b border-border space-y-2 min-w-0 md:min-w-[256px]">
           <div className="flex items-center gap-2">
             <h2 className="font-semibold text-sm flex-1">База знаний</h2>
             <button onClick={() => setSidebarOpen(false)} className="h-7 w-7 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors" title="Скрыть панель">
@@ -350,7 +353,7 @@ export default function KnowledgePage() {
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Поиск..." className="w-full h-7 pl-7 pr-2 text-xs rounded-md border border-input bg-background outline-none focus:border-primary" />
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto p-2 min-w-[256px]">
+        <div className="flex-1 overflow-y-auto p-2 min-w-0 md:min-w-[256px]">
           {draggedPageId && (
             <div
               onDragEnter={(e) => {
@@ -410,7 +413,7 @@ export default function KnowledgePage() {
       </div>
 
       {/* Editor */}
-      <div className="flex-1 flex flex-col min-w-0 relative">
+      <div className={cn('flex-1 flex-col min-w-0 relative', sidebarOpen ? 'hidden md:flex' : 'flex')}>
         {selected ? (
           <KBEditor
             selected={selected}
@@ -434,7 +437,7 @@ export default function KnowledgePage() {
         ) : (
           <div className="flex-1 flex flex-col">
             {!sidebarOpen && (
-              <div className="flex items-center gap-2 px-5 py-3 border-b border-border">
+              <div className="flex items-center gap-2 px-3 sm:px-5 py-3 border-b border-border">
                 <button
                   onClick={() => setSidebarOpen(true)}
                   className="h-8 w-8 rounded-md border border-border bg-background flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors"
@@ -457,7 +460,7 @@ export default function KnowledgePage() {
       {showNew && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowNew(false)} />
-          <div className="relative z-10 w-full max-w-md rounded-2xl bg-card border border-border shadow-2xl p-6 space-y-4">
+          <div className="relative z-10 w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl bg-card border border-border shadow-2xl p-4 sm:p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">Новая страница</h2>
               <button onClick={() => setShowNew(false)} className="h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary"><X className="h-4 w-4" /></button>
@@ -571,14 +574,14 @@ function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSa
 
   return (
     <>
-      <div className="flex items-center gap-3 px-5 py-3 border-b border-border">
+      <div className="flex items-center gap-2 sm:gap-3 px-3 sm:px-5 py-3 border-b border-border">
         {sidebarToggle}
         {editing ? (
           <input value={draft.title} onChange={e => setDraft(d => ({ ...d, title: e.target.value }))} className="flex-1 text-lg font-bold bg-transparent outline-none border-b border-primary/50 pb-0.5" />
         ) : (
           <h1 className="flex-1 text-lg font-bold truncate">{selected.title}</h1>
         )}
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1 sm:gap-1.5">
           {editing && (
             <button onClick={() => setPreview(!preview)} className={`h-8 w-8 rounded-md flex items-center justify-center transition-colors ${preview ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary'}`} title={preview ? 'Редактор' : 'Предпросмотр'}>
               {preview ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
@@ -601,7 +604,7 @@ function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSa
 
       {/* Toolbar */}
       {editing && !preview && (
-        <div className="flex items-center gap-0.5 px-5 py-1.5 border-b border-border bg-secondary/20 flex-wrap">
+        <div className="flex items-center gap-0.5 px-3 sm:px-5 py-1.5 border-b border-border bg-secondary/20 flex-wrap">
           {toolbarButtons.map((btn, i) =>
             'sep' in btn ? <div key={i} className="w-px h-5 bg-border mx-1" /> :
             <button key={i} onClick={btn.action} title={btn.title} className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">
@@ -611,7 +614,7 @@ function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSa
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto p-5">
+      <div className="flex-1 overflow-y-auto p-3 sm:p-5">
         {editing && !preview ? (
           <textarea ref={textareaRef} value={draft.content} onChange={e => setDraft(d => ({ ...d, content: e.target.value }))}
             className="w-full h-full min-h-[400px] text-sm bg-transparent outline-none resize-none font-mono leading-relaxed"
@@ -627,11 +630,11 @@ function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSa
         )}
       </div>
       {errorText && (
-        <div className="mx-5 mb-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <div className="mx-3 sm:mx-5 mb-3 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {errorText}
         </div>
       )}
-      <div className="px-5 py-2 border-t border-border text-xs text-muted-foreground flex items-center justify-between">
+      <div className="px-3 sm:px-5 py-2 border-t border-border text-xs text-muted-foreground flex flex-wrap items-center justify-between gap-1.5">
         <span>Изменено: {new Date(selected.updated_at || selected.created_at).toLocaleString('ru')}</span>
         {editing && <span className="text-primary/60">Markdown поддерживается</span>}
       </div>

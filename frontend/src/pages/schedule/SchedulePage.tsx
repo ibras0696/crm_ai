@@ -468,7 +468,7 @@ export default function SchedulePage() {
       </div>
 
       {/* Calendar nav */}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
         <button onClick={() => nav(-1)} className="h-8 w-8 rounded-md border border-border flex items-center justify-center hover:bg-secondary transition-colors"><ChevronLeft className="h-4 w-4" /></button>
         <span className="flex-1 text-center font-semibold capitalize">{title}</span>
         <button onClick={() => setCurrent(new Date())} className="h-8 px-3 rounded-md border border-border text-xs hover:bg-secondary transition-colors">Сегодня</button>
@@ -477,30 +477,32 @@ export default function SchedulePage() {
 
       {/* Month view */}
       {view === 'month' && (
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
-          <div className="grid grid-cols-7 border-b border-border">
-            {DAYS_RU.map(dayLabel => <div key={dayLabel} className="py-2 text-center text-xs font-medium text-muted-foreground">{dayLabel}</div>)}
-          </div>
-          <div className="grid grid-cols-7">
-            {buildMonthGrid().map((day, i) => {
-              const isToday = day && isSameDay(day, new Date())
-              const dayEvs = day ? eventsOnDay(day) : []
-              return (
-                <div key={i} onClick={() => { if (day) { setCurrent(day); setView('day') } }} className={`min-h-[80px] p-1.5 border-b border-r border-border/50 cursor-pointer transition-colors ${day ? 'hover:bg-secondary/20' : 'bg-secondary/5'} ${isToday ? 'bg-primary/5' : ''}`}>
-                  {day && (
-                    <>
-                      <span className={`text-xs font-medium inline-flex h-6 w-6 items-center justify-center rounded-full ${isToday ? 'bg-primary text-white' : 'text-foreground'}`}>{day.getDate()}</span>
-                      <div className="mt-1 space-y-0.5">
-                        {dayEvs.slice(0, 3).map(ev => (
-                          <div key={ev.id} className="text-[10px] px-1 py-0.5 rounded truncate text-white" style={{ background: ev.color }}>{ev.title}</div>
-                        ))}
-                        {dayEvs.length > 3 && <div className="text-[10px] text-muted-foreground px-1">+{dayEvs.length - 3} ещё</div>}
-                      </div>
-                    </>
-                  )}
-                </div>
-              )
-            })}
+        <div className="rounded-xl border border-border bg-card overflow-x-auto">
+          <div className="min-w-[700px]">
+            <div className="grid grid-cols-7 border-b border-border">
+              {DAYS_RU.map(dayLabel => <div key={dayLabel} className="py-2 text-center text-xs font-medium text-muted-foreground">{dayLabel}</div>)}
+            </div>
+            <div className="grid grid-cols-7">
+              {buildMonthGrid().map((day, i) => {
+                const isToday = day && isSameDay(day, new Date())
+                const dayEvs = day ? eventsOnDay(day) : []
+                return (
+                  <div key={i} onClick={() => { if (day) { setCurrent(day); setView('day') } }} className={`min-h-[80px] p-1.5 border-b border-r border-border/50 cursor-pointer transition-colors ${day ? 'hover:bg-secondary/20' : 'bg-secondary/5'} ${isToday ? 'bg-primary/5' : ''}`}>
+                    {day && (
+                      <>
+                        <span className={`text-xs font-medium inline-flex h-6 w-6 items-center justify-center rounded-full ${isToday ? 'bg-primary text-white' : 'text-foreground'}`}>{day.getDate()}</span>
+                        <div className="mt-1 space-y-0.5">
+                          {dayEvs.slice(0, 3).map(ev => (
+                            <div key={ev.id} className="text-[10px] px-1 py-0.5 rounded truncate text-white" style={{ background: ev.color }}>{ev.title}</div>
+                          ))}
+                          {dayEvs.length > 3 && <div className="text-[10px] text-muted-foreground px-1">+{dayEvs.length - 3} ещё</div>}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </div>
       )}
@@ -531,7 +533,7 @@ export default function SchedulePage() {
                       {ev.recurrence && <span className="text-xs text-muted-foreground flex items-center gap-0.5"><Repeat className="h-3 w-3" /> {RECURRENCE.find(r => r.value === ev.recurrence)?.label}</span>}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                     <button onClick={(e) => { e.stopPropagation(); handleToggle(ev) }} className={`h-7 w-7 rounded flex items-center justify-center transition-colors ${ev.is_done ? 'text-primary' : 'text-muted-foreground hover:text-primary'}`}><Check className="h-4 w-4" /></button>
                     <button onClick={(e) => { e.stopPropagation(); openEdit(ev) }} className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:text-primary transition-colors"><Edit3 className="h-4 w-4" /></button>
                     <button onClick={(e) => { e.stopPropagation(); handleDelete(ev.id) }} className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="h-4 w-4" /></button>
@@ -587,7 +589,7 @@ export default function SchedulePage() {
                       </div>
                       {ev.recurrence && <Repeat className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
                       {!ev._isVirtual && (
-                        <button onClick={(e) => { e.stopPropagation(); handleDelete(ev.id) }} className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-all"><Trash2 className="h-3.5 w-3.5" /></button>
+                        <button onClick={(e) => { e.stopPropagation(); handleDelete(ev.id) }} className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:text-destructive opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all"><Trash2 className="h-3.5 w-3.5" /></button>
                       )}
                     </div>
                   )
@@ -600,9 +602,9 @@ export default function SchedulePage() {
 
       {/* Create Event Modal */}
       {showForm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowForm(false)} />
-          <div className="relative z-10 w-full max-w-md rounded-2xl bg-card border border-border shadow-2xl p-6 space-y-4">
+          <div className="relative z-10 w-full max-w-md max-h-[92dvh] overflow-y-auto rounded-2xl bg-card border border-border shadow-2xl p-4 sm:p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">Новое событие</h2>
               <button onClick={() => setShowForm(false)} className="h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary"><X className="h-4 w-4" /></button>
@@ -616,7 +618,7 @@ export default function SchedulePage() {
               </label>
             </div>
             {!form.all_day && (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Дата начала</label>
                   <input
@@ -706,7 +708,7 @@ export default function SchedulePage() {
             </div>
             <div className="space-y-2">
               <label className="text-xs text-muted-foreground block">Напомнить</label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {REMINDER_OPTIONS.map(opt => {
                   const checked = form.reminder_offsets_minutes.includes(opt.value)
                   return (
@@ -731,7 +733,7 @@ export default function SchedulePage() {
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1.5">Цвет</label>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 {COLORS.map(c => <button key={c} onClick={() => setForm(f => ({ ...f, color: c }))} className={`h-7 w-7 rounded-full transition-transform ${form.color === c ? 'scale-125 ring-2 ring-offset-2 ring-primary' : 'hover:scale-110'}`} style={{ background: c }} />)}
               </div>
             </div>
@@ -746,9 +748,9 @@ export default function SchedulePage() {
       )}
       {/* Edit Event Modal */}
       {editEvent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
           <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setEditEvent(null)} />
-          <div className="relative z-10 w-full max-w-md rounded-2xl bg-card border border-border shadow-2xl p-6 space-y-4">
+          <div className="relative z-10 w-full max-w-md max-h-[92dvh] overflow-y-auto rounded-2xl bg-card border border-border shadow-2xl p-4 sm:p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold">Редактировать событие</h2>
               <button onClick={() => setEditEvent(null)} className="h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary"><X className="h-4 w-4" /></button>
@@ -762,7 +764,7 @@ export default function SchedulePage() {
               </label>
             </div>
             {!editForm.all_day && (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Дата начала</label>
                   <input
@@ -845,7 +847,7 @@ export default function SchedulePage() {
             </div>
             <div className="space-y-2">
               <label className="text-xs text-muted-foreground block">Напомнить</label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                 {REMINDER_OPTIONS.map(opt => {
                   const checked = editForm.reminder_offsets_minutes.includes(opt.value)
                   return (
@@ -870,7 +872,7 @@ export default function SchedulePage() {
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1.5">Цвет</label>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 {COLORS.map(c => <button key={c} onClick={() => setEditForm(f => ({ ...f, color: c }))} className={`h-7 w-7 rounded-full transition-transform ${editForm.color === c ? 'scale-125 ring-2 ring-offset-2 ring-primary' : 'hover:scale-110'}`} style={{ background: c }} />)}
               </div>
             </div>

@@ -7,6 +7,15 @@ import { ThemeProvider } from './contexts/ThemeContext'
 import App from './App'
 import './index.css'
 
+if (import.meta.env.PROD && typeof window !== 'undefined') {
+  const isInsecure = window.location.protocol === 'http:'
+  const isProdDomain = window.location.hostname === 'crm.py-it.ru' || window.location.hostname.endsWith('.py-it.ru')
+  if (isInsecure && isProdDomain) {
+    const secureUrl = `https://${window.location.host}${window.location.pathname}${window.location.search}${window.location.hash}`
+    window.location.replace(secureUrl)
+  }
+}
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

@@ -379,7 +379,10 @@ export default function DocsPage() {
   }, [files])
 
   const extractError = (error: unknown, fallback: string): string => {
-    if (!isAxiosError(error)) return fallback
+    if (!isAxiosError(error)) {
+      if (error instanceof Error && error.message.trim()) return error.message
+      return fallback
+    }
     const message = error.response?.data?.error?.message
     if (typeof message === 'string' && message.trim()) return message
     return fallback
@@ -575,11 +578,15 @@ export default function DocsPage() {
 
           const put = await fetch(init.data.data.upload_url, {
             method: 'PUT',
+            mode: 'cors',
             headers: init.data.data.upload_headers,
             body: file,
           })
           if (!put.ok) {
-            throw new Error(`Ошибка загрузки в S3: ${put.status}`)
+            if (put.status === 403) {
+              throw new Error('Хранилище отклонило загрузку (403). Проверьте, что CRM открыт по HTTPS и у bucket настроен CORS для вашего домена.')
+            }
+            throw new Error(`Ошибка загрузки в хранилище: ${put.status}`)
           }
 
           const finish = await docsApi.finishUpload({ file_id: init.data.data.file_id, size_bytes: file.size })
@@ -599,6 +606,9 @@ export default function DocsPage() {
             } catch {
               // best-effort rollback: если не вышло, запись останется для ручной очистки.
             }
+          }
+          if (error instanceof TypeError && /fetch/i.test(error.message)) {
+            throw new Error('Не удалось отправить файл в объектное хранилище. Откройте CRM по HTTPS и проверьте доступ к s3.twcstorage.ru.')
           }
           throw error
         }

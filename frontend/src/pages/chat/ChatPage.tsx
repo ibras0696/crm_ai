@@ -690,19 +690,20 @@ export default function ChatPage() {
       const title = chat.title || (chat.chat_type === 'direct' ? 'Direct чат' : 'Без названия')
 
       if (compact) {
+        const compactLabel = getInitials(title).slice(0, 1)
         return (
           <button
             key={chat.id}
             type="button"
             onClick={() => handleSelectChat(chat.id)}
             title={title}
-            className={`mb-2 flex h-10 w-10 items-center justify-center rounded-full border text-[11px] font-semibold transition ${
+            className={`mb-1.5 flex h-8 w-8 items-center justify-center rounded-full border text-[10px] font-semibold transition ${
               isActive
                 ? 'border-primary/50 bg-primary/15 text-primary'
                 : 'border-border/60 bg-background/50 text-muted-foreground hover:bg-muted/30'
             }`}
           >
-            {getInitials(title)}
+            {compactLabel}
           </button>
         )
       }
@@ -842,11 +843,11 @@ export default function ChatPage() {
         </CardHeader>
         <CardContent className="relative h-[70vh] min-h-[520px] max-h-[760px] p-0">
           <div className="flex h-full min-h-0 gap-4 p-4">
-            <div className={`hidden min-h-0 shrink-0 lg:flex ${isDesktopSidebarCollapsed ? 'w-[78px]' : 'w-[280px]'}`}>
+            <div className={`hidden min-h-0 shrink-0 lg:flex ${isDesktopSidebarCollapsed ? 'w-[58px]' : 'w-[280px]'}`}>
               <div className="flex min-h-0 flex-1 flex-col rounded-md border border-border/60 bg-background/40">
                 <div
                   className={`border-b border-border/60 ${
-                    isDesktopSidebarCollapsed ? 'flex justify-center px-1 py-2' : 'flex items-center justify-between px-3 py-2'
+                    isDesktopSidebarCollapsed ? 'flex justify-center px-1 py-1.5' : 'flex items-center justify-between px-3 py-2'
                   }`}
                 >
                   {!isDesktopSidebarCollapsed && <span className="text-xs text-muted-foreground">Чаты</span>}
@@ -854,14 +855,14 @@ export default function ChatPage() {
                     type="button"
                     size="icon"
                     variant="ghost"
-                    className="h-7 w-7"
+                    className={`${isDesktopSidebarCollapsed ? 'h-6 w-6' : 'h-7 w-7'}`}
                     onClick={() => setIsDesktopSidebarCollapsed((prev) => !prev)}
                     aria-label={isDesktopSidebarCollapsed ? 'Развернуть панель чатов' : 'Свернуть панель чатов'}
                   >
                     {isDesktopSidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
                   </Button>
                 </div>
-                <div className={`min-h-0 flex-1 overflow-y-auto ${isDesktopSidebarCollapsed ? 'p-1.5' : 'p-2'}`}>
+                <div className={`min-h-0 flex-1 overflow-y-auto ${isDesktopSidebarCollapsed ? 'p-1' : 'p-2'}`}>
                   {renderChatList(isDesktopSidebarCollapsed)}
                 </div>
               </div>

@@ -842,33 +842,50 @@ export default function ChatPage() {
           </Button>
         </CardHeader>
         <CardContent className="relative h-[70vh] min-h-[520px] max-h-[760px] p-0">
-          <div className="flex h-full min-h-0 gap-4 p-4">
-            <div className={`hidden min-h-0 shrink-0 lg:flex ${isDesktopSidebarCollapsed ? 'w-[58px]' : 'w-[280px]'}`}>
-              <div className="flex min-h-0 flex-1 flex-col rounded-md border border-border/60 bg-background/40">
-                <div
-                  className={`border-b border-border/60 ${
-                    isDesktopSidebarCollapsed ? 'flex justify-center px-1 py-1.5' : 'flex items-center justify-between px-3 py-2'
-                  }`}
-                >
-                  {!isDesktopSidebarCollapsed && <span className="text-xs text-muted-foreground">Чаты</span>}
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className={`${isDesktopSidebarCollapsed ? 'h-6 w-6' : 'h-7 w-7'}`}
-                    onClick={() => setIsDesktopSidebarCollapsed((prev) => !prev)}
-                    aria-label={isDesktopSidebarCollapsed ? 'Развернуть панель чатов' : 'Свернуть панель чатов'}
-                  >
-                    {isDesktopSidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-                  </Button>
+          <div className="relative h-full min-h-0 p-4">
+            {isDesktopSidebarCollapsed ? (
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="absolute left-4 top-6 z-30 hidden h-9 w-9 rounded-full border border-border/70 bg-background/90 shadow-sm backdrop-blur lg:flex"
+                onClick={() => setIsDesktopSidebarCollapsed(false)}
+                aria-label="Открыть панель чатов"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  aria-label="Закрыть панель чатов"
+                  onClick={() => setIsDesktopSidebarCollapsed(true)}
+                  className="absolute inset-0 z-10 hidden bg-black/20 lg:block"
+                />
+                <div className="absolute inset-y-4 left-4 z-20 hidden w-[280px] lg:block">
+                  <div className="flex h-full min-h-0 flex-col rounded-md border border-border/60 bg-background/95 shadow-xl backdrop-blur">
+                    <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
+                      <span className="text-xs text-muted-foreground">Чаты</span>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        onClick={() => setIsDesktopSidebarCollapsed(true)}
+                        aria-label="Свернуть панель чатов"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                      {renderChatList(false)}
+                    </div>
+                  </div>
                 </div>
-                <div className={`min-h-0 flex-1 overflow-y-auto ${isDesktopSidebarCollapsed ? 'p-1' : 'p-2'}`}>
-                  {renderChatList(isDesktopSidebarCollapsed)}
-                </div>
-              </div>
-            </div>
+              </>
+            )}
 
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col rounded-md border border-border/60">
+            <div className="flex h-full min-h-0 min-w-0 flex-col rounded-md border border-border/60">
               <div className="border-b border-border/60 px-3 py-2">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">

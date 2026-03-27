@@ -860,7 +860,18 @@ export default function ChatPage() {
             <div className="flex min-h-0 min-w-0 flex-1 flex-col rounded-md border border-border/60">
               <div className="border-b border-border/60 px-3 py-2">
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
+                  <div className="flex min-w-0 items-start gap-2">
+                    <Button
+                      type="button"
+                      className="mt-0.5 h-8 rounded-full border border-primary/30 bg-primary/10 px-3 text-xs text-primary hover:bg-primary/20 lg:hidden"
+                      variant="ghost"
+                      onClick={() => setIsMobileDialogsOpen(true)}
+                      aria-label="Открыть диалоги"
+                    >
+                      <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
+                      Чаты
+                    </Button>
+                    <div className="min-w-0">
                     <div className="truncate text-sm font-semibold">
                       {selectedChat ? selectedChat.title || 'Без названия' : 'Выберите чат'}
                     </div>
@@ -884,6 +895,7 @@ export default function ChatPage() {
                         {typingLabels.join(', ')} печатает...
                       </div>
                     )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-1">
                     <Button type="button" size="icon" variant="ghost" onClick={() => setSearchOpen((prev) => !prev)} aria-label="Поиск по сообщениям">
@@ -1117,18 +1129,6 @@ export default function ChatPage() {
                 )}
               </div>
             </div>
-          </div>
-
-          <div className="pointer-events-none fixed bottom-6 right-4 z-40 lg:hidden">
-            <Button
-              type="button"
-              className="pointer-events-auto h-11 rounded-full px-4 shadow-lg"
-              onClick={() => setIsMobileDialogsOpen(true)}
-              aria-label="Открыть диалоги"
-            >
-              <MessageSquare className="mr-2 h-4 w-4" />
-              Чаты
-            </Button>
           </div>
 
           {isMobileDialogsOpen && (

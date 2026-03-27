@@ -876,7 +876,7 @@ export default function ChatPage() {
                               <span className="rounded-full border border-border/60 px-2 py-0.5">{formatDayDivider(message.created_at)}</span>
                             </div>
                           )}
-                          <div className={`group ${own ? 'ml-auto max-w-[85%] sm:max-w-[70%]' : 'mr-auto max-w-[92%] sm:max-w-[76%]'}`}>
+                          <div className={`group w-fit ${own ? 'ml-auto max-w-[82%] sm:max-w-[62%]' : 'mr-auto max-w-[90%] sm:max-w-[68%]'}`}>
                             {!own && (
                               <div className="mb-1 flex items-center gap-2 px-1">
                                 <div className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground">
@@ -886,7 +886,7 @@ export default function ChatPage() {
                               </div>
                             )}
                             <div
-                              className={`relative rounded-xl border px-3 py-2 text-sm ${
+                              className={`relative w-fit max-w-full rounded-xl border px-3 py-2 text-sm ${
                                 own
                                   ? 'border-primary/35 bg-primary/[0.14]'
                                   : 'border-border/70 bg-muted/25'

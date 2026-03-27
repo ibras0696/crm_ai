@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
 import { chatApi, type ChatInfo, type ChatMessageInfo } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
@@ -30,6 +30,11 @@ export default function ChatPage() {
 
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  const selectedChatIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    selectedChatIdRef.current = selectedChatId
+  }, [selectedChatId])
 
   const membersById = useMemo(() => {
     return new Map(
@@ -102,6 +107,94 @@ export default function ChatPage() {
     void loadMessages()
   }, [selectedChatId])
 
+  useEffect(() => {
+    let socket: WebSocket | null = null
+    let reconnectTimer: number | null = null
+    let pingTimer: number | null = null
+    let closedByEffectCleanup = false
+
+    const clearTimers = () => {
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer)
+        reconnectTimer = null
+      }
+      if (pingTimer !== null) {
+        window.clearInterval(pingTimer)
+        pingTimer = null
+      }
+    }
+
+    const connect = () => {
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+      const wsUrl = `${protocol}://${window.location.host}/api/v1/ws/notifications`
+      socket = new WebSocket(wsUrl)
+
+      socket.onopen = () => {
+        clearTimers()
+        pingTimer = window.setInterval(() => {
+          if (socket?.readyState === WebSocket.OPEN) {
+            socket.send('ping')
+          }
+        }, 25_000)
+      }
+
+      socket.onmessage = (event) => {
+        if (typeof event.data !== 'string') return
+        if (event.data === 'pong') return
+
+        try {
+          const payload = JSON.parse(event.data) as {
+            type?: string
+            chat_id?: string
+            message?: ChatMessageInfo
+          }
+          if (payload.type !== 'chat.message.created' || !payload.chat_id || !payload.message) return
+          const incomingMessage = payload.message
+
+          setChats((prev) => {
+            const index = prev.findIndex((x) => x.id === payload.chat_id)
+            if (index === -1) return prev
+            const next = [...prev]
+            const chat = next[index]
+            if (!chat) return prev
+            const updatedChat: ChatInfo = {
+              ...chat,
+              updated_at: incomingMessage.created_at,
+            }
+            next.splice(index, 1)
+            next.unshift(updatedChat)
+            return next
+          })
+
+          if (selectedChatIdRef.current !== payload.chat_id) return
+          setMessages((prev) => {
+            if (prev.some((x) => x.id === incomingMessage.id)) return prev
+            return [...prev, incomingMessage]
+          })
+        } catch {
+          // Ignore non-JSON and unrelated ws frames.
+        }
+      }
+
+      socket.onerror = () => {
+        socket?.close()
+      }
+
+      socket.onclose = () => {
+        clearTimers()
+        if (closedByEffectCleanup) return
+        reconnectTimer = window.setTimeout(connect, 3000)
+      }
+    }
+
+    connect()
+    return () => {
+      closedByEffectCleanup = true
+      clearTimers()
+      socket?.close()
+    }
+  }, [])
+
   const handleToggleMember = (memberId: string) => {
     setSelectedMemberIds((prev) => {
       if (prev.includes(memberId)) return prev.filter((x) => x !== memberId)
@@ -153,7 +246,7 @@ export default function ChatPage() {
       const response = await chatApi.sendMessage(selectedChatId, { body: draft.trim() })
       if (response.data.ok && response.data.data) {
         const created = response.data.data
-        setMessages((prev) => [...prev, created])
+        setMessages((prev) => (prev.some((x) => x.id === created.id) ? prev : [...prev, created]))
         setDraft('')
         await chatApi.updateReadCursor(selectedChatId, { last_read_seq_no: created.seq_no })
       } else {

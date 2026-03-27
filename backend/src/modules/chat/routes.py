@@ -20,6 +20,7 @@ from src.modules.chat.schemas import (
     UpdateReadCursorRequest,
 )
 from src.modules.chat.service import ChatService, ChatServiceError
+from src.modules.notifications.ws import manager as ws_manager
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -264,6 +265,17 @@ async def send_message(
             meta=message.meta,
             created_at=message.created_at,
         )
+        member_ids = await service.get_member_ids(chat_id=chat.id)
+
+    event_payload = {
+        "type": "chat.message.created",
+        "schema_version": 1,
+        "chat_id": str(chat.id),
+        "message": item.model_dump(mode="json"),
+    }
+    for member_id in member_ids:
+        await ws_manager.send_personal_message(event_payload, member_id)
+
     return ApiResponse(data=item)
 
 

@@ -365,10 +365,10 @@ export default function ChatPage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Диалоги</CardTitle>
         </CardHeader>
-        <CardContent className="grid min-h-[600px] grid-cols-1 gap-4 lg:grid-cols-[260px_1fr]">
-            <div className="rounded-md border border-border/60">
+        <CardContent className="grid h-[70vh] min-h-[520px] max-h-[760px] grid-cols-1 gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+            <div className="flex min-h-0 flex-col rounded-md border border-border/60">
               <div className="border-b border-border/60 px-3 py-2 text-xs text-muted-foreground">Чаты</div>
-              <div className="max-h-[520px] overflow-y-auto p-2">
+              <div className="min-h-0 flex-1 overflow-y-auto p-2">
                 {loadingChats ? (
                   <div className="p-2 text-sm text-muted-foreground">Загрузка...</div>
                 ) : chats.length === 0 ? (
@@ -399,7 +399,7 @@ export default function ChatPage() {
               </div>
             </div>
 
-            <div className="flex min-h-[520px] flex-col rounded-md border border-border/60">
+            <div className="flex min-h-0 flex-col rounded-md border border-border/60">
               <div className="border-b border-border/60 px-3 py-2">
                 <div className="text-sm font-semibold">
                   {selectedChat ? selectedChat.title || 'Без названия' : 'Выберите чат'}
@@ -413,7 +413,7 @@ export default function ChatPage() {
                 )}
               </div>
 
-              <div className="flex-1 space-y-2 overflow-y-auto p-3">
+              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
                 {!selectedChat ? (
                   <div className="text-sm text-muted-foreground">Откройте чат слева</div>
                 ) : loadingMessages ? (

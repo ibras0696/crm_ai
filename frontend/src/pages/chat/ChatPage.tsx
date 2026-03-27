@@ -827,8 +827,18 @@ export default function ChatPage() {
       )}
 
       <Card className="border-border/60">
-        <CardHeader className="pb-3">
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
           <CardTitle className="text-base">Диалоги</CardTitle>
+          <Button
+            type="button"
+            className="h-8 rounded-full border border-primary/30 bg-primary/10 px-3 text-xs text-primary hover:bg-primary/20 lg:hidden"
+            variant="ghost"
+            onClick={() => setIsMobileDialogsOpen(true)}
+            aria-label="Открыть диалоги"
+          >
+            <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
+            Чаты
+          </Button>
         </CardHeader>
         <CardContent className="relative h-[70vh] min-h-[520px] max-h-[760px] p-0">
           <div className="flex h-full min-h-0 gap-4 p-4">
@@ -860,18 +870,7 @@ export default function ChatPage() {
             <div className="flex min-h-0 min-w-0 flex-1 flex-col rounded-md border border-border/60">
               <div className="border-b border-border/60 px-3 py-2">
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex min-w-0 items-start gap-2">
-                    <Button
-                      type="button"
-                      className="mt-0.5 h-8 rounded-full border border-primary/30 bg-primary/10 px-3 text-xs text-primary hover:bg-primary/20 lg:hidden"
-                      variant="ghost"
-                      onClick={() => setIsMobileDialogsOpen(true)}
-                      aria-label="Открыть диалоги"
-                    >
-                      <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
-                      Чаты
-                    </Button>
-                    <div className="min-w-0">
+                  <div className="min-w-0">
                     <div className="truncate text-sm font-semibold">
                       {selectedChat ? selectedChat.title || 'Без названия' : 'Выберите чат'}
                     </div>
@@ -895,7 +894,6 @@ export default function ChatPage() {
                         {typingLabels.join(', ')} печатает...
                       </div>
                     )}
-                    </div>
                   </div>
                   <div className="flex items-center gap-1">
                     <Button type="button" size="icon" variant="ghost" onClick={() => setSearchOpen((prev) => !prev)} aria-label="Поиск по сообщениям">

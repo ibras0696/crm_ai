@@ -876,93 +876,108 @@ export default function ChatPage() {
                               <span className="rounded-full border border-border/60 px-2 py-0.5">{formatDayDivider(message.created_at)}</span>
                             </div>
                           )}
-                          <div className={`group w-fit ${own ? 'ml-auto max-w-[82%] sm:max-w-[62%]' : 'mr-auto max-w-[90%] sm:max-w-[68%]'}`}>
-                            {!own && (
-                              <div className="mb-1 flex items-center gap-2 px-1">
-                                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground">
-                                  {getInitials(senderLabel)}
+                          <div className={`group flex w-full ${own ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`w-fit ${own ? 'max-w-[82%] sm:max-w-[62%] text-right' : 'max-w-[90%] sm:max-w-[68%] text-left'}`}>
+                              {!own && (
+                                <div className="mb-1 flex items-center gap-2 px-1">
+                                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground">
+                                    {getInitials(senderLabel)}
+                                  </div>
+                                  <div className="truncate text-[11px] text-muted-foreground">{senderLabel}</div>
                                 </div>
-                                <div className="truncate text-[11px] text-muted-foreground">{senderLabel}</div>
-                              </div>
-                            )}
-                            <div
-                              className={`relative w-fit max-w-full rounded-xl border px-3 py-2 text-sm ${
-                                own
-                                  ? 'border-primary/35 bg-primary/[0.14]'
-                                  : 'border-border/70 bg-muted/25'
-                              }`}
-                            >
-                              {replyTarget && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const indexInFull = messages.findIndex((m) => m.id === replyTarget.id)
-                                    if (indexInFull >= 0) {
-                                      setExpandedMessages((prev) => ({ ...prev, [replyTarget.id]: true }))
-                                    }
-                                  }}
-                                  className="mb-2 block w-full rounded border border-border/60 bg-background/40 px-2 py-1 text-left text-[11px] text-muted-foreground"
-                                >
-                                  Ответ на: {(membersById.get(replyTarget.sender_id) || replyTarget.sender_id)} · {replyTarget.body.slice(0, 80)}
-                                </button>
                               )}
-
-                              <div className={`whitespace-pre-wrap break-all ${expandable && !expanded ? 'max-h-28 overflow-hidden' : ''}`}>
-                                {message.body}
-                              </div>
-                              {expandable && (
-                                <button
-                                  type="button"
-                                  onClick={() => toggleMessageExpanded(message.id)}
-                                  className="mt-1 text-[11px] text-primary hover:underline"
-                                >
-                                  {expanded ? 'Свернуть' : 'Развернуть'}
-                                </button>
-                              )}
-
-                              <button
-                                type="button"
-                                onClick={() => setMenuOpenMessageId((prev) => (prev === message.id ? null : message.id))}
-                                className="absolute right-1 top-1 hidden rounded px-1 py-0.5 text-[12px] text-muted-foreground hover:bg-background/40 group-hover:block"
-                                aria-label="Действия с сообщением"
+                              <div
+                                className={`relative w-fit max-w-full rounded-xl border px-3 py-2 text-sm ${
+                                  own
+                                    ? 'ml-auto border-primary/35 bg-primary/[0.14] text-right'
+                                    : 'mr-auto border-border/70 bg-muted/25 text-left'
+                                }`}
                               >
-                                ⋯
-                              </button>
-                              {showMenu && (
-                                <div className="absolute right-1 top-7 z-20 min-w-[150px] rounded-md border border-border/70 bg-background p-1 shadow-lg">
-                                  <button
-                                    type="button"
-                                    onClick={() => void handleCopyMessage(message.body)}
-                                    className="w-full rounded px-2 py-1 text-left text-xs hover:bg-muted/40"
-                                  >
-                                    Копировать
-                                  </button>
+                                {replyTarget && (
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      setReplyToMessageId(message.id)
-                                      setMenuOpenMessageId(null)
-                                      composerRef.current?.focus()
+                                      const indexInFull = messages.findIndex((m) => m.id === replyTarget.id)
+                                      if (indexInFull >= 0) {
+                                        setExpandedMessages((prev) => ({ ...prev, [replyTarget.id]: true }))
+                                      }
                                     }}
-                                    className="w-full rounded px-2 py-1 text-left text-xs hover:bg-muted/40"
+                                    className={`mb-2 block w-full overflow-hidden rounded border border-border/60 bg-background/40 px-2 py-1 text-[11px] text-muted-foreground ${
+                                      own ? 'text-right' : 'text-left'
+                                    }`}
                                   >
-                                    Ответить
+                                    <div>Ответ на: {(membersById.get(replyTarget.sender_id) || replyTarget.sender_id)} ·</div>
+                                    <div className="mt-0.5 break-all">{replyTarget.body.slice(0, 80)}{replyTarget.body.length > 80 ? '…' : ''}</div>
                                   </button>
-                                  {own && (
+                                )}
+
+                                <div
+                                  className={`whitespace-pre-wrap break-all ${expandable && !expanded ? 'max-h-28 overflow-hidden' : ''} ${
+                                    own ? 'text-right' : 'text-left'
+                                  }`}
+                                >
+                                  {message.body}
+                                </div>
+                                {expandable && (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleMessageExpanded(message.id)}
+                                    className={`mt-1 text-[11px] text-primary hover:underline ${own ? 'ml-auto block text-right' : ''}`}
+                                  >
+                                    {expanded ? 'Свернуть' : 'Развернуть'}
+                                  </button>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => setMenuOpenMessageId((prev) => (prev === message.id ? null : message.id))}
+                                  className={`absolute top-1 hidden rounded px-1 py-0.5 text-[12px] text-muted-foreground hover:bg-background/40 group-hover:block ${
+                                    own ? 'right-1' : 'left-1'
+                                  }`}
+                                  aria-label="Действия с сообщением"
+                                >
+                                  ⋯
+                                </button>
+                                {showMenu && (
+                                  <div
+                                    className={`absolute top-7 z-20 min-w-[150px] rounded-md border border-border/70 bg-background p-1 shadow-lg ${
+                                      own ? 'right-1' : 'left-1'
+                                    }`}
+                                  >
                                     <button
                                       type="button"
-                                      onClick={() => void handleDeleteMessage(message.id)}
-                                      className="w-full rounded px-2 py-1 text-left text-xs text-destructive hover:bg-destructive/10"
+                                      onClick={() => void handleCopyMessage(message.body)}
+                                      className="w-full rounded px-2 py-1 text-left text-xs hover:bg-muted/40"
                                     >
-                                      Удалить
+                                      Копировать
                                     </button>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                            <div className={`mt-1 px-1 text-[10px] text-muted-foreground ${own ? 'text-right' : 'text-left'}`}>
-                              #{message.seq_no} · {new Date(message.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-                              {ownStatus && ` · ${ownStatus}`}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setReplyToMessageId(message.id)
+                                        setMenuOpenMessageId(null)
+                                        composerRef.current?.focus()
+                                      }}
+                                      className="w-full rounded px-2 py-1 text-left text-xs hover:bg-muted/40"
+                                    >
+                                      Ответить
+                                    </button>
+                                    {own && (
+                                      <button
+                                        type="button"
+                                        onClick={() => void handleDeleteMessage(message.id)}
+                                        className="w-full rounded px-2 py-1 text-left text-xs text-destructive hover:bg-destructive/10"
+                                      >
+                                        Удалить
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              <div className={`mt-1 px-1 text-[10px] text-muted-foreground ${own ? 'text-right' : 'text-left'}`}>
+                                #{message.seq_no} · {new Date(message.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                                {ownStatus && ` · ${ownStatus}`}
+                              </div>
                             </div>
                           </div>
                         </div>

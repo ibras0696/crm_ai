@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
+import { Plus, X } from 'lucide-react'
 import { chatApi, type ChatInfo, type ChatMessageInfo } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
@@ -26,6 +27,7 @@ export default function ChatPage() {
   const [newChatTitle, setNewChatTitle] = useState('')
   const [newChatType, setNewChatType] = useState<'direct' | 'group' | 'channel'>('group')
   const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([])
+  const [createChatOpen, setCreateChatOpen] = useState(false)
   const [creatingChat, setCreatingChat] = useState(false)
 
   const [draft, setDraft] = useState('')
@@ -228,6 +230,7 @@ export default function ChatPage() {
         setNewChatTitle('')
         setNewChatType('group')
         setSelectedMemberIds([])
+        setCreateChatOpen(false)
       } else {
         setErrorText(response.data.error?.message || 'Не удалось создать чат')
       }
@@ -263,6 +266,15 @@ export default function ChatPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">Чат</h1>
+        <Button
+          type="button"
+          size="icon"
+          onClick={() => setCreateChatOpen(true)}
+          aria-label="Создать чат"
+          title="Создать чат"
+        >
+          <Plus className="h-5 w-5" />
+        </Button>
       </div>
 
       {errorText && (
@@ -271,66 +283,89 @@ export default function ChatPage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[360px_1fr]">
-        <Card className="border-border/60">
-          <CardHeader>
-            <CardTitle className="text-base">Создать чат</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Тип</label>
-              <select
-                value={newChatType}
-                onChange={(e) => setNewChatType(e.target.value as 'direct' | 'group' | 'channel')}
-                className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+      {createChatOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setCreateChatOpen(false)}>
+          <Card
+            role="dialog"
+            aria-modal="true"
+            aria-label="Создание чата"
+            className="w-full max-w-xl border-border/60"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+              <CardTitle className="text-base">Создать чат</CardTitle>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                onClick={() => setCreateChatOpen(false)}
+                aria-label="Закрыть окно создания чата"
               >
-                <option value="group">Group</option>
-                <option value="direct">Direct</option>
-                <option value="channel">Channel</option>
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Название</label>
-              <Input
-                value={newChatTitle}
-                onChange={(e) => setNewChatTitle(e.target.value)}
-                placeholder={newChatType === 'direct' ? 'Для direct не обязательно' : 'Название чата'}
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground">
-                Участники {newChatType === 'direct' ? '(выберите 1)' : '(опционально)'}
-              </label>
-              <div className="max-h-40 space-y-1 overflow-y-auto rounded-md border border-border/60 p-2">
-                {members
-                  .filter((m) => m.user_id !== user?.id)
-                  .map((m) => {
-                    const caption = `${m.user_first_name || ''} ${m.user_last_name || ''}`.trim() || m.user_email || m.user_id
-                    const checked = selectedMemberIds.includes(m.user_id)
-                    return (
-                      <label key={m.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-muted/40">
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => handleToggleMember(m.user_id)}
-                        />
-                        <span className="truncate">{caption}</span>
-                      </label>
-                    )
-                  })}
+                <X className="h-4 w-4" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Тип</label>
+                <select
+                  value={newChatType}
+                  onChange={(e) => setNewChatType(e.target.value as 'direct' | 'group' | 'channel')}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                >
+                  <option value="group">Group</option>
+                  <option value="direct">Direct</option>
+                  <option value="channel">Channel</option>
+                </select>
               </div>
-            </div>
-            <Button onClick={handleCreateChat} disabled={creatingChat} className="w-full">
-              {creatingChat ? 'Создание...' : 'Создать чат'}
-            </Button>
-          </CardContent>
-        </Card>
+              <div className="space-y-1">
+                <label className="text-xs text-muted-foreground">Название</label>
+                <Input
+                  value={newChatTitle}
+                  onChange={(e) => setNewChatTitle(e.target.value)}
+                  placeholder={newChatType === 'direct' ? 'Для direct не обязательно' : 'Название чата'}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs text-muted-foreground">
+                  Участники {newChatType === 'direct' ? '(выберите 1)' : '(опционально)'}
+                </label>
+                <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border/60 p-2">
+                  {members
+                    .filter((m) => m.user_id !== user?.id)
+                    .map((m) => {
+                      const caption = `${m.user_first_name || ''} ${m.user_last_name || ''}`.trim() || m.user_email || m.user_id
+                      const checked = selectedMemberIds.includes(m.user_id)
+                      return (
+                        <label key={m.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-muted/40">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => handleToggleMember(m.user_id)}
+                          />
+                          <span className="truncate">{caption}</span>
+                        </label>
+                      )
+                    })}
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setCreateChatOpen(false)} disabled={creatingChat}>
+                  Отмена
+                </Button>
+                <Button type="button" onClick={handleCreateChat} disabled={creatingChat}>
+                  {creatingChat ? 'Создание...' : 'Создать чат'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
-        <Card className="border-border/60">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Диалоги</CardTitle>
-          </CardHeader>
-          <CardContent className="grid min-h-[600px] grid-cols-1 gap-4 lg:grid-cols-[260px_1fr]">
+      <Card className="border-border/60">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Диалоги</CardTitle>
+        </CardHeader>
+        <CardContent className="grid min-h-[600px] grid-cols-1 gap-4 lg:grid-cols-[260px_1fr]">
             <div className="rounded-md border border-border/60">
               <div className="border-b border-border/60 px-3 py-2 text-xs text-muted-foreground">Чаты</div>
               <div className="max-h-[520px] overflow-y-auto p-2">
@@ -427,9 +462,8 @@ export default function ChatPage() {
                 </div>
               </div>
             </div>
-          </CardContent>
-        </Card>
-      </div>
+        </CardContent>
+      </Card>
     </div>
   )
 }

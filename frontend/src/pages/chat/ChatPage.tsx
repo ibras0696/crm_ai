@@ -875,19 +875,39 @@ export default function ChatPage() {
                       {selectedChat ? selectedChat.title || 'Без названия' : 'Выберите чат'}
                     </div>
                     {selectedChat && (
-                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                        {selectedChatMembers.slice(0, 5).map((member) => (
-                          <span key={member.userId} className="inline-flex items-center gap-1 rounded-full border border-border/60 px-2 py-0.5 text-[11px] text-muted-foreground">
-                            <span className={`h-1.5 w-1.5 rounded-full ${member.online ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
-                            <span className="max-w-[120px] truncate">{member.label}</span>
+                      isMobileViewport ? (
+                        <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                          <div className="flex -space-x-1">
+                            {selectedChatMembers.slice(0, 3).map((member) => (
+                              <span
+                                key={member.userId}
+                                className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-border/70 bg-muted/20 text-[9px] font-medium"
+                                title={member.label}
+                              >
+                                {member.initials}
+                              </span>
+                            ))}
+                          </div>
+                          <span>{selectedChatMembers.length} участников</span>
+                          <span className="text-emerald-400">
+                            {selectedChatMembers.filter((member) => member.online).length} онлайн
                           </span>
-                        ))}
-                      </div>
-                    )}
-                    {selectedChat && (
-                      <div className="mt-1 text-[11px] text-muted-foreground">
-                        Онлайн: {selectedChatMembers.filter((member) => member.online).length}/{selectedChatMembers.length}
-                      </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                            {selectedChatMembers.slice(0, 5).map((member) => (
+                              <span key={member.userId} className="inline-flex items-center gap-1 rounded-full border border-border/60 px-2 py-0.5 text-[11px] text-muted-foreground">
+                                <span className={`h-1.5 w-1.5 rounded-full ${member.online ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
+                                <span className="max-w-[120px] truncate">{member.label}</span>
+                              </span>
+                            ))}
+                          </div>
+                          <div className="mt-1 text-[11px] text-muted-foreground">
+                            Онлайн: {selectedChatMembers.filter((member) => member.online).length}/{selectedChatMembers.length}
+                          </div>
+                        </>
+                      )
                     )}
                     {typingLabels.length > 0 && (
                       <div className="mt-1 text-[11px] text-primary">

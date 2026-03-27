@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   billingApi,
   type PlanInfo,
@@ -7,6 +7,7 @@ import {
   type TokenPurchaseResponse,
   type UsageInfo,
 } from '@/lib/api'
+import { useAuth } from '@/contexts/AuthContext'
 import { CreditCard, Zap, Users, Database, HardDrive, FileText, Check, Crown, Sparkles } from 'lucide-react'
 
 const BILLING_PENDING_PAYMENT_KEY = 'billing_pending_payment'
@@ -85,6 +86,7 @@ function getPackageMeta(index: number, total: number) {
 }
 
 export default function BillingPage() {
+  const { user, members } = useAuth()
   const [plans, setPlans] = useState<PlanInfo[]>([])
   const [usage, setUsage] = useState<UsageInfo | null>(null)
   const [sub, setSub] = useState<SubInfo | null>(null)
@@ -97,6 +99,10 @@ export default function BillingPage() {
   const [cancelConfirm, setCancelConfirm] = useState(false)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const isOrgOwner = useMemo(() => {
+    if (!user) return false
+    return members.find((m) => m.user_id === user.id)?.role === 'owner'
+  }, [members, user])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -124,6 +130,10 @@ export default function BillingPage() {
   useEffect(() => { load() }, [load])
 
   const handleCancelSubscription = async () => {
+    if (!isOrgOwner) {
+      setErrorMessage('Отменить подписку может только владелец организации.')
+      return
+    }
     setCancelling(true)
     setErrorMessage(null)
     setSuccessMessage(null)
@@ -538,14 +548,15 @@ export default function BillingPage() {
             Отмена или неоплата переводит организацию на бесплатный тариф после льготного периода.
             Через 30 дней после окончания подписки данные будут автоматически очищены.
           </p>
-          {!cancelConfirm ? (
+          {isOrgOwner && !cancelConfirm && (
             <button
               onClick={() => setCancelConfirm(true)}
               className="h-9 px-4 rounded-lg border border-destructive/40 text-destructive text-sm font-medium hover:bg-destructive/10 transition-colors"
             >
               Отменить подписку
             </button>
-          ) : (
+          )}
+          {isOrgOwner && cancelConfirm && (
             <div className="flex items-center gap-3">
               <p className="text-sm font-medium text-destructive">Вы уверены?</p>
               <button
@@ -562,6 +573,11 @@ export default function BillingPage() {
                 Нет
               </button>
             </div>
+          )}
+          {!isOrgOwner && (
+            <p className="text-sm text-muted-foreground">
+              Только владелец организации может отменить подписку.
+            </p>
           )}
         </div>
       )}

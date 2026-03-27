@@ -11,7 +11,7 @@ import { Building2, User, CreditCard, Globe, Lock, Loader2, Check } from 'lucide
 import api, { orgApi } from '@/lib/api'
 
 export default function SettingsPage() {
-  const { user, org, refresh, logout } = useAuth()
+  const { user, org, members, refresh, logout } = useAuth()
   const navigate = useNavigate()
   const [profileForm, setProfileForm] = useState({
     first_name: user?.first_name ?? '',
@@ -24,6 +24,10 @@ export default function SettingsPage() {
   const [orgLoading, setOrgLoading] = useState(false)
   const [orgSaved, setOrgSaved] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
+  const isOrgOwner = useMemo(() => {
+    if (!user) return false
+    return members.find((m) => m.user_id === user.id)?.role === 'owner'
+  }, [members, user])
 
   const timezoneOptions = useMemo(() => {
     const base = [
@@ -72,6 +76,10 @@ export default function SettingsPage() {
   }
 
   const deleteOrg = async () => {
+    if (!isOrgOwner) {
+      window.alert('Удалить организацию может только владелец.')
+      return
+    }
     if (!org) return
     const confirmed = window.confirm(`Удалить организацию "${org.name}"? Это действие необратимо.`)
     if (!confirmed) return
@@ -244,9 +252,13 @@ export default function SettingsPage() {
               <p className="text-sm font-medium">Удалить организацию</p>
               <p className="text-xs text-muted-foreground">Безвозвратно удалить организацию и все ее данные</p>
             </div>
-            <Button variant="destructive" size="sm" onClick={deleteOrg} disabled={deleteLoading}>
-              {deleteLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Удалить'}
-            </Button>
+            {isOrgOwner ? (
+              <Button variant="destructive" size="sm" onClick={deleteOrg} disabled={deleteLoading}>
+                {deleteLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Удалить'}
+              </Button>
+            ) : (
+              <Badge variant="secondary" className="text-xs">Только владелец</Badge>
+            )}
           </div>
         </CardContent>
       </Card>

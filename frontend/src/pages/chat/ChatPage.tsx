@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
-import { ArrowDown, Paperclip, Plus, Search, X } from 'lucide-react'
+import { ArrowDown, ChevronLeft, ChevronRight, MessageSquare, Paperclip, Plus, Search, X } from 'lucide-react'
 import { chatApi, type ChatInfo, type ChatMemberInfo, type ChatMessageInfo } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
@@ -46,6 +46,7 @@ function getInitials(label: string): string {
 const MESSAGE_PAGE_SIZE = 50
 const MESSAGE_MAX_CHARS = 500
 const TYPING_TTL_MS = 3000
+const CHAT_SIDEBAR_COLLAPSED_STORAGE_KEY = 'chat.sidebar.collapsed.v1'
 
 export default function ChatPage() {
   const { members, user } = useAuth()
@@ -77,6 +78,15 @@ export default function ChatPage() {
 
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  const [isDesktopSidebarCollapsed, setIsDesktopSidebarCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.localStorage.getItem(CHAT_SIDEBAR_COLLAPSED_STORAGE_KEY) === '1'
+  })
+  const [isMobileViewport, setIsMobileViewport] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.matchMedia('(max-width: 1023px)').matches
+  })
+  const [isMobileDialogsOpen, setIsMobileDialogsOpen] = useState(false)
   const selectedChatIdRef = useRef<string | null>(null)
   const messagesViewportRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
@@ -86,6 +96,23 @@ export default function ChatPage() {
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId
   }, [selectedChatId])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const media = window.matchMedia('(max-width: 1023px)')
+    const onChange = (event: MediaQueryListEvent) => {
+      setIsMobileViewport(event.matches)
+      if (!event.matches) setIsMobileDialogsOpen(false)
+    }
+    setIsMobileViewport(media.matches)
+    media.addEventListener('change', onChange)
+    return () => media.removeEventListener('change', onChange)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(CHAT_SIDEBAR_COLLAPSED_STORAGE_KEY, isDesktopSidebarCollapsed ? '1' : '0')
+  }, [isDesktopSidebarCollapsed])
 
   const membersById = useMemo(() => {
     return new Map(
@@ -645,6 +672,61 @@ export default function ChatPage() {
     }
   }
 
+  const handleSelectChat = (chatId: string) => {
+    setSelectedChatId(chatId)
+    setIsMobileDialogsOpen(false)
+  }
+
+  const renderChatList = (compact: boolean) => {
+    if (loadingChats) {
+      return <div className="p-2 text-sm text-muted-foreground">Загрузка...</div>
+    }
+    if (chats.length === 0) {
+      return <div className="p-2 text-sm text-muted-foreground">Чатов пока нет</div>
+    }
+
+    return chats.map((chat) => {
+      const isActive = chat.id === selectedChatId
+      const title = chat.title || (chat.chat_type === 'direct' ? 'Direct чат' : 'Без названия')
+
+      if (compact) {
+        return (
+          <button
+            key={chat.id}
+            type="button"
+            onClick={() => handleSelectChat(chat.id)}
+            title={title}
+            className={`mb-2 flex h-10 w-10 items-center justify-center rounded-full border text-[11px] font-semibold transition ${
+              isActive
+                ? 'border-primary/50 bg-primary/15 text-primary'
+                : 'border-border/60 bg-background/50 text-muted-foreground hover:bg-muted/30'
+            }`}
+          >
+            {getInitials(title)}
+          </button>
+        )
+      }
+
+      return (
+        <button
+          key={chat.id}
+          type="button"
+          onClick={() => handleSelectChat(chat.id)}
+          className={`mb-1 w-full rounded-md border px-3 py-2 text-left text-sm transition ${
+            isActive
+              ? 'border-primary/40 bg-primary/10 text-primary'
+              : 'border-transparent hover:border-border hover:bg-muted/40'
+          }`}
+        >
+          <div className="truncate font-medium">{title}</div>
+          <div className="mt-1 text-xs text-muted-foreground">
+            {chat.chat_type} · {chat.member_ids.length} участников
+          </div>
+        </button>
+      )
+    })
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
@@ -748,41 +830,34 @@ export default function ChatPage() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Диалоги</CardTitle>
         </CardHeader>
-        <CardContent className="grid h-[70vh] min-h-[520px] max-h-[760px] grid-cols-1 gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
-            <div className="flex min-h-0 flex-col rounded-md border border-border/60">
-              <div className="border-b border-border/60 px-3 py-2 text-xs text-muted-foreground">Чаты</div>
-              <div className="min-h-0 flex-1 overflow-y-auto p-2">
-                {loadingChats ? (
-                  <div className="p-2 text-sm text-muted-foreground">Загрузка...</div>
-                ) : chats.length === 0 ? (
-                  <div className="p-2 text-sm text-muted-foreground">Чатов пока нет</div>
-                ) : (
-                  chats.map((chat) => {
-                    const isActive = chat.id === selectedChatId
-                    const title = chat.title || (chat.chat_type === 'direct' ? 'Direct чат' : 'Без названия')
-                    return (
-                      <button
-                        key={chat.id}
-                        type="button"
-                        onClick={() => setSelectedChatId(chat.id)}
-                        className={`mb-1 w-full rounded-md border px-3 py-2 text-left text-sm transition ${
-                          isActive
-                            ? 'border-primary/40 bg-primary/10 text-primary'
-                            : 'border-transparent hover:border-border hover:bg-muted/40'
-                        }`}
-                      >
-                        <div className="truncate font-medium">{title}</div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {chat.chat_type} · {chat.member_ids.length} участников
-                        </div>
-                      </button>
-                    )
-                  })
-                )}
+        <CardContent className="relative h-[70vh] min-h-[520px] max-h-[760px] p-0">
+          <div className="flex h-full min-h-0 gap-4 p-4">
+            <div className={`hidden min-h-0 shrink-0 lg:flex ${isDesktopSidebarCollapsed ? 'w-[78px]' : 'w-[280px]'}`}>
+              <div className="flex min-h-0 flex-1 flex-col rounded-md border border-border/60 bg-background/40">
+                <div
+                  className={`border-b border-border/60 ${
+                    isDesktopSidebarCollapsed ? 'flex justify-center px-1 py-2' : 'flex items-center justify-between px-3 py-2'
+                  }`}
+                >
+                  {!isDesktopSidebarCollapsed && <span className="text-xs text-muted-foreground">Чаты</span>}
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-7 w-7"
+                    onClick={() => setIsDesktopSidebarCollapsed((prev) => !prev)}
+                    aria-label={isDesktopSidebarCollapsed ? 'Развернуть панель чатов' : 'Свернуть панель чатов'}
+                  >
+                    {isDesktopSidebarCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <div className={`min-h-0 flex-1 overflow-y-auto ${isDesktopSidebarCollapsed ? 'p-1.5' : 'p-2'}`}>
+                  {renderChatList(isDesktopSidebarCollapsed)}
+                </div>
               </div>
             </div>
 
-            <div className="flex min-h-0 flex-col rounded-md border border-border/60">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col rounded-md border border-border/60">
               <div className="border-b border-border/60 px-3 py-2">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -845,7 +920,7 @@ export default function ChatPage() {
                   <div className="pb-1 text-center text-xs text-muted-foreground">Загрузка предыдущих сообщений...</div>
                 )}
                 {!selectedChat ? (
-                  <div className="text-sm text-muted-foreground">Откройте чат слева</div>
+                  <div className="text-sm text-muted-foreground">{isMobileViewport ? 'Откройте список через кнопку "Чаты"' : 'Откройте чат слева'}</div>
                 ) : loadingMessages ? (
                   <div className="text-sm text-muted-foreground">Загрузка сообщений...</div>
                 ) : messages.length === 0 ? (
@@ -1042,6 +1117,48 @@ export default function ChatPage() {
                 )}
               </div>
             </div>
+          </div>
+
+          <div className="pointer-events-none fixed bottom-6 right-4 z-40 lg:hidden">
+            <Button
+              type="button"
+              className="pointer-events-auto h-11 rounded-full px-4 shadow-lg"
+              onClick={() => setIsMobileDialogsOpen(true)}
+              aria-label="Открыть диалоги"
+            >
+              <MessageSquare className="mr-2 h-4 w-4" />
+              Чаты
+            </Button>
+          </div>
+
+          {isMobileDialogsOpen && (
+            <div
+              className="fixed inset-0 z-50 lg:hidden"
+              onClick={() => setIsMobileDialogsOpen(false)}
+            >
+              <div className="absolute inset-0 bg-black/60 backdrop-blur-[1px]" />
+              <div className="absolute inset-y-0 left-0 w-[88vw] max-w-[340px] p-3" onClick={(e) => e.stopPropagation()}>
+                <div className="flex h-full min-h-0 flex-col rounded-xl border border-border/70 bg-background shadow-2xl">
+                  <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
+                    <span className="text-xs text-muted-foreground">Чаты</span>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7"
+                      onClick={() => setIsMobileDialogsOpen(false)}
+                      aria-label="Закрыть список диалогов"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                    {renderChatList(false)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

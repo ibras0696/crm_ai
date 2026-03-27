@@ -842,7 +842,7 @@ export default function ChatPage() {
           </Button>
         </CardHeader>
         <CardContent className="relative h-[70vh] min-h-[520px] max-h-[760px] p-0">
-          <div className="relative h-full min-h-0 p-4">
+          <div className={`relative h-full min-h-0 p-4 ${isDesktopSidebarCollapsed ? 'lg:pl-16' : ''}`}>
             {isDesktopSidebarCollapsed ? (
               <Button
                 type="button"

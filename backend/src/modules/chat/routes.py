@@ -1,6 +1,7 @@
 import uuid
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 
 from src.common.enums import UserRole
 from src.common.schemas import ApiResponse
@@ -26,6 +27,10 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 CHAT_NOT_FOUND_MESSAGE = "Чат не найден"
 MESSAGE_NOT_FOUND_MESSAGE = "Сообщение не найдено"
+
+
+class TypingEventRequest(BaseModel):
+    is_typing: bool = True
 
 
 def _service_error(error: ChatServiceError) -> ApiResponse[None]:
@@ -188,6 +193,41 @@ async def add_member(
     return ApiResponse(data=item)
 
 
+@router.get("/chats/{chat_id}/members", response_model=ApiResponse[list[ChatMemberOut]])
+async def list_members(
+    chat_id: uuid.UUID,
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY),
+    ),
+    _: None = Depends(require_access(resource_type="chat", permission="can_read", resource_id_param="chat_id")),
+):
+    async with UnitOfWork() as uow:
+        service = ChatService(uow.session)
+        chat = await service.get_chat_for_user(
+            chat_id=chat_id,
+            org_id=current_user.org_id,
+            user_id=current_user.user_id,
+        )
+        if chat is None:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": CHAT_NOT_FOUND_MESSAGE})
+        try:
+            members = await service.list_members_for_user(chat=chat, user_id=current_user.user_id)
+        except ChatServiceError as error:
+            return _service_error(error)
+        items = [
+            ChatMemberOut(
+                id=member.id,
+                chat_id=member.chat_id,
+                user_id=member.user_id,
+                role=member.role,
+                last_read_seq_no=member.last_read_seq_no,
+                created_at=member.created_at,
+            )
+            for member in members
+        ]
+    return ApiResponse(data=items)
+
+
 @router.get("/chats/{chat_id}/messages", response_model=ApiResponse[list[ChatMessageOut]])
 async def list_messages(
     chat_id: uuid.UUID,
@@ -234,6 +274,63 @@ async def list_messages(
             for message in messages
         ]
     return ApiResponse(data=items)
+
+
+@router.get("/chats/{chat_id}/presence", response_model=ApiResponse[dict[str, bool]])
+async def get_presence(
+    chat_id: uuid.UUID,
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY),
+    ),
+    _: None = Depends(require_access(resource_type="chat", permission="can_read", resource_id_param="chat_id")),
+):
+    async with UnitOfWork() as uow:
+        service = ChatService(uow.session)
+        chat = await service.get_chat_for_user(
+            chat_id=chat_id,
+            org_id=current_user.org_id,
+            user_id=current_user.user_id,
+        )
+        if chat is None:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": CHAT_NOT_FOUND_MESSAGE})
+        member_ids = await service.get_member_ids(chat_id=chat.id)
+    payload = {str(user_id): ws_manager.is_online(user_id) for user_id in member_ids}
+    return ApiResponse(data=payload)
+
+
+@router.post("/chats/{chat_id}/typing", response_model=ApiResponse[None])
+async def send_typing_event(
+    chat_id: uuid.UUID,
+    body: TypingEventRequest,
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY),
+    ),
+    _: None = Depends(require_access(resource_type="chat", permission="can_read", resource_id_param="chat_id")),
+):
+    async with UnitOfWork() as uow:
+        service = ChatService(uow.session)
+        chat = await service.get_chat_for_user(
+            chat_id=chat_id,
+            org_id=current_user.org_id,
+            user_id=current_user.user_id,
+        )
+        if chat is None:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": CHAT_NOT_FOUND_MESSAGE})
+        member_ids = await service.get_member_ids(chat_id=chat.id)
+
+    event_payload = {
+        "type": "chat.typing.updated",
+        "schema_version": 1,
+        "chat_id": str(chat_id),
+        "user_id": str(current_user.user_id),
+        "is_typing": body.is_typing,
+    }
+    for member_id in member_ids:
+        if member_id == current_user.user_id:
+            continue
+        await ws_manager.send_personal_message(event_payload, member_id)
+
+    return ApiResponse(data=None)
 
 
 @router.post("/chats/{chat_id}/messages", response_model=ApiResponse[ChatMessageOut])
@@ -331,10 +428,22 @@ async def update_read_cursor(
             )
         except ChatServiceError as error:
             return _service_error(error)
+        member_ids = await service.get_member_ids(chat_id=chat.id)
         await uow.commit()
         item = ReadCursorOut(
             chat_id=member.chat_id,
             user_id=member.user_id,
             last_read_seq_no=member.last_read_seq_no,
         )
+
+    event_payload = {
+        "type": "chat.read.cursor.updated",
+        "schema_version": 1,
+        "chat_id": str(chat_id),
+        "user_id": str(current_user.user_id),
+        "last_read_seq_no": item.last_read_seq_no,
+    }
+    for member_id in member_ids:
+        await ws_manager.send_personal_message(event_payload, member_id)
+
     return ApiResponse(data=item)

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
-import { Plus, X } from 'lucide-react'
-import { chatApi, type ChatInfo, type ChatMessageInfo } from '@/lib/api'
+import { ArrowDown, Paperclip, Plus, Search, X } from 'lucide-react'
+import { chatApi, type ChatInfo, type ChatMemberInfo, type ChatMessageInfo } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,14 +15,54 @@ function extractApiError(e: unknown, fallback: string): string {
   return fallback
 }
 
+function toDayKey(value: string): string {
+  const d = new Date(value)
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`
+}
+
+function formatDayDivider(value: string): string {
+  const target = new Date(value)
+  const now = new Date()
+  const todayKey = `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  const yesterdayKey = `${yesterday.getFullYear()}-${yesterday.getMonth()}-${yesterday.getDate()}`
+  const targetKey = `${target.getFullYear()}-${target.getMonth()}-${target.getDate()}`
+  if (targetKey === todayKey) return 'Сегодня'
+  if (targetKey === yesterdayKey) return 'Вчера'
+  return target.toLocaleDateString('ru-RU', { day: '2-digit', month: 'long' })
+}
+
+function getInitials(label: string): string {
+  const parts = label
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+  if (parts.length === 0) return '?'
+  if (parts.length === 1) return parts[0]!.slice(0, 1).toUpperCase()
+  return `${parts[0]!.slice(0, 1)}${parts[1]!.slice(0, 1)}`.toUpperCase()
+}
+
 const MESSAGE_PAGE_SIZE = 50
 const MESSAGE_MAX_CHARS = 500
+const TYPING_TTL_MS = 3000
 
 export default function ChatPage() {
   const { members, user } = useAuth()
   const [chats, setChats] = useState<ChatInfo[]>([])
   const [selectedChatId, setSelectedChatId] = useState<string | null>(null)
   const [messages, setMessages] = useState<ChatMessageInfo[]>([])
+  const [chatMembers, setChatMembers] = useState<ChatMemberInfo[]>([])
+  const [presence, setPresence] = useState<Record<string, boolean>>({})
+  const [typingUsers, setTypingUsers] = useState<Record<string, number>>({})
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [replyToMessageId, setReplyToMessageId] = useState<string | null>(null)
+  const [menuOpenMessageId, setMenuOpenMessageId] = useState<string | null>(null)
+  const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({})
+  const [ackedOwnMessages, setAckedOwnMessages] = useState<Record<string, boolean>>({})
+  const [isNearBottom, setIsNearBottom] = useState(true)
+  const [newMessagesCount, setNewMessagesCount] = useState(0)
   const [loadingChats, setLoadingChats] = useState(false)
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [loadingOlderMessages, setLoadingOlderMessages] = useState(false)
@@ -39,6 +79,9 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false)
   const selectedChatIdRef = useRef<string | null>(null)
   const messagesViewportRef = useRef<HTMLDivElement | null>(null)
+  const composerRef = useRef<HTMLTextAreaElement | null>(null)
+  const typingStopTimerRef = useRef<number | null>(null)
+  const lastTypingSentAtRef = useRef(0)
 
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId
@@ -54,10 +97,68 @@ export default function ChatPage() {
     return chats.find((x) => x.id === selectedChatId) || null
   }, [chats, selectedChatId])
 
+  const selectedChatMembers = useMemo(() => {
+    if (!selectedChat) return []
+    return selectedChat.member_ids.map((id) => {
+      const label = membersById.get(id) || id
+      return { userId: id, label, initials: getInitials(label), online: Boolean(presence[id]) }
+    })
+  }, [membersById, presence, selectedChat])
+
+  const visibleMessages = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return messages
+    return messages.filter((message) => message.body.toLowerCase().includes(q))
+  }, [messages, searchQuery])
+
+  const replyToMessage = useMemo(
+    () => messages.find((message) => message.id === replyToMessageId) || null,
+    [messages, replyToMessageId],
+  )
+
+  const typingLabels = useMemo(() => {
+    const now = Date.now()
+    return Object.entries(typingUsers)
+      .filter(([, expiresAt]) => expiresAt > now)
+      .map(([userId]) => membersById.get(userId) || userId)
+  }, [membersById, typingUsers])
+
   const scrollMessagesToBottom = () => {
     const viewport = messagesViewportRef.current
     if (!viewport) return
     viewport.scrollTop = viewport.scrollHeight
+  }
+
+  const adjustComposerHeight = () => {
+    const el = composerRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    const maxHeight = 160
+    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`
+  }
+
+  const getMessageOwnerLabel = (message: ChatMessageInfo): string => {
+    return membersById.get(message.sender_id) || message.sender_id
+  }
+
+  const getOwnMessageStatus = (message: ChatMessageInfo): string => {
+    if (!user || message.sender_id !== user.id) return ''
+    const readByOther = chatMembers.some((member) => member.user_id !== user.id && member.last_read_seq_no >= message.seq_no)
+    if (readByOther) return 'Прочитано'
+    const hasOnlinePeer = chatMembers.some((member) => member.user_id !== user.id && presence[member.user_id])
+    if (ackedOwnMessages[message.id] || hasOnlinePeer) return 'Доставлено'
+    return 'Отправлено'
+  }
+
+  const toggleMessageExpanded = (messageId: string) => {
+    setExpandedMessages((prev) => ({ ...prev, [messageId]: !prev[messageId] }))
+  }
+
+  const isExpandableMessage = (body: string): boolean => {
+    if (body.length > 280) return true
+    if (/(https?:\/\/\S{80,})/i.test(body)) return true
+    if (/^[\[{]/.test(body.trim()) && body.length > 120) return true
+    return false
   }
 
   useEffect(() => {
@@ -91,9 +192,20 @@ export default function ChatPage() {
   }, [])
 
   useEffect(() => {
+    adjustComposerHeight()
+  }, [draft])
+
+  useEffect(() => {
     const loadMessages = async () => {
       if (!selectedChatId) {
         setMessages([])
+        setChatMembers([])
+        setPresence({})
+        setTypingUsers({})
+        setReplyToMessageId(null)
+        setMenuOpenMessageId(null)
+        setAckedOwnMessages({})
+        setNewMessagesCount(0)
         setHasMoreMessages(true)
         return
       }
@@ -102,14 +214,25 @@ export default function ChatPage() {
       setHasMoreMessages(true)
       setErrorText('')
       try {
-        const response = await chatApi.listMessages(selectedChatId, {
-          limit: MESSAGE_PAGE_SIZE,
-          latest: true,
-        })
-        if (response.data.ok && response.data.data) {
-          const nextMessages = response.data.data
+        const [messagesResponse, membersResponse, presenceResponse] = await Promise.all([
+          chatApi.listMessages(selectedChatId, {
+            limit: MESSAGE_PAGE_SIZE,
+            latest: true,
+          }),
+          chatApi.listMembers(selectedChatId),
+          chatApi.getPresence(selectedChatId),
+        ])
+        if (messagesResponse.data.ok && messagesResponse.data.data) {
+          const nextMessages = messagesResponse.data.data
           setMessages(nextMessages)
           setHasMoreMessages(nextMessages.length === MESSAGE_PAGE_SIZE)
+          const ownDelivered = Object.fromEntries(
+            nextMessages
+              .filter((message) => message.sender_id === user?.id)
+              .map((message) => [message.id, true]),
+          )
+          setAckedOwnMessages(ownDelivered)
+          setNewMessagesCount(0)
           const lastSeqNo = nextMessages[nextMessages.length - 1]?.seq_no
           if (typeof lastSeqNo === 'number') {
             await chatApi.updateReadCursor(selectedChatId, { last_read_seq_no: lastSeqNo })
@@ -118,10 +241,26 @@ export default function ChatPage() {
         } else {
           setMessages([])
           setHasMoreMessages(true)
-          setErrorText(response.data.error?.message || 'Не удалось загрузить сообщения')
+          setErrorText(messagesResponse.data.error?.message || 'Не удалось загрузить сообщения')
+        }
+
+        if (membersResponse.data.ok && membersResponse.data.data) {
+          setChatMembers(membersResponse.data.data)
+        } else {
+          setChatMembers([])
+        }
+
+        if (presenceResponse.data.ok && presenceResponse.data.data) {
+          setPresence(presenceResponse.data.data)
+        } else {
+          setPresence({})
         }
       } catch (e) {
         setMessages([])
+        setChatMembers([])
+        setPresence({})
+        setTypingUsers({})
+        setAckedOwnMessages({})
         setHasMoreMessages(true)
         setErrorText(extractApiError(e, 'Не удалось загрузить сообщения'))
       } finally {
@@ -130,6 +269,53 @@ export default function ChatPage() {
     }
     void loadMessages()
   }, [selectedChatId])
+
+  useEffect(() => {
+    if (!selectedChatId) return
+    let cancelled = false
+    const refreshPresence = async () => {
+      try {
+        const response = await chatApi.getPresence(selectedChatId)
+        if (!cancelled && response.data.ok && response.data.data) {
+          setPresence(response.data.data)
+        }
+      } catch {
+        // ignore background presence polling errors
+      }
+    }
+
+    void refreshPresence()
+    const intervalId = window.setInterval(() => {
+      void refreshPresence()
+    }, 20_000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(intervalId)
+    }
+  }, [selectedChatId])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now()
+      setTypingUsers((prev) => {
+        const next = Object.fromEntries(Object.entries(prev).filter(([, expiresAt]) => expiresAt > now))
+        return Object.keys(next).length === Object.keys(prev).length ? prev : next
+      })
+    }, 500)
+    return () => window.clearInterval(timer)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (typingStopTimerRef.current !== null) {
+        window.clearTimeout(typingStopTimerRef.current)
+      }
+      if (selectedChatIdRef.current) {
+        void chatApi.sendTyping(selectedChatIdRef.current, false)
+      }
+    }
+  }, [])
 
   const loadOlderMessages = async () => {
     if (!selectedChatId || loadingMessages || loadingOlderMessages || !hasMoreMessages || messages.length === 0) return
@@ -175,8 +361,70 @@ export default function ChatPage() {
   const handleMessagesScroll = () => {
     const viewport = messagesViewportRef.current
     if (!viewport) return
+    const nearBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 120
+    setIsNearBottom(nearBottom)
+    if (nearBottom && newMessagesCount > 0) {
+      setNewMessagesCount(0)
+    }
     if (viewport.scrollTop <= 64) {
       void loadOlderMessages()
+    }
+  }
+
+  const sendTypingEvent = (isTyping: boolean) => {
+    if (!selectedChatId) return
+    void chatApi.sendTyping(selectedChatId, isTyping)
+  }
+
+  const touchTypingActivity = () => {
+    if (!selectedChatId) return
+    const now = Date.now()
+    if (now - lastTypingSentAtRef.current > 1200) {
+      sendTypingEvent(true)
+      lastTypingSentAtRef.current = now
+    }
+    if (typingStopTimerRef.current !== null) {
+      window.clearTimeout(typingStopTimerRef.current)
+    }
+    typingStopTimerRef.current = window.setTimeout(() => {
+      sendTypingEvent(false)
+      typingStopTimerRef.current = null
+    }, 1800)
+  }
+
+  const stopTyping = () => {
+    if (typingStopTimerRef.current !== null) {
+      window.clearTimeout(typingStopTimerRef.current)
+      typingStopTimerRef.current = null
+    }
+    sendTypingEvent(false)
+  }
+
+  const scrollToLatest = () => {
+    requestAnimationFrame(scrollMessagesToBottom)
+    setNewMessagesCount(0)
+  }
+
+  const handleDeleteMessage = async (messageId: string) => {
+    try {
+      const response = await chatApi.deleteMessage(messageId)
+      if (response.data.ok) {
+        setMessages((prev) => prev.filter((message) => message.id !== messageId))
+        setMenuOpenMessageId(null)
+      } else {
+        setErrorText(response.data.error?.message || 'Не удалось удалить сообщение')
+      }
+    } catch (e) {
+      setErrorText(extractApiError(e, 'Не удалось удалить сообщение'))
+    }
+  }
+
+  const handleCopyMessage = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setMenuOpenMessageId(null)
+    } catch {
+      setErrorText('Не удалось скопировать сообщение')
     }
   }
 
@@ -220,36 +468,74 @@ export default function ChatPage() {
             type?: string
             chat_id?: string
             message?: ChatMessageInfo
+            user_id?: string
+            is_typing?: boolean
+            last_read_seq_no?: number
           }
-          if (payload.type !== 'chat.message.created' || !payload.chat_id || !payload.message) return
-          const incomingMessage = payload.message
+          if (payload.type === 'chat.message.created' && payload.chat_id && payload.message) {
+            const incomingMessage = payload.message
+            setChats((prev) => {
+              const index = prev.findIndex((x) => x.id === payload.chat_id)
+              if (index === -1) return prev
+              const next = [...prev]
+              const chat = next[index]
+              if (!chat) return prev
+              const updatedChat: ChatInfo = {
+                ...chat,
+                updated_at: incomingMessage.created_at,
+              }
+              next.splice(index, 1)
+              next.unshift(updatedChat)
+              return next
+            })
 
-          setChats((prev) => {
-            const index = prev.findIndex((x) => x.id === payload.chat_id)
-            if (index === -1) return prev
-            const next = [...prev]
-            const chat = next[index]
-            if (!chat) return prev
-            const updatedChat: ChatInfo = {
-              ...chat,
-              updated_at: incomingMessage.created_at,
+            if (selectedChatIdRef.current !== payload.chat_id) return
+            const viewport = messagesViewportRef.current
+            const shouldStickToBottom = viewport
+              ? viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 120
+              : false
+            setMessages((prev) => {
+              if (prev.some((x) => x.id === incomingMessage.id)) return prev
+              return [...prev, incomingMessage]
+            })
+            if (incomingMessage.sender_id === user?.id) {
+              setAckedOwnMessages((prev) => ({ ...prev, [incomingMessage.id]: true }))
             }
-            next.splice(index, 1)
-            next.unshift(updatedChat)
-            return next
-          })
+            if (shouldStickToBottom) {
+              requestAnimationFrame(scrollMessagesToBottom)
+            } else {
+              setNewMessagesCount((prev) => prev + 1)
+            }
+            return
+          }
 
-          if (selectedChatIdRef.current !== payload.chat_id) return
-          const viewport = messagesViewportRef.current
-          const shouldStickToBottom = viewport
-            ? viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 120
-            : false
-          setMessages((prev) => {
-            if (prev.some((x) => x.id === incomingMessage.id)) return prev
-            return [...prev, incomingMessage]
-          })
-          if (shouldStickToBottom) {
-            requestAnimationFrame(scrollMessagesToBottom)
+          if (payload.type === 'chat.typing.updated' && payload.chat_id === selectedChatIdRef.current && payload.user_id) {
+            if (payload.user_id === user?.id) return
+            if (payload.is_typing) {
+              setTypingUsers((prev) => ({ ...prev, [payload.user_id!]: Date.now() + TYPING_TTL_MS }))
+            } else {
+              setTypingUsers((prev) => {
+                const next = { ...prev }
+                delete next[payload.user_id!]
+                return next
+              })
+            }
+            return
+          }
+
+          if (
+            payload.type === 'chat.read.cursor.updated'
+            && payload.chat_id === selectedChatIdRef.current
+            && payload.user_id
+            && typeof payload.last_read_seq_no === 'number'
+          ) {
+            setChatMembers((prev) =>
+              prev.map((member) =>
+                member.user_id === payload.user_id
+                  ? { ...member, last_read_seq_no: Math.max(member.last_read_seq_no, payload.last_read_seq_no!) }
+                  : member,
+              ),
+            )
           }
         } catch {
           // Ignore non-JSON and unrelated ws frames.
@@ -329,13 +615,26 @@ export default function ChatPage() {
     setSending(true)
     setErrorText('')
     try {
-      const response = await chatApi.sendMessage(selectedChatId, { body: trimmedDraft })
+      const meta = replyToMessageId ? { reply_to_message_id: replyToMessageId } : undefined
+      const response = await chatApi.sendMessage(selectedChatId, { body: trimmedDraft, meta })
       if (response.data.ok && response.data.data) {
         const created = response.data.data
         setMessages((prev) => (prev.some((x) => x.id === created.id) ? prev : [...prev, created]))
+        if (created.sender_id === user?.id) {
+          setAckedOwnMessages((prev) => ({ ...prev, [created.id]: false }))
+        }
         setDraft('')
+        setReplyToMessageId(null)
+        stopTyping()
         requestAnimationFrame(scrollMessagesToBottom)
         await chatApi.updateReadCursor(selectedChatId, { last_read_seq_no: created.seq_no })
+        setChatMembers((prev) =>
+          prev.map((member) =>
+            member.user_id === user?.id
+              ? { ...member, last_read_seq_no: Math.max(member.last_read_seq_no, created.seq_no) }
+              : member,
+          ),
+        )
       } else {
         setErrorText(response.data.error?.message || 'Не удалось отправить сообщение')
       }
@@ -485,14 +784,54 @@ export default function ChatPage() {
 
             <div className="flex min-h-0 flex-col rounded-md border border-border/60">
               <div className="border-b border-border/60 px-3 py-2">
-                <div className="text-sm font-semibold">
-                  {selectedChat ? selectedChat.title || 'Без названия' : 'Выберите чат'}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold">
+                      {selectedChat ? selectedChat.title || 'Без названия' : 'Выберите чат'}
+                    </div>
+                    {selectedChat && (
+                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                        {selectedChatMembers.slice(0, 5).map((member) => (
+                          <span key={member.userId} className="inline-flex items-center gap-1 rounded-full border border-border/60 px-2 py-0.5 text-[11px] text-muted-foreground">
+                            <span className={`h-1.5 w-1.5 rounded-full ${member.online ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
+                            <span className="max-w-[120px] truncate">{member.label}</span>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {selectedChat && (
+                      <div className="mt-1 text-[11px] text-muted-foreground">
+                        Онлайн: {selectedChatMembers.filter((member) => member.online).length}/{selectedChatMembers.length}
+                      </div>
+                    )}
+                    {typingLabels.length > 0 && (
+                      <div className="mt-1 text-[11px] text-primary">
+                        {typingLabels.join(', ')} печатает...
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button type="button" size="icon" variant="ghost" onClick={() => setSearchOpen((prev) => !prev)} aria-label="Поиск по сообщениям">
+                      <Search className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => setErrorText('Вложения чата подключим следующим шагом.')}
+                      aria-label="Вложения"
+                    >
+                      <Paperclip className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
-                {selectedChat && (
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    {selectedChat.member_ids
-                      .map((id) => membersById.get(id) || id)
-                      .join(', ')}
+                {searchOpen && (
+                  <div className="mt-2">
+                    <Input
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Поиск в текущем чате..."
+                    />
                   </div>
                 )}
               </div>
@@ -511,41 +850,162 @@ export default function ChatPage() {
                   <div className="text-sm text-muted-foreground">Загрузка сообщений...</div>
                 ) : messages.length === 0 ? (
                   <div className="text-sm text-muted-foreground">Сообщений пока нет</div>
+                ) : visibleMessages.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">Поиск не дал результатов</div>
                 ) : (
                   <>
                     {!hasMoreMessages && (
                       <div className="pb-1 text-center text-xs text-muted-foreground">Начало переписки</div>
                     )}
-                    {messages.map((message) => {
+                    {visibleMessages.map((message, index) => {
                       const own = message.sender_id === user?.id
+                      const prev = visibleMessages[index - 1]
+                      const showDayDivider = !prev || toDayKey(prev.created_at) !== toDayKey(message.created_at)
+                      const senderLabel = getMessageOwnerLabel(message)
+                      const ownStatus = getOwnMessageStatus(message)
+                      const expanded = Boolean(expandedMessages[message.id])
+                      const expandable = isExpandableMessage(message.body)
+                      const metaReplyToId = (message.meta as { reply_to_message_id?: string } | null)?.reply_to_message_id
+                      const replyTarget = metaReplyToId ? messages.find((m) => m.id === metaReplyToId) || null : null
+                      const showMenu = menuOpenMessageId === message.id
+
                       return (
-                        <div
-                          key={message.id}
-                          className={`max-w-[80%] rounded-lg border px-3 py-2 text-sm ${
-                            own
-                              ? 'ml-auto border-primary/40 bg-primary/10'
-                              : 'border-border/70 bg-muted/30'
-                          }`}
-                        >
-                          <div className="whitespace-pre-wrap break-all">{message.body}</div>
-                          <div className="mt-1 text-[11px] text-muted-foreground">
-                            #{message.seq_no} · {new Date(message.created_at).toLocaleString('ru-RU')}
+                        <div key={message.id}>
+                          {showDayDivider && (
+                            <div className="my-2 text-center text-[11px] text-muted-foreground">
+                              <span className="rounded-full border border-border/60 px-2 py-0.5">{formatDayDivider(message.created_at)}</span>
+                            </div>
+                          )}
+                          <div className={`group ${own ? 'ml-auto max-w-[85%] sm:max-w-[70%]' : 'mr-auto max-w-[92%] sm:max-w-[76%]'}`}>
+                            {!own && (
+                              <div className="mb-1 flex items-center gap-2 px-1">
+                                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground">
+                                  {getInitials(senderLabel)}
+                                </div>
+                                <div className="truncate text-[11px] text-muted-foreground">{senderLabel}</div>
+                              </div>
+                            )}
+                            <div
+                              className={`relative rounded-xl border px-3 py-2 text-sm ${
+                                own
+                                  ? 'border-primary/35 bg-primary/[0.14]'
+                                  : 'border-border/70 bg-muted/25'
+                              }`}
+                            >
+                              {replyTarget && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const indexInFull = messages.findIndex((m) => m.id === replyTarget.id)
+                                    if (indexInFull >= 0) {
+                                      setExpandedMessages((prev) => ({ ...prev, [replyTarget.id]: true }))
+                                    }
+                                  }}
+                                  className="mb-2 block w-full rounded border border-border/60 bg-background/40 px-2 py-1 text-left text-[11px] text-muted-foreground"
+                                >
+                                  Ответ на: {(membersById.get(replyTarget.sender_id) || replyTarget.sender_id)} · {replyTarget.body.slice(0, 80)}
+                                </button>
+                              )}
+
+                              <div className={`whitespace-pre-wrap break-all ${expandable && !expanded ? 'max-h-28 overflow-hidden' : ''}`}>
+                                {message.body}
+                              </div>
+                              {expandable && (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleMessageExpanded(message.id)}
+                                  className="mt-1 text-[11px] text-primary hover:underline"
+                                >
+                                  {expanded ? 'Свернуть' : 'Развернуть'}
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => setMenuOpenMessageId((prev) => (prev === message.id ? null : message.id))}
+                                className="absolute right-1 top-1 hidden rounded px-1 py-0.5 text-[12px] text-muted-foreground hover:bg-background/40 group-hover:block"
+                                aria-label="Действия с сообщением"
+                              >
+                                ⋯
+                              </button>
+                              {showMenu && (
+                                <div className="absolute right-1 top-7 z-20 min-w-[150px] rounded-md border border-border/70 bg-background p-1 shadow-lg">
+                                  <button
+                                    type="button"
+                                    onClick={() => void handleCopyMessage(message.body)}
+                                    className="w-full rounded px-2 py-1 text-left text-xs hover:bg-muted/40"
+                                  >
+                                    Копировать
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setReplyToMessageId(message.id)
+                                      setMenuOpenMessageId(null)
+                                      composerRef.current?.focus()
+                                    }}
+                                    className="w-full rounded px-2 py-1 text-left text-xs hover:bg-muted/40"
+                                  >
+                                    Ответить
+                                  </button>
+                                  {own && (
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleDeleteMessage(message.id)}
+                                      className="w-full rounded px-2 py-1 text-left text-xs text-destructive hover:bg-destructive/10"
+                                    >
+                                      Удалить
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <div className={`mt-1 px-1 text-[10px] text-muted-foreground ${own ? 'text-right' : 'text-left'}`}>
+                              #{message.seq_no} · {new Date(message.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                              {ownStatus && ` · ${ownStatus}`}
+                            </div>
                           </div>
                         </div>
                       )
                     })}
                   </>
                 )}
+                {newMessagesCount > 0 && !isNearBottom && (
+                  <div className="sticky bottom-2 mt-2 flex justify-center">
+                    <Button type="button" size="sm" onClick={scrollToLatest} className="h-8 rounded-full px-3">
+                      <ArrowDown className="mr-1 h-3.5 w-3.5" />
+                      {newMessagesCount} новых
+                    </Button>
+                  </div>
+                )}
               </div>
 
-              <div className="border-t border-border/60 p-3">
-                <div className="flex gap-2">
-                  <Input
+              <div className="sticky bottom-0 border-t border-border/60 bg-background/95 p-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+                {replyToMessage && (
+                  <div className="mb-2 flex items-center justify-between rounded-md border border-border/60 bg-muted/20 px-2 py-1 text-xs">
+                    <div className="truncate">
+                      Ответ на: <span className="text-muted-foreground">{getMessageOwnerLabel(replyToMessage)}</span> · {replyToMessage.body.slice(0, 90)}
+                    </div>
+                    <button type="button" onClick={() => setReplyToMessageId(null)} className="ml-2 rounded px-1 hover:bg-muted/50">
+                      ×
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex items-end gap-2">
+                  <textarea
+                    ref={composerRef}
                     value={draft}
-                    onChange={(e) => setDraft(e.target.value)}
+                    onChange={(e) => {
+                      setDraft(e.target.value)
+                      touchTypingActivity()
+                    }}
                     maxLength={MESSAGE_MAX_CHARS}
-                    placeholder={selectedChat ? 'Введите сообщение' : 'Сначала выберите чат'}
+                    rows={1}
+                    placeholder={selectedChat ? 'Напишите сообщение (Enter — отправить, Shift+Enter — новая строка)' : 'Сначала выберите чат'}
                     disabled={!selectedChat || sending}
+                    className="max-h-40 min-h-[40px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onBlur={() => stopTyping()}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault()

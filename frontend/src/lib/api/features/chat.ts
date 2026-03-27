@@ -43,6 +43,12 @@ export const chatApi = {
   deleteChat: (chatId: string) => api.delete<ApiResponse<null>>(`/chat/chats/${chatId}`),
   addMember: (chatId: string, data: { user_id: string; role?: 'owner' | 'admin' | 'member' | 'readonly' }) =>
     api.post<ApiResponse<ChatMemberInfo>>(`/chat/chats/${chatId}/members`, data),
+  listMembers: (chatId: string) =>
+    api.get<ApiResponse<ChatMemberInfo[]>>(`/chat/chats/${chatId}/members`),
+  getPresence: (chatId: string) =>
+    api.get<ApiResponse<Record<string, boolean>>>(`/chat/chats/${chatId}/presence`),
+  sendTyping: (chatId: string, is_typing = true) =>
+    api.post<ApiResponse<null>>(`/chat/chats/${chatId}/typing`, { is_typing }),
   listMessages: (
     chatId: string,
     params: { limit?: number; offset?: number; before_seq_no?: number; latest?: boolean } = {},
@@ -56,6 +62,8 @@ export const chatApi = {
   },
   sendMessage: (chatId: string, data: { body: string; body_type?: string; meta?: Record<string, unknown> }) =>
     api.post<ApiResponse<ChatMessageInfo>>(`/chat/chats/${chatId}/messages`, data),
+  deleteMessage: (messageId: string) =>
+    api.delete<ApiResponse<null>>(`/chat/messages/${messageId}`),
   updateReadCursor: (chatId: string, data: { last_read_seq_no: number }) =>
     api.post<ApiResponse<{ chat_id: string; user_id: string; last_read_seq_no: number }>>(
       `/chat/chats/${chatId}/read-cursor`,

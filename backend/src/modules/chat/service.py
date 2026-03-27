@@ -65,6 +65,12 @@ class ChatService:
     async def get_member_ids(self, *, chat_id: uuid.UUID) -> list[uuid.UUID]:
         return await self.repo.list_member_ids(chat_id=chat_id)
 
+    async def list_members_for_user(self, *, chat: Chat, user_id: uuid.UUID) -> list[ChatMember]:
+        member = await self.repo.get_chat_member(chat_id=chat.id, user_id=user_id)
+        if member is None:
+            raise ChatServiceError(code="FORBIDDEN", message="Нет доступа к чату", status_code=403)
+        return await self.repo.list_members(chat_id=chat.id)
+
     async def update_chat(
         self, *, chat: Chat, actor_id: uuid.UUID, body: UpdateChatRequest
     ) -> Chat:

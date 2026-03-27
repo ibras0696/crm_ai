@@ -48,6 +48,9 @@ class ConnectionManager:
             for connection in to_remove:
                 self.disconnect(connection, user_id)
 
+    def is_online(self, user_id: uuid.UUID) -> bool:
+        return bool(self.active_connections.get(user_id))
+
 
 manager = ConnectionManager()
 

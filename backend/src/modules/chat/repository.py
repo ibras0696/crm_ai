@@ -50,6 +50,10 @@ class ChatRepository:
         stmt = select(ChatMember.user_id).where(ChatMember.chat_id == chat_id).order_by(ChatMember.created_at.asc())
         return [row[0] for row in (await self.session.execute(stmt)).all()]
 
+    async def list_members(self, *, chat_id: uuid.UUID) -> list[ChatMember]:
+        stmt = select(ChatMember).where(ChatMember.chat_id == chat_id).order_by(ChatMember.created_at.asc())
+        return list((await self.session.execute(stmt)).scalars().all())
+
     async def get_chat_member(self, *, chat_id: uuid.UUID, user_id: uuid.UUID) -> ChatMember | None:
         stmt = select(ChatMember).where(ChatMember.chat_id == chat_id, ChatMember.user_id == user_id).limit(1)
         return (await self.session.execute(stmt)).scalar_one_or_none()

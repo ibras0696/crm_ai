@@ -3,7 +3,8 @@ import uuid
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.modules.chat.models import Chat, ChatMember, ChatMessage
+from src.modules.chat.models import Chat, ChatMember, ChatMessage, ChatUploadSession
+from src.modules.files.models import File
 from src.modules.org.models import Membership
 
 
@@ -111,6 +112,73 @@ class ChatRepository:
         self.session.add(message)
         await self.session.flush()
         return message
+
+    async def create_upload_session(self, upload: ChatUploadSession) -> ChatUploadSession:
+        self.session.add(upload)
+        await self.session.flush()
+        return upload
+
+    async def get_upload_session_for_user(
+        self,
+        *,
+        org_id: uuid.UUID,
+        chat_id: uuid.UUID,
+        user_id: uuid.UUID,
+        file_id: uuid.UUID,
+    ) -> ChatUploadSession | None:
+        stmt = (
+            select(ChatUploadSession)
+            .where(
+                ChatUploadSession.org_id == org_id,
+                ChatUploadSession.chat_id == chat_id,
+                ChatUploadSession.user_id == user_id,
+                ChatUploadSession.file_id == file_id,
+            )
+            .limit(1)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def get_upload_session_for_chat_file(
+        self,
+        *,
+        org_id: uuid.UUID,
+        chat_id: uuid.UUID,
+        file_id: uuid.UUID,
+    ) -> ChatUploadSession | None:
+        stmt = (
+            select(ChatUploadSession)
+            .where(
+                ChatUploadSession.org_id == org_id,
+                ChatUploadSession.chat_id == chat_id,
+                ChatUploadSession.file_id == file_id,
+            )
+            .limit(1)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def list_upload_sessions_for_user_files(
+        self,
+        *,
+        org_id: uuid.UUID,
+        chat_id: uuid.UUID,
+        user_id: uuid.UUID,
+        file_ids: list[uuid.UUID],
+    ) -> list[ChatUploadSession]:
+        if not file_ids:
+            return []
+        stmt = select(ChatUploadSession).where(
+            ChatUploadSession.org_id == org_id,
+            ChatUploadSession.chat_id == chat_id,
+            ChatUploadSession.user_id == user_id,
+            ChatUploadSession.file_id.in_(file_ids),
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def list_files_for_org_ids(self, *, org_id: uuid.UUID, file_ids: list[uuid.UUID]) -> list[File]:
+        if not file_ids:
+            return []
+        stmt = select(File).where(File.org_id == org_id, File.id.in_(file_ids))
+        return list((await self.session.execute(stmt)).scalars().all())
 
     async def get_message_for_org(self, *, message_id: uuid.UUID, org_id: uuid.UUID) -> ChatMessage | None:
         stmt = select(ChatMessage).where(ChatMessage.id == message_id, ChatMessage.org_id == org_id).limit(1)

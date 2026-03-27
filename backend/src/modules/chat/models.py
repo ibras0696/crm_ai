@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -66,3 +67,31 @@ class ChatMessage(BaseDBModel):
     body_type: Mapped[str] = mapped_column(String(40), nullable=False, server_default=text("'text_markdown'"))
     meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
+
+class ChatUploadSession(BaseDBModel):
+    __tablename__ = "chat_upload_sessions"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('uploading', 'ready', 'aborted', 'expired')",
+            name="ck_chat_upload_sessions_status_valid",
+        ),
+        CheckConstraint("expected_size > 0", name="ck_chat_upload_sessions_expected_size_positive"),
+        UniqueConstraint("file_id", name="uq_chat_upload_sessions_file_id"),
+    )
+
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    chat_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chats.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    file_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("files.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'uploading'"))
+    expected_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    expected_content_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)

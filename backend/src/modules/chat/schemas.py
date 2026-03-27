@@ -23,9 +23,41 @@ class AddChatMemberRequest(BaseModel):
 
 
 class SendChatMessageRequest(BaseModel):
-    body: str = Field(min_length=1, max_length=CHAT_MESSAGE_MAX_CHARS)
+    body: str = Field(default="", max_length=CHAT_MESSAGE_MAX_CHARS)
     body_type: str = Field(default="text_markdown", max_length=40)
     meta: dict | None = None
+
+
+class ChatAttachmentInitRequest(BaseModel):
+    filename: str = Field(min_length=1, max_length=500)
+    size_bytes: int = Field(gt=0)
+    content_type: str = Field(min_length=1, max_length=255)
+
+
+class ChatAttachmentInitOut(BaseModel):
+    file_id: uuid.UUID
+    upload_url: str
+    upload_headers: dict[str, str]
+    expires_in: int
+
+
+class ChatAttachmentFinishRequest(BaseModel):
+    file_id: uuid.UUID
+    size_bytes: int = Field(gt=0)
+
+
+class ChatAttachmentOut(BaseModel):
+    file_id: uuid.UUID
+    filename: str
+    original_name: str
+    content_type: str
+    size: int
+    status: str
+
+
+class ChatAttachmentDownloadOut(BaseModel):
+    url: str
+    expires_in: int
 
 
 class UpdateReadCursorRequest(BaseModel):

@@ -3,6 +3,7 @@
 import uuid
 from contextlib import suppress
 from typing import BinaryIO
+from urllib.parse import quote
 
 import boto3
 from botocore.config import Config
@@ -101,11 +102,51 @@ def delete_file(s3_key: str, bucket: str):
     s3.delete_object(Bucket=bucket, Key=s3_key)
 
 
-def generate_presigned_url(s3_key: str, bucket: str, expires_in: int = 3600) -> str:
+def head_object(s3_key: str, bucket: str) -> dict:
+    """Read object metadata from S3."""
+    s3 = get_s3_client()
+    return s3.head_object(Bucket=bucket, Key=s3_key)
+
+
+def generate_presigned_put_url(
+    *,
+    s3_key: str,
+    bucket: str,
+    content_type: str,
+    expires_in: int = 900,
+) -> tuple[str, dict[str, str]]:
+    """Generate presigned URL for direct object upload."""
     ensure_bucket()
     s3 = get_s3_presign_client()
+    url = s3.generate_presigned_url(
+        "put_object",
+        Params={"Bucket": bucket, "Key": s3_key, "ContentType": content_type},
+        ExpiresIn=expires_in,
+    )
+    return url, {"Content-Type": content_type}
+
+
+def generate_presigned_url(s3_key: str, bucket: str, expires_in: int = 3600) -> str:
+    return generate_presigned_get_url(s3_key=s3_key, bucket=bucket, expires_in=expires_in)
+
+
+def generate_presigned_get_url(
+    *,
+    s3_key: str,
+    bucket: str,
+    expires_in: int = 3600,
+    filename: str | None = None,
+    inline: bool = False,
+) -> str:
+    ensure_bucket()
+    s3 = get_s3_presign_client()
+    params = {"Bucket": bucket, "Key": s3_key}
+    if filename:
+        safe_filename = quote(filename.encode("utf-8"))
+        disposition = "inline" if inline else "attachment"
+        params["ResponseContentDisposition"] = f"{disposition}; filename*=UTF-8''{safe_filename}"
     return s3.generate_presigned_url(
         "get_object",
-        Params={"Bucket": bucket, "Key": s3_key},
+        Params=params,
         ExpiresIn=expires_in,
     )

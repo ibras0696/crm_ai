@@ -35,6 +35,18 @@ class Settings(BaseSettings):
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "application/vnd.ms-excel",
     ]
+    CHAT_ATTACHMENT_MAX_UPLOAD_MB: int = 100
+    CHAT_ATTACHMENT_MAX_FILES_PER_MESSAGE: int = 8
+    CHAT_ATTACHMENT_PRESIGNED_TTL_S: int = 900
+    CHAT_ATTACHMENT_ALLOWED_MIME_TYPES: list[str] = [
+        "image/png",
+        "image/jpeg",
+        "image/gif",
+        "image/webp",
+        "video/mp4",
+        "video/webm",
+        "video/quicktime",
+    ]
     # --------------------------------------------------------------------------
     # Docs Module Security & Pipeline
     # --------------------------------------------------------------------------
@@ -175,6 +187,27 @@ class Settings(BaseSettings):
     @field_validator("FILE_ALLOWED_MIME_TYPES", mode="before")
     @classmethod
     def _parse_file_allowed_mime_types(cls, v: Any) -> list[str]:
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return [str(x).strip().lower() for x in v if str(x).strip()]
+        if isinstance(v, str):
+            s = v.strip()
+            if not s:
+                return []
+            if s.startswith("["):
+                try:
+                    parsed = json.loads(s)
+                    if isinstance(parsed, list):
+                        return [str(x).strip().lower() for x in parsed if str(x).strip()]
+                except Exception:
+                    pass
+            return [p.strip().lower() for p in s.split(",") if p.strip()]
+        return [str(v).strip().lower()]
+
+    @field_validator("CHAT_ATTACHMENT_ALLOWED_MIME_TYPES", mode="before")
+    @classmethod
+    def _parse_chat_attachment_allowed_mime_types(cls, v: Any) -> list[str]:
         if v is None:
             return []
         if isinstance(v, list):

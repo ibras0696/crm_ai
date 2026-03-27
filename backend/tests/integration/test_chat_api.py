@@ -176,3 +176,78 @@ async def test_chat_message_length_and_empty_validation(client: AsyncClient):
     payload = only_spaces.json()
     assert payload["ok"] is False
     assert payload["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_chat_attachment_init_finish_send_and_download_url(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    token = await _register_owner(client, org_name="Chat Attachments Org")
+
+    created = await client.post(
+        "/api/v1/chat/chats",
+        json={
+            "chat_type": "group",
+            "title": "Attachments Chat",
+            "member_ids": [],
+        },
+        headers=_headers(token),
+    )
+    assert created.status_code == 200, f"Create chat failed: {created.text}"
+    chat_id = created.json()["data"]["id"]
+
+    monkeypatch.setattr(
+        "src.modules.chat.service.files_storage.generate_presigned_put_url",
+        lambda **kwargs: ("https://upload.example.com/put", {"Content-Type": kwargs["content_type"]}),
+    )
+    monkeypatch.setattr(
+        "src.modules.chat.service.files_storage.head_object",
+        lambda _s3_key, _bucket: {"ContentLength": 13},
+    )
+    monkeypatch.setattr(
+        "src.modules.chat.service.files_storage.generate_presigned_get_url",
+        lambda **_kwargs: "https://download.example.com/get",
+    )
+
+    init_upload = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/attachments/init-upload",
+        json={
+            "filename": "preview.png",
+            "size_bytes": 13,
+            "content_type": "image/png",
+        },
+        headers=_headers(token),
+    )
+    assert init_upload.status_code == 200, f"Init upload failed: {init_upload.text}"
+    assert init_upload.json()["ok"] is True
+    upload_data = init_upload.json()["data"]
+    file_id = upload_data["file_id"]
+    assert upload_data["upload_url"] == "https://upload.example.com/put"
+
+    finish_upload = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/attachments/finish-upload",
+        json={"file_id": file_id, "size_bytes": 13},
+        headers=_headers(token),
+    )
+    assert finish_upload.status_code == 200, f"Finish upload failed: {finish_upload.text}"
+    assert finish_upload.json()["ok"] is True
+    assert finish_upload.json()["data"]["status"] == "ready"
+
+    send_message = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/messages",
+        json={"body": "", "meta": {"attachment_ids": [file_id]}},
+        headers=_headers(token),
+    )
+    assert send_message.status_code == 200, f"Send message with attachment failed: {send_message.text}"
+    assert send_message.json()["ok"] is True
+    message_meta = send_message.json()["data"]["meta"]
+    assert isinstance(message_meta, dict)
+    assert message_meta["attachment_ids"] == [file_id]
+    assert len(message_meta["attachments"]) == 1
+    assert message_meta["attachments"][0]["file_id"] == file_id
+
+    download_url = await client.get(
+        f"/api/v1/chat/chats/{chat_id}/attachments/{file_id}/download-url",
+        headers=_headers(token),
+    )
+    assert download_url.status_code == 200, f"Get download URL failed: {download_url.text}"
+    assert download_url.json()["ok"] is True
+    assert download_url.json()["data"]["url"] == "https://download.example.com/get"

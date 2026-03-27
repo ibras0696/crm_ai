@@ -11,6 +11,11 @@ from src.modules.auth.dependencies import CurrentUser, require_roles
 from src.modules.chat.repository import ChatRepository
 from src.modules.chat.schemas import (
     AddChatMemberRequest,
+    ChatAttachmentDownloadOut,
+    ChatAttachmentFinishRequest,
+    ChatAttachmentInitOut,
+    ChatAttachmentInitRequest,
+    ChatAttachmentOut,
     ChatMemberOut,
     ChatMessageOut,
     ChatOut,
@@ -377,6 +382,127 @@ async def send_message(
     for member_id in member_ids:
         await ws_manager.send_personal_message(event_payload, member_id)
 
+    return ApiResponse(data=item)
+
+
+@router.post("/chats/{chat_id}/attachments/init-upload", response_model=ApiResponse[ChatAttachmentInitOut])
+async def init_attachment_upload(
+    chat_id: uuid.UUID,
+    body: ChatAttachmentInitRequest,
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE),
+    ),
+    _: None = Depends(require_access(resource_type="chat", permission="can_write", resource_id_param="chat_id")),
+):
+    async with UnitOfWork() as uow:
+        service = ChatService(uow.session)
+        chat = await service.get_chat_for_user(
+            chat_id=chat_id,
+            org_id=current_user.org_id,
+            user_id=current_user.user_id,
+        )
+        if chat is None:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": CHAT_NOT_FOUND_MESSAGE})
+        try:
+            payload = await service.init_attachment_upload(chat=chat, actor_id=current_user.user_id, body=body)
+        except ChatServiceError as error:
+            return _service_error(error)
+        await uow.commit()
+        item = ChatAttachmentInitOut.model_validate(payload)
+    return ApiResponse(data=item)
+
+
+@router.post("/chats/{chat_id}/attachments/finish-upload", response_model=ApiResponse[ChatAttachmentOut])
+async def finish_attachment_upload(
+    chat_id: uuid.UUID,
+    body: ChatAttachmentFinishRequest,
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE),
+    ),
+    _: None = Depends(require_access(resource_type="chat", permission="can_write", resource_id_param="chat_id")),
+):
+    async with UnitOfWork() as uow:
+        service = ChatService(uow.session)
+        chat = await service.get_chat_for_user(
+            chat_id=chat_id,
+            org_id=current_user.org_id,
+            user_id=current_user.user_id,
+        )
+        if chat is None:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": CHAT_NOT_FOUND_MESSAGE})
+        try:
+            uploaded = await service.finish_attachment_upload(chat=chat, actor_id=current_user.user_id, body=body)
+        except ChatServiceError as error:
+            return _service_error(error)
+        await uow.commit()
+        item = ChatAttachmentOut(
+            file_id=uploaded.id,
+            filename=uploaded.filename,
+            original_name=uploaded.original_name,
+            content_type=uploaded.content_type,
+            size=int(uploaded.size),
+            status=str(uploaded.status or "ready"),
+        )
+    return ApiResponse(data=item)
+
+
+@router.post("/chats/{chat_id}/attachments/{file_id}/abort-upload", response_model=ApiResponse[None])
+async def abort_attachment_upload(
+    chat_id: uuid.UUID,
+    file_id: uuid.UUID,
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE),
+    ),
+    _: None = Depends(require_access(resource_type="chat", permission="can_write", resource_id_param="chat_id")),
+):
+    async with UnitOfWork() as uow:
+        service = ChatService(uow.session)
+        chat = await service.get_chat_for_user(
+            chat_id=chat_id,
+            org_id=current_user.org_id,
+            user_id=current_user.user_id,
+        )
+        if chat is None:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": CHAT_NOT_FOUND_MESSAGE})
+        try:
+            await service.abort_attachment_upload(chat=chat, actor_id=current_user.user_id, file_id=file_id)
+        except ChatServiceError as error:
+            return _service_error(error)
+        await uow.commit()
+    return ApiResponse(data=None)
+
+
+@router.get(
+    "/chats/{chat_id}/attachments/{file_id}/download-url",
+    response_model=ApiResponse[ChatAttachmentDownloadOut],
+)
+async def get_attachment_download_url(
+    chat_id: uuid.UUID,
+    file_id: uuid.UUID,
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY),
+    ),
+    _: None = Depends(require_access(resource_type="chat", permission="can_read", resource_id_param="chat_id")),
+):
+    async with UnitOfWork() as uow:
+        service = ChatService(uow.session)
+        chat = await service.get_chat_for_user(
+            chat_id=chat_id,
+            org_id=current_user.org_id,
+            user_id=current_user.user_id,
+        )
+        if chat is None:
+            return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": CHAT_NOT_FOUND_MESSAGE})
+        try:
+            url = await service.get_attachment_download_url(
+                chat=chat,
+                user_id=current_user.user_id,
+                file_id=file_id,
+                expires_in=600,
+            )
+        except ChatServiceError as error:
+            return _service_error(error)
+        item = ChatAttachmentDownloadOut(url=url, expires_in=600)
     return ApiResponse(data=item)
 
 

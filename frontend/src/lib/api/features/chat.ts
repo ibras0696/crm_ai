@@ -19,8 +19,50 @@ export interface ChatMessageInfo {
   seq_no: number
   body: string
   body_type: string
-  meta: Record<string, unknown> | null
+  meta: ChatMessageMeta | null
   created_at: string
+}
+
+export interface ChatAttachmentInfo {
+  file_id: string
+  original_name: string
+  content_type: string
+  size: number
+  status: string
+}
+
+export interface ChatMessageMeta {
+  reply_to_message_id?: string
+  attachment_ids?: string[]
+  attachments?: ChatAttachmentInfo[]
+  [key: string]: unknown
+}
+
+export interface InitChatAttachmentUploadPayload {
+  filename: string
+  size_bytes: number
+  content_type: string
+}
+
+export interface InitChatAttachmentUploadResult {
+  file_id: string
+  upload_url: string
+  upload_headers: Record<string, string>
+  expires_in: number
+}
+
+export interface FinishChatAttachmentUploadPayload {
+  file_id: string
+  size_bytes: number
+}
+
+export interface ChatAttachmentResult {
+  file_id: string
+  filename: string
+  original_name: string
+  content_type: string
+  size: number
+  status: string
 }
 
 export interface ChatMemberInfo {
@@ -60,7 +102,7 @@ export const chatApi = {
     if (params.latest) query.set('latest', 'true')
     return api.get<ApiResponse<ChatMessageInfo[]>>(`/chat/chats/${chatId}/messages?${query.toString()}`)
   },
-  sendMessage: (chatId: string, data: { body: string; body_type?: string; meta?: Record<string, unknown> }) =>
+  sendMessage: (chatId: string, data: { body: string; body_type?: string; meta?: ChatMessageMeta }) =>
     api.post<ApiResponse<ChatMessageInfo>>(`/chat/chats/${chatId}/messages`, data),
   deleteMessage: (messageId: string) =>
     api.delete<ApiResponse<null>>(`/chat/messages/${messageId}`),
@@ -69,4 +111,12 @@ export const chatApi = {
       `/chat/chats/${chatId}/read-cursor`,
       data,
     ),
+  initAttachmentUpload: (chatId: string, data: InitChatAttachmentUploadPayload) =>
+    api.post<ApiResponse<InitChatAttachmentUploadResult>>(`/chat/chats/${chatId}/attachments/init-upload`, data),
+  finishAttachmentUpload: (chatId: string, data: FinishChatAttachmentUploadPayload) =>
+    api.post<ApiResponse<ChatAttachmentResult>>(`/chat/chats/${chatId}/attachments/finish-upload`, data),
+  abortAttachmentUpload: (chatId: string, fileId: string) =>
+    api.post<ApiResponse<null>>(`/chat/chats/${chatId}/attachments/${fileId}/abort-upload`, {}),
+  getAttachmentDownloadUrl: (chatId: string, fileId: string) =>
+    api.get<ApiResponse<{ url: string; expires_in: number }>>(`/chat/chats/${chatId}/attachments/${fileId}/download-url`),
 }

@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { isAxiosError } from 'axios'
-import { ArrowDown, ChevronLeft, ChevronRight, MessageSquare, Paperclip, Plus, Search, X } from 'lucide-react'
-import { chatApi, type ChatInfo, type ChatMemberInfo, type ChatMessageInfo } from '@/lib/api'
+import { ArrowDown, ChevronLeft, ChevronRight, Loader2, MessageSquare, Paperclip, Plus, Search, X } from 'lucide-react'
+import { chatApi, type ChatAttachmentInfo, type ChatInfo, type ChatMemberInfo, type ChatMessageInfo, type ChatMessageMeta } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -47,6 +47,178 @@ const MESSAGE_PAGE_SIZE = 50
 const MESSAGE_MAX_CHARS = 500
 const TYPING_TTL_MS = 3000
 const CHAT_SIDEBAR_COLLAPSED_STORAGE_KEY = 'chat.sidebar.collapsed.v1'
+const ATTACHMENT_URL_REFRESH_BUFFER_MS = 30_000
+
+type ComposerAttachmentStatus = 'uploading' | 'ready' | 'error'
+
+interface ComposerAttachment {
+  clientId: string
+  fileId: string
+  originalName: string
+  contentType: string
+  size: number
+  status: ComposerAttachmentStatus
+  error: string | null
+}
+
+interface CachedAttachmentDownloadUrl {
+  url: string
+  expiresAt: number
+  promise?: Promise<string>
+}
+
+const attachmentDownloadUrlCache = new Map<string, CachedAttachmentDownloadUrl>()
+
+function getMessageAttachments(message: ChatMessageInfo): ChatAttachmentInfo[] {
+  const attachments = message.meta?.attachments
+  if (!Array.isArray(attachments)) return []
+  return attachments.filter((item): item is ChatAttachmentInfo => {
+    return Boolean(
+      item &&
+        typeof item.file_id === 'string' &&
+        typeof item.original_name === 'string' &&
+        typeof item.content_type === 'string' &&
+        typeof item.size === 'number' &&
+        typeof item.status === 'string',
+    )
+  })
+}
+
+function isMediaAttachment(contentType: string): boolean {
+  const normalized = contentType.toLowerCase()
+  return normalized.startsWith('image/') || normalized.startsWith('video/')
+}
+
+function formatFileSize(size: number): string {
+  if (!Number.isFinite(size) || size < 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let value = size
+  let unitIndex = 0
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024
+    unitIndex += 1
+  }
+  const digits = value >= 10 || unitIndex === 0 ? 0 : 1
+  return `${value.toFixed(digits)} ${units[unitIndex]}`
+}
+
+async function getAttachmentDownloadUrl(chatId: string, fileId: string): Promise<string> {
+  const cacheKey = `${chatId}:${fileId}`
+  const now = Date.now()
+  const cached = attachmentDownloadUrlCache.get(cacheKey)
+  if (cached && cached.url && cached.expiresAt - ATTACHMENT_URL_REFRESH_BUFFER_MS > now) {
+    return cached.url
+  }
+  if (cached?.promise) {
+    return cached.promise
+  }
+
+  const promise = (async () => {
+    const response = await chatApi.getAttachmentDownloadUrl(chatId, fileId)
+    if (!response.data.ok || !response.data.data) {
+      throw new Error(response.data.error?.message || 'Не удалось получить ссылку на вложение')
+    }
+    const next = response.data.data
+    attachmentDownloadUrlCache.set(cacheKey, {
+      url: next.url,
+      expiresAt: Date.now() + next.expires_in * 1000,
+    })
+    return next.url
+  })()
+
+  attachmentDownloadUrlCache.set(cacheKey, {
+    url: cached?.url || '',
+    expiresAt: cached?.expiresAt || 0,
+    promise,
+  })
+
+  try {
+    return await promise
+  } catch (error) {
+    attachmentDownloadUrlCache.delete(cacheKey)
+    throw error
+  }
+}
+
+function AttachmentPreview({
+  chatId,
+  attachment,
+}: {
+  chatId: string
+  attachment: ChatAttachmentInfo
+}) {
+  const [downloadUrl, setDownloadUrl] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [errorText, setErrorText] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setErrorText('')
+    setDownloadUrl('')
+
+    void getAttachmentDownloadUrl(chatId, attachment.file_id)
+      .then((url) => {
+        if (cancelled) return
+        setDownloadUrl(url)
+        setLoading(false)
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return
+        setErrorText(extractApiError(error, 'Не удалось загрузить вложение'))
+        setLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [attachment.file_id, chatId])
+
+  if (loading) {
+    return <div className="text-xs text-muted-foreground">Загрузка вложения...</div>
+  }
+
+  if (errorText) {
+    return <div className="text-xs text-destructive">{errorText}</div>
+  }
+
+  if (isMediaAttachment(attachment.content_type)) {
+    if (attachment.content_type.toLowerCase().startsWith('image/')) {
+      return (
+        <a href={downloadUrl} target="_blank" rel="noreferrer" className="block">
+          <img
+            src={downloadUrl}
+            alt={attachment.original_name}
+            className="max-h-64 max-w-full rounded-lg border border-border/60 object-contain"
+          />
+        </a>
+      )
+    }
+
+    return (
+      <video
+        controls
+        src={downloadUrl}
+        className="max-h-80 max-w-full rounded-lg border border-border/60"
+      >
+        Ваш браузер не поддерживает видео.
+      </video>
+    )
+  }
+
+  return (
+    <a
+      href={downloadUrl}
+      target="_blank"
+      rel="noreferrer"
+      download={attachment.original_name}
+      className="inline-flex max-w-full items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-xs text-primary hover:bg-primary/5"
+    >
+      <span className="truncate">{attachment.original_name}</span>
+      <span className="shrink-0 text-muted-foreground">{formatFileSize(attachment.size)}</span>
+    </a>
+  )
+}
 
 export default function ChatPage() {
   const { members, user } = useAuth()
@@ -78,6 +250,7 @@ export default function ChatPage() {
 
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
+  const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([])
   const [isDesktopSidebarCollapsed, setIsDesktopSidebarCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false
     return window.localStorage.getItem(CHAT_SIDEBAR_COLLAPSED_STORAGE_KEY) === '1'
@@ -90,6 +263,8 @@ export default function ChatPage() {
   const selectedChatIdRef = useRef<string | null>(null)
   const messagesViewportRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null)
+  const attachmentUploadControllersRef = useRef<Record<string, AbortController>>({})
   const typingStopTimerRef = useRef<number | null>(null)
   const lastTypingSentAtRef = useRef(0)
 
@@ -186,6 +361,184 @@ export default function ChatPage() {
     if (/(https?:\/\/\S{80,})/i.test(body)) return true
     if (/^[\[{]/.test(body.trim()) && body.length > 120) return true
     return false
+  }
+
+  const readyComposerAttachments = useMemo(
+    () => composerAttachments.filter((item) => item.status === 'ready'),
+    [composerAttachments],
+  )
+  const hasUploadingAttachments = useMemo(
+    () => composerAttachments.some((item) => item.status === 'uploading'),
+    [composerAttachments],
+  )
+  const canSendMessage = Boolean(selectedChatId) && !sending && (draft.trim().length > 0 || readyComposerAttachments.length > 0)
+
+  const resetComposerAttachments = useCallback(() => {
+    for (const controller of Object.values(attachmentUploadControllersRef.current)) {
+      controller.abort()
+    }
+    attachmentUploadControllersRef.current = {}
+    setComposerAttachments([])
+    if (attachmentInputRef.current) {
+      attachmentInputRef.current.value = ''
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      resetComposerAttachments()
+    }
+  }, [resetComposerAttachments, selectedChatId])
+
+  const handleRemoveComposerAttachment = async (clientId: string) => {
+    const attachment = composerAttachments.find((item) => item.clientId === clientId)
+    if (!attachment) return
+
+    const controller = attachmentUploadControllersRef.current[clientId]
+    if (controller) {
+      controller.abort()
+      delete attachmentUploadControllersRef.current[clientId]
+    }
+
+    if (attachment.status === 'uploading' && selectedChatId && attachment.fileId) {
+      try {
+        await chatApi.abortAttachmentUpload(selectedChatId, attachment.fileId)
+      } catch {
+        // ignore abort cleanup errors
+      }
+    }
+
+    setComposerAttachments((prev) => prev.filter((item) => item.clientId !== clientId))
+    if (attachmentInputRef.current) {
+      attachmentInputRef.current.value = ''
+    }
+  }
+
+  const uploadComposerAttachment = async (file: File) => {
+    if (!selectedChatId) {
+      setErrorText('Сначала выберите чат')
+      return
+    }
+
+    const clientId = crypto.randomUUID()
+    const contentType = file.type || 'application/octet-stream'
+    setComposerAttachments((prev) => [
+      ...prev,
+      {
+        clientId,
+        fileId: '',
+        originalName: file.name,
+        contentType,
+        size: file.size,
+        status: 'uploading',
+        error: null,
+      },
+    ])
+
+    const controller = new AbortController()
+    attachmentUploadControllersRef.current[clientId] = controller
+    let uploadedFileId = ''
+
+    try {
+      const initResponse = await chatApi.initAttachmentUpload(selectedChatId, {
+        filename: file.name,
+        size_bytes: file.size,
+        content_type: contentType,
+      })
+      if (!initResponse.data.ok || !initResponse.data.data) {
+        throw new Error(initResponse.data.error?.message || 'Не удалось инициировать загрузку файла')
+      }
+
+      const initData = initResponse.data.data
+      uploadedFileId = initData.file_id
+      setComposerAttachments((prev) =>
+        prev.map((item) =>
+          item.clientId === clientId
+            ? {
+                ...item,
+                fileId: initData.file_id,
+              }
+            : item,
+        ),
+      )
+
+      const headers = new Headers(initData.upload_headers)
+      if (contentType && !headers.has('Content-Type')) {
+        headers.set('Content-Type', contentType)
+      }
+
+      const uploadResponse = await fetch(initData.upload_url, {
+        method: 'PUT',
+        headers,
+        body: file,
+        signal: controller.signal,
+      })
+      if (!uploadResponse.ok) {
+        throw new Error(`Не удалось загрузить файл (${uploadResponse.status})`)
+      }
+
+      const finishResponse = await chatApi.finishAttachmentUpload(selectedChatId, {
+        file_id: initData.file_id,
+        size_bytes: file.size,
+      })
+      if (!finishResponse.data.ok || !finishResponse.data.data) {
+        throw new Error(finishResponse.data.error?.message || 'Не удалось завершить загрузку файла')
+      }
+
+      const finished = finishResponse.data.data
+      setComposerAttachments((prev) =>
+        prev.map((item) =>
+          item.clientId === clientId
+            ? {
+                ...item,
+                fileId: finished.file_id,
+                originalName: finished.original_name,
+                contentType: finished.content_type,
+                size: finished.size,
+                status: 'ready',
+                error: null,
+              }
+            : item,
+        ),
+      )
+    } catch (error: unknown) {
+      if (uploadedFileId) {
+        try {
+          await chatApi.abortAttachmentUpload(selectedChatId, uploadedFileId)
+        } catch {
+          // ignore cleanup errors
+        }
+      }
+
+      const message = controller.signal.aborted ? 'Загрузка отменена' : extractApiError(error, 'Не удалось загрузить файл')
+      setComposerAttachments((prev) =>
+        prev.map((item) =>
+          item.clientId === clientId
+            ? {
+                ...item,
+                status: 'error',
+                error: message,
+              }
+            : item,
+        ),
+      )
+    } finally {
+      if (attachmentUploadControllersRef.current[clientId] === controller) {
+        delete attachmentUploadControllersRef.current[clientId]
+      }
+    }
+  }
+
+  const handleAttachmentInputChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files || [])
+    event.target.value = ''
+    if (files.length === 0) return
+    if (!selectedChatId) {
+      setErrorText('Сначала выберите чат')
+      return
+    }
+
+    await Promise.all(files.map((file) => uploadComposerAttachment(file)))
   }
 
   useEffect(() => {
@@ -634,7 +987,12 @@ export default function ChatPage() {
 
   const handleSend = async () => {
     const trimmedDraft = draft.trim()
-    if (!selectedChatId || !trimmedDraft || sending) return
+    if (!selectedChatId || sending) return
+    if (hasUploadingAttachments) {
+      setErrorText('Дождитесь завершения загрузки вложений')
+      return
+    }
+    if (!trimmedDraft && readyComposerAttachments.length === 0) return
     if (trimmedDraft.length > MESSAGE_MAX_CHARS) {
       setErrorText(`Сообщение не должно превышать ${MESSAGE_MAX_CHARS} символов`)
       return
@@ -642,7 +1000,14 @@ export default function ChatPage() {
     setSending(true)
     setErrorText('')
     try {
-      const meta = replyToMessageId ? { reply_to_message_id: replyToMessageId } : undefined
+      const attachmentIds = readyComposerAttachments.map((attachment) => attachment.fileId)
+      const meta: ChatMessageMeta | undefined =
+        replyToMessageId || attachmentIds.length > 0
+          ? {
+              ...(replyToMessageId ? { reply_to_message_id: replyToMessageId } : {}),
+              ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
+            }
+          : undefined
       const response = await chatApi.sendMessage(selectedChatId, { body: trimmedDraft, meta })
       if (response.data.ok && response.data.data) {
         const created = response.data.data
@@ -652,6 +1017,7 @@ export default function ChatPage() {
         }
         setDraft('')
         setReplyToMessageId(null)
+        resetComposerAttachments()
         stopTyping()
         requestAnimationFrame(scrollMessagesToBottom)
         await chatApi.updateReadCursor(selectedChatId, { last_read_seq_no: created.seq_no })
@@ -941,8 +1307,15 @@ export default function ChatPage() {
                       type="button"
                       size="icon"
                       variant="ghost"
-                      onClick={() => setErrorText('Вложения чата подключим следующим шагом.')}
+                      onClick={() => {
+                        if (!selectedChatId) {
+                          setErrorText('Сначала выберите чат')
+                          return
+                        }
+                        attachmentInputRef.current?.click()
+                      }}
                       aria-label="Вложения"
+                      title="Прикрепить файлы"
                     >
                       <Paperclip className="h-4 w-4" />
                     </Button>
@@ -987,10 +1360,16 @@ export default function ChatPage() {
                       const senderLabel = getMessageOwnerLabel(message)
                       const ownStatus = getOwnMessageStatus(message)
                       const expanded = Boolean(expandedMessages[message.id])
-                      const expandable = isExpandableMessage(message.body)
-                      const metaReplyToId = (message.meta as { reply_to_message_id?: string } | null)?.reply_to_message_id
+                      const hasBody = message.body.trim().length > 0
+                      const attachments = getMessageAttachments(message)
+                      const hasAttachments = attachments.length > 0
+                      const expandable = hasBody && isExpandableMessage(message.body)
+                      const metaReplyToId = message.meta?.reply_to_message_id
                       const replyTarget = metaReplyToId ? messages.find((m) => m.id === metaReplyToId) || null : null
                       const showMenu = menuOpenMessageId === message.id
+                      const replyPreviewText = replyTarget
+                        ? replyTarget.body.trim() || (getMessageAttachments(replyTarget).length > 0 ? 'Вложение' : '')
+                        : ''
 
                       return (
                         <div key={message.id}>
@@ -1030,17 +1409,22 @@ export default function ChatPage() {
                                     }`}
                                   >
                                     <div>Ответ на: {(membersById.get(replyTarget.sender_id) || replyTarget.sender_id)} ·</div>
-                                    <div className="mt-0.5 break-all">{replyTarget.body.slice(0, 80)}{replyTarget.body.length > 80 ? '…' : ''}</div>
+                                    <div className="mt-0.5 break-all">
+                                      {replyPreviewText.slice(0, 80)}
+                                      {replyPreviewText.length > 80 ? '…' : ''}
+                                    </div>
                                   </button>
                                 )}
 
-                                <div
-                                  className={`whitespace-pre-wrap break-all ${expandable && !expanded ? 'max-h-28 overflow-hidden' : ''} ${
-                                    own ? 'text-right' : 'text-left'
-                                  }`}
-                                >
-                                  {message.body}
-                                </div>
+                                {hasBody && (
+                                  <div
+                                    className={`whitespace-pre-wrap break-all ${expandable && !expanded ? 'max-h-28 overflow-hidden' : ''} ${
+                                      own ? 'text-right' : 'text-left'
+                                    }`}
+                                  >
+                                    {message.body}
+                                  </div>
+                                )}
                                 {expandable && (
                                   <button
                                     type="button"
@@ -1049,6 +1433,14 @@ export default function ChatPage() {
                                   >
                                     {expanded ? 'Свернуть' : 'Развернуть'}
                                   </button>
+                                )}
+
+                                {hasAttachments && (
+                                  <div className={`mt-2 space-y-2 ${own ? 'text-right' : 'text-left'}`}>
+                                    {attachments.map((attachment) => (
+                                      <AttachmentPreview key={attachment.file_id} chatId={message.chat_id} attachment={attachment} />
+                                    ))}
+                                  </div>
                                 )}
 
                                 <button
@@ -1122,7 +1514,8 @@ export default function ChatPage() {
                 {replyToMessage && (
                   <div className="mb-2 flex items-center justify-between rounded-md border border-border/60 bg-muted/20 px-2 py-1 text-xs">
                     <div className="truncate">
-                      Ответ на: <span className="text-muted-foreground">{getMessageOwnerLabel(replyToMessage)}</span> · {replyToMessage.body.slice(0, 90)}
+                      Ответ на: <span className="text-muted-foreground">{getMessageOwnerLabel(replyToMessage)}</span> ·{' '}
+                      {replyToMessage.body.trim() || (getMessageAttachments(replyToMessage).length > 0 ? 'Вложение' : '')}
                     </div>
                     <button type="button" onClick={() => setReplyToMessageId(null)} className="ml-2 rounded px-1 hover:bg-muted/50">
                       ×
@@ -1130,7 +1523,70 @@ export default function ChatPage() {
                   </div>
                 )}
 
+                {composerAttachments.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    {composerAttachments.map((attachment) => {
+                      const isUploading = attachment.status === 'uploading'
+                      const isReady = attachment.status === 'ready'
+                      const isError = attachment.status === 'error'
+                      return (
+                        <div
+                          key={attachment.clientId}
+                          className={`inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1 text-xs ${
+                            isReady
+                              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600'
+                              : isError
+                                ? 'border-destructive/30 bg-destructive/10 text-destructive'
+                                : 'border-primary/30 bg-primary/10 text-primary'
+                          }`}
+                        >
+                          {isUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
+                          <div className="min-w-0">
+                            <div className="max-w-[220px] truncate">{attachment.originalName}</div>
+                            <div className="text-[10px] opacity-80">
+                              {isUploading ? 'Загрузка...' : isReady ? formatFileSize(attachment.size) : attachment.error || 'Ошибка'}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleRemoveComposerAttachment(attachment.clientId)}
+                            className="ml-1 rounded-full p-0.5 hover:bg-black/10"
+                            aria-label={`Удалить вложение ${attachment.originalName}`}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                <input
+                  ref={attachmentInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(event) => void handleAttachmentInputChange(event)}
+                />
+
                 <div className="flex items-end gap-2">
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => {
+                      if (!selectedChatId) {
+                        setErrorText('Сначала выберите чат')
+                        return
+                      }
+                      attachmentInputRef.current?.click()
+                    }}
+                    disabled={!selectedChatId || sending}
+                    aria-label="Прикрепить файлы"
+                    title="Прикрепить файлы"
+                  >
+                    <Paperclip className="h-4 w-4" />
+                  </Button>
                   <textarea
                     ref={composerRef}
                     value={draft}
@@ -1145,15 +1601,16 @@ export default function ChatPage() {
                     className="max-h-40 min-h-[40px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onBlur={() => stopTyping()}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
+                      if (e.key === 'Enter' && !e.shiftKey && (draft.trim().length > 0 || readyComposerAttachments.length > 0)) {
                         e.preventDefault()
                         void handleSend()
                       }
                     }}
                   />
                   <Button
+                    type="button"
                     onClick={() => void handleSend()}
-                    disabled={!selectedChat || !draft.trim() || draft.trim().length > MESSAGE_MAX_CHARS || sending}
+                    disabled={!canSendMessage || draft.trim().length > MESSAGE_MAX_CHARS || hasUploadingAttachments}
                   >
                     {sending ? '...' : 'Отправить'}
                   </Button>

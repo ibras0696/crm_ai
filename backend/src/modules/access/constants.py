@@ -1,7 +1,7 @@
 """Module-level constants for access control."""
 
 # IMPORTANT: keep in sync with frontend and validation logic.
-RESOURCE_TYPES: list[str] = ["table", "knowledge", "ai", "schedule", "reports", "files"]
+RESOURCE_TYPES: list[str] = ["table", "knowledge", "ai", "schedule", "reports", "files", "chat"]
 
 # Organization membership roles that can be targets for role-based ACL rules.
 # "superadmin" is global and not part of regular org membership ACL.

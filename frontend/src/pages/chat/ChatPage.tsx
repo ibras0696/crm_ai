@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent } from 'react'
 import { isAxiosError } from 'axios'
-import { ArrowDown, ChevronLeft, ChevronRight, Image, Loader2, MessageSquare, Paperclip, Plus, Search, X } from 'lucide-react'
+import { ArrowDown, Camera, ChevronLeft, ChevronRight, Image, Loader2, MessageSquare, Paperclip, Plus, Search, Video, X } from 'lucide-react'
 import { chatApi, type ChatAttachmentInfo, type ChatInfo, type ChatMemberInfo, type ChatMessageInfo, type ChatMessageMeta } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
@@ -402,6 +402,8 @@ export default function ChatPage() {
   const messagesViewportRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
   const mediaAttachmentInputRef = useRef<HTMLInputElement | null>(null)
+  const cameraPhotoAttachmentInputRef = useRef<HTMLInputElement | null>(null)
+  const cameraVideoAttachmentInputRef = useRef<HTMLInputElement | null>(null)
   const fileAttachmentInputRef = useRef<HTMLInputElement | null>(null)
   const attachmentUploadControllersRef = useRef<Record<string, AbortController>>({})
   const typingStopTimerRef = useRef<number | null>(null)
@@ -519,6 +521,8 @@ export default function ChatPage() {
     attachmentUploadControllersRef.current = {}
     setComposerAttachments([])
     if (mediaAttachmentInputRef.current) mediaAttachmentInputRef.current.value = ''
+    if (cameraPhotoAttachmentInputRef.current) cameraPhotoAttachmentInputRef.current.value = ''
+    if (cameraVideoAttachmentInputRef.current) cameraVideoAttachmentInputRef.current.value = ''
     if (fileAttachmentInputRef.current) fileAttachmentInputRef.current.value = ''
   }, [])
 
@@ -548,6 +552,8 @@ export default function ChatPage() {
 
     setComposerAttachments((prev) => prev.filter((item) => item.clientId !== clientId))
     if (mediaAttachmentInputRef.current) mediaAttachmentInputRef.current.value = ''
+    if (cameraPhotoAttachmentInputRef.current) cameraPhotoAttachmentInputRef.current.value = ''
+    if (cameraVideoAttachmentInputRef.current) cameraVideoAttachmentInputRef.current.value = ''
     if (fileAttachmentInputRef.current) fileAttachmentInputRef.current.value = ''
   }
 
@@ -707,6 +713,14 @@ export default function ChatPage() {
     await handleAttachmentInputChange(event, 'media')
   }
 
+  const handleCameraPhotoInputChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    await handleAttachmentInputChange(event, 'media')
+  }
+
+  const handleCameraVideoInputChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    await handleAttachmentInputChange(event, 'media')
+  }
+
   const handleFileInputChange = async (event: ChangeEvent<HTMLInputElement>) => {
     await handleAttachmentInputChange(event, 'file')
   }
@@ -721,6 +735,30 @@ export default function ChatPage() {
       return
     }
     mediaAttachmentInputRef.current?.click()
+  }
+
+  const openCameraPhotoPicker = () => {
+    if (!selectedChatId) {
+      setErrorText('Сначала выберите чат')
+      return
+    }
+    if (composerAttachments.length >= 1 || hasUploadingAttachments) {
+      setErrorText('В сообщении может быть только 1 вложение')
+      return
+    }
+    cameraPhotoAttachmentInputRef.current?.click()
+  }
+
+  const openCameraVideoPicker = () => {
+    if (!selectedChatId) {
+      setErrorText('Сначала выберите чат')
+      return
+    }
+    if (composerAttachments.length >= 1 || hasUploadingAttachments) {
+      setErrorText('В сообщении может быть только 1 вложение')
+      return
+    }
+    cameraVideoAttachmentInputRef.current?.click()
   }
 
   const openFilePicker = () => {
@@ -1527,6 +1565,28 @@ export default function ChatPage() {
                       type="button"
                       size="icon"
                       variant="ghost"
+                      onClick={openCameraPhotoPicker}
+                      disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
+                      aria-label="Сделать фото с камеры"
+                      title="Камера фото"
+                    >
+                      <Camera className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      onClick={openCameraVideoPicker}
+                      disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
+                      aria-label="Снять видео с камеры"
+                      title="Камера видео"
+                    >
+                      <Video className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
                       onClick={openFilePicker}
                       disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
                       aria-label="Добавить файл"
@@ -1785,7 +1845,7 @@ export default function ChatPage() {
                   </div>
                 )}
                 <div className="mb-2 text-xs text-muted-foreground">
-                  Вложения: 1 файл до {CHAT_ATTACHMENT_MAX_MB} MB. Кнопки отдельно: Фото/Видео и Файл. Скриншот можно вставить из буфера.
+                  Вложения: 1 файл до {CHAT_ATTACHMENT_MAX_MB} MB. Есть отдельные действия: Фото/Видео, Камера фото, Камера видео и Файл. Скриншот можно вставить из буфера.
                 </div>
 
                 <input
@@ -1794,6 +1854,22 @@ export default function ChatPage() {
                   accept="image/*,video/*"
                   className="hidden"
                   onChange={(event) => void handleMediaInputChange(event)}
+                />
+                <input
+                  ref={cameraPhotoAttachmentInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(event) => void handleCameraPhotoInputChange(event)}
+                />
+                <input
+                  ref={cameraVideoAttachmentInputRef}
+                  type="file"
+                  accept="video/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(event) => void handleCameraVideoInputChange(event)}
                 />
                 <input
                   ref={fileAttachmentInputRef}

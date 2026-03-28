@@ -212,13 +212,15 @@ function getMessageAttachments(message: ChatMessageInfo): ChatAttachmentInfo[] {
 }
 
 function inferMediaKind(contentType: string, originalName: string): 'image' | 'video' | 'file' {
-  const mime = String(contentType || '').toLowerCase()
-  if (mime.startsWith('image/')) return 'image'
-  if (mime.startsWith('video/')) return 'video'
+  const mime = String(contentType || '').trim().toLowerCase()
+  if (mime.startsWith('image/') || mime.includes('image/')) return 'image'
+  if (mime.startsWith('video/') || mime.includes('video/')) return 'video'
 
-  const ext = originalName.toLowerCase().split('.').pop() || ''
-  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) return 'image'
-  if (['mp4', 'webm', 'mov', 'm4v', 'avi', 'mkv'].includes(ext)) return 'video'
+  const name = decodeURIComponent(String(originalName || ''))
+    .trim()
+    .toLowerCase()
+  if (/\.(png|jpe?g|gif|webp|bmp|svg|heic|heif|avif)(?:$|[?#\s])/i.test(name)) return 'image'
+  if (/\.(mp4|webm|mov|m4v|avi|mkv)(?:$|[?#\s])/i.test(name)) return 'video'
   return 'file'
 }
 

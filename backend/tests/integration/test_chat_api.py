@@ -315,3 +315,126 @@ async def test_chat_attachment_limits_one_file_and_10mb(client: AsyncClient, mon
     assert too_many_attachment_ids.status_code == 200, f"Too many attachment IDs failed: {too_many_attachment_ids.text}"
     assert too_many_attachment_ids.json()["ok"] is False
     assert too_many_attachment_ids.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_chat_voice_note_allows_audio_up_to_1_minute(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    token = await _register_owner(client, org_name="Chat Voice Note Org")
+
+    created = await client.post(
+        "/api/v1/chat/chats",
+        json={
+            "chat_type": "group",
+            "title": "Voice Chat",
+            "member_ids": [],
+        },
+        headers=_headers(token),
+    )
+    assert created.status_code == 200, f"Create chat failed: {created.text}"
+    chat_id = created.json()["data"]["id"]
+
+    monkeypatch.setattr(
+        "src.modules.chat.service.files_storage.generate_presigned_put_url",
+        lambda **kwargs: ("https://upload.example.com/put", {"Content-Type": kwargs["content_type"]}),
+    )
+    monkeypatch.setattr(
+        "src.modules.chat.service.files_storage.head_object",
+        lambda _s3_key, _bucket: {"ContentLength": 2048},
+    )
+
+    init_upload = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/attachments/init-upload",
+        json={
+            "filename": "voice-note.ogg",
+            "size_bytes": 2048,
+            "content_type": "audio/ogg",
+        },
+        headers=_headers(token),
+    )
+    assert init_upload.status_code == 200, f"Init upload failed: {init_upload.text}"
+    assert init_upload.json()["ok"] is True
+    file_id = init_upload.json()["data"]["file_id"]
+
+    finish_upload = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/attachments/finish-upload",
+        json={"file_id": file_id, "size_bytes": 2048},
+        headers=_headers(token),
+    )
+    assert finish_upload.status_code == 200, f"Finish upload failed: {finish_upload.text}"
+    assert finish_upload.json()["ok"] is True
+
+    send_voice = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/messages",
+        json={
+            "body": "",
+            "meta": {
+                "attachment_ids": [file_id],
+                "voice_note": {"file_id": file_id, "duration_ms": 59_000},
+            },
+        },
+        headers=_headers(token),
+    )
+    assert send_voice.status_code == 200, f"Send voice message failed: {send_voice.text}"
+    assert send_voice.json()["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_chat_voice_note_rejects_duration_over_1_minute(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    token = await _register_owner(client, org_name="Chat Voice Note Limit Org")
+
+    created = await client.post(
+        "/api/v1/chat/chats",
+        json={
+            "chat_type": "group",
+            "title": "Voice Chat Limit",
+            "member_ids": [],
+        },
+        headers=_headers(token),
+    )
+    assert created.status_code == 200, f"Create chat failed: {created.text}"
+    chat_id = created.json()["data"]["id"]
+
+    monkeypatch.setattr(
+        "src.modules.chat.service.files_storage.generate_presigned_put_url",
+        lambda **kwargs: ("https://upload.example.com/put", {"Content-Type": kwargs["content_type"]}),
+    )
+    monkeypatch.setattr(
+        "src.modules.chat.service.files_storage.head_object",
+        lambda _s3_key, _bucket: {"ContentLength": 4096},
+    )
+
+    init_upload = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/attachments/init-upload",
+        json={
+            "filename": "voice-limit.ogg",
+            "size_bytes": 4096,
+            "content_type": "audio/ogg",
+        },
+        headers=_headers(token),
+    )
+    assert init_upload.status_code == 200, f"Init upload failed: {init_upload.text}"
+    assert init_upload.json()["ok"] is True
+    file_id = init_upload.json()["data"]["file_id"]
+
+    finish_upload = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/attachments/finish-upload",
+        json={"file_id": file_id, "size_bytes": 4096},
+        headers=_headers(token),
+    )
+    assert finish_upload.status_code == 200, f"Finish upload failed: {finish_upload.text}"
+    assert finish_upload.json()["ok"] is True
+
+    send_voice = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/messages",
+        json={
+            "body": "",
+            "meta": {
+                "attachment_ids": [file_id],
+                "voice_note": {"file_id": file_id, "duration_ms": 61_000},
+            },
+        },
+        headers=_headers(token),
+    )
+    assert send_voice.status_code == 200, f"Voice limit request failed: {send_voice.text}"
+    assert send_voice.json()["ok"] is False
+    assert send_voice.json()["error"]["code"] == "VALIDATION_ERROR"

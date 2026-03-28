@@ -35,6 +35,10 @@ export interface ChatMessageMeta {
   reply_to_message_id?: string
   attachment_ids?: string[]
   attachments?: ChatAttachmentInfo[]
+  voice_note?: {
+    file_id?: string
+    duration_ms: number
+  }
   [key: string]: unknown
 }
 

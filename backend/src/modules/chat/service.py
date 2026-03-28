@@ -33,6 +33,7 @@ class ChatService:
     CHAT_WRITE_ROLES: ClassVar[set[str]] = {"owner", "admin", "member"}
     CHAT_ADMIN_ROLES: ClassVar[set[str]] = {"owner", "admin"}
     CHAT_ALLOWED_ATTACHMENT_STATUSES: ClassVar[set[str]] = {"ready"}
+    VOICE_NOTE_MAX_DURATION_MS: ClassVar[int] = 60_000
 
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -155,6 +156,7 @@ class ChatService:
                 code="VALIDATION_ERROR",
                 message=f"Сообщение не должно превышать {CHAT_MESSAGE_MAX_CHARS} символов",
             )
+        self._validate_voice_note_meta(meta=body.meta, attachments=attachments)
         message_meta = self._normalize_message_meta(meta=body.meta, attachments=attachments)
 
         seq_no = await self.repo.next_seq_no(chat_id=chat.id)
@@ -480,6 +482,38 @@ class ChatService:
             payload.pop("attachment_ids", None)
             payload.pop("attachments", None)
         return payload or None
+
+    @classmethod
+    def _validate_voice_note_meta(cls, *, meta: dict | None, attachments: list[dict]) -> None:
+        if not isinstance(meta, dict):
+            return
+
+        voice_note = meta.get("voice_note")
+        if voice_note is None:
+            return
+        if not isinstance(voice_note, dict):
+            raise ChatServiceError(code="VALIDATION_ERROR", message="voice_note должен быть объектом")
+
+        duration_raw = voice_note.get("duration_ms")
+        try:
+            duration_ms = int(duration_raw)
+        except (TypeError, ValueError) as exc:
+            raise ChatServiceError(code="VALIDATION_ERROR", message="voice_note.duration_ms должен быть числом") from exc
+        if duration_ms <= 0 or duration_ms > cls.VOICE_NOTE_MAX_DURATION_MS:
+            raise ChatServiceError(code="VALIDATION_ERROR", message="Голосовое сообщение не должно превышать 1 минуту")
+
+        audio_attachments = [
+            item for item in attachments if str(item.get("content_type") or "").strip().lower().startswith("audio/")
+        ]
+        if len(audio_attachments) != 1:
+            raise ChatServiceError(
+                code="VALIDATION_ERROR",
+                message="voice_note поддерживается только с одним аудио-вложением",
+            )
+
+        voice_file_id = str(voice_note.get("file_id") or "").strip()
+        if voice_file_id and voice_file_id != str(audio_attachments[0].get("file_id") or ""):
+            raise ChatServiceError(code="VALIDATION_ERROR", message="voice_note.file_id не совпадает с аудио-вложением")
 
     @staticmethod
     def _extract_attachment_ids(meta: dict | None) -> list[uuid.UUID]:

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent } from 'react'
 import { isAxiosError } from 'axios'
-import { ArrowDown, Camera, ChevronLeft, ChevronRight, Image, Loader2, MessageSquare, Paperclip, Plus, Search, Video, X } from 'lucide-react'
+import { ArrowDown, Camera, ChevronLeft, ChevronRight, Image, Loader2, MessageSquare, Mic, Paperclip, Plus, Search, Square, Video, X } from 'lucide-react'
 import { chatApi, type ChatAttachmentInfo, type ChatInfo, type ChatMemberInfo, type ChatMessageInfo, type ChatMessageMeta } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
@@ -50,9 +50,11 @@ const CHAT_SIDEBAR_COLLAPSED_STORAGE_KEY = 'chat.sidebar.collapsed.v1'
 const ATTACHMENT_URL_REFRESH_BUFFER_MS = 30_000
 const CHAT_ATTACHMENT_MAX_MB = 5
 const CHAT_ATTACHMENT_MAX_BYTES = CHAT_ATTACHMENT_MAX_MB * 1024 * 1024
+const VOICE_NOTE_MAX_DURATION_MS = 60_000
+const VOICE_NOTE_TICK_MS = 250
 
 type ComposerAttachmentStatus = 'uploading' | 'ready' | 'error'
-type ComposerAttachmentSource = 'media' | 'file' | 'paste'
+type ComposerAttachmentSource = 'media' | 'file' | 'paste' | 'voice'
 
 interface ComposerAttachment {
   clientId: string
@@ -60,6 +62,7 @@ interface ComposerAttachment {
   originalName: string
   contentType: string
   size: number
+  durationMs: number | null
   status: ComposerAttachmentStatus
   error: string | null
 }
@@ -108,6 +111,10 @@ function inferContentTypeFromName(filename: string): string {
   if (['m4v'].includes(ext)) return 'video/x-m4v'
   if (['avi'].includes(ext)) return 'video/x-msvideo'
   if (['mkv'].includes(ext)) return 'video/x-matroska'
+  if (['ogg', 'oga', 'opus'].includes(ext)) return 'audio/ogg'
+  if (['mp3'].includes(ext)) return 'audio/mpeg'
+  if (['m4a'].includes(ext)) return 'audio/mp4'
+  if (['wav'].includes(ext)) return 'audio/wav'
   return 'application/octet-stream'
 }
 
@@ -211,22 +218,59 @@ function getMessageAttachments(message: ChatMessageInfo): ChatAttachmentInfo[] {
   return result
 }
 
-function inferMediaKind(contentType: string, originalName: string): 'image' | 'video' | 'file' {
+function inferMediaKind(contentType: string, originalName: string): 'image' | 'video' | 'audio' | 'file' {
   const mime = String(contentType || '').trim().toLowerCase()
   if (mime.startsWith('image/') || mime.includes('image/')) return 'image'
   if (mime.startsWith('video/') || mime.includes('video/')) return 'video'
+  if (mime.startsWith('audio/') || mime.includes('audio/')) return 'audio'
 
   const name = decodeURIComponent(String(originalName || ''))
     .trim()
     .toLowerCase()
   if (/\.(png|jpe?g|gif|webp|bmp|svg|heic|heif|avif)(?:$|[?#\s])/i.test(name)) return 'image'
   if (/\.(mp4|webm|mov|m4v|avi|mkv)(?:$|[?#\s])/i.test(name)) return 'video'
+  if (/\.(ogg|oga|opus|mp3|m4a|wav)(?:$|[?#\s])/i.test(name)) return 'audio'
   return 'file'
 }
 
 function isMediaAttachment(contentType: string): boolean {
   const normalized = contentType.toLowerCase()
   return normalized.startsWith('image/') || normalized.startsWith('video/')
+}
+
+function isVoiceAttachment(contentType: string): boolean {
+  return String(contentType || '').trim().toLowerCase().startsWith('audio/')
+}
+
+function formatDurationLabel(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.ceil(durationMs / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
+function resolveVoiceRecorderMimeType(): string {
+  if (typeof MediaRecorder === 'undefined') return ''
+  const candidates = [
+    'audio/ogg;codecs=opus',
+    'audio/webm;codecs=opus',
+    'audio/ogg',
+    'audio/webm',
+  ]
+  for (const mimeType of candidates) {
+    if (MediaRecorder.isTypeSupported(mimeType)) return mimeType
+  }
+  return ''
+}
+
+function getVoiceFileExtension(mimeType: string): string {
+  const normalized = String(mimeType || '').toLowerCase()
+  if (normalized.includes('ogg')) return 'ogg'
+  if (normalized.includes('webm')) return 'webm'
+  if (normalized.includes('mpeg')) return 'mp3'
+  if (normalized.includes('wav')) return 'wav'
+  if (normalized.includes('mp4')) return 'm4a'
+  return 'ogg'
 }
 
 function formatFileSize(size: number): string {
@@ -345,6 +389,16 @@ function AttachmentPreview({
       </video>
     )
   }
+  if (mediaKind === 'audio') {
+    return (
+      <div className="max-w-full rounded-lg border border-border/60 bg-background/20 p-2">
+        <audio controls preload="metadata" src={downloadUrl} className="w-full min-w-[220px] max-w-full">
+          Ваш браузер не поддерживает аудио.
+        </audio>
+        <div className="mt-1 truncate text-[11px] text-muted-foreground">{attachment.original_name}</div>
+      </div>
+    )
+  }
 
   return (
     <a
@@ -391,6 +445,8 @@ export default function ChatPage() {
   const [draft, setDraft] = useState('')
   const [sending, setSending] = useState(false)
   const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([])
+  const [isRecordingVoice, setIsRecordingVoice] = useState(false)
+  const [voiceRecordingElapsedMs, setVoiceRecordingElapsedMs] = useState(0)
   const [isDesktopSidebarCollapsed, setIsDesktopSidebarCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false
     return window.localStorage.getItem(CHAT_SIDEBAR_COLLAPSED_STORAGE_KEY) === '1'
@@ -410,6 +466,14 @@ export default function ChatPage() {
   const attachmentUploadControllersRef = useRef<Record<string, AbortController>>({})
   const typingStopTimerRef = useRef<number | null>(null)
   const lastTypingSentAtRef = useRef(0)
+  const voiceRecorderRef = useRef<MediaRecorder | null>(null)
+  const voiceStreamRef = useRef<MediaStream | null>(null)
+  const voiceChunksRef = useRef<Blob[]>([])
+  const voiceStopTimerRef = useRef<number | null>(null)
+  const voiceTickTimerRef = useRef<number | null>(null)
+  const voiceShouldUploadOnStopRef = useRef(true)
+  const voiceDurationOnStopRef = useRef(0)
+  const voiceElapsedMsRef = useRef(0)
 
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId
@@ -516,11 +580,43 @@ export default function ChatPage() {
   )
   const canSendMessage = Boolean(selectedChatId) && !sending && (draft.trim().length > 0 || readyComposerAttachments.length > 0)
 
+  const clearVoiceRecordingTimers = () => {
+    if (voiceStopTimerRef.current !== null) {
+      window.clearTimeout(voiceStopTimerRef.current)
+      voiceStopTimerRef.current = null
+    }
+    if (voiceTickTimerRef.current !== null) {
+      window.clearInterval(voiceTickTimerRef.current)
+      voiceTickTimerRef.current = null
+    }
+  }
+
+  const stopVoiceStreamTracks = () => {
+    const stream = voiceStreamRef.current
+    if (!stream) return
+    for (const track of stream.getTracks()) {
+      track.stop()
+    }
+    voiceStreamRef.current = null
+  }
+
   const resetComposerAttachments = useCallback(() => {
     for (const controller of Object.values(attachmentUploadControllersRef.current)) {
       controller.abort()
     }
     attachmentUploadControllersRef.current = {}
+    clearVoiceRecordingTimers()
+    const recorder = voiceRecorderRef.current
+    if (recorder && recorder.state !== 'inactive') {
+      voiceShouldUploadOnStopRef.current = false
+      recorder.stop()
+    }
+    voiceRecorderRef.current = null
+    voiceChunksRef.current = []
+    voiceElapsedMsRef.current = 0
+    setIsRecordingVoice(false)
+    setVoiceRecordingElapsedMs(0)
+    stopVoiceStreamTracks()
     setComposerAttachments([])
     if (mediaAttachmentInputRef.current) mediaAttachmentInputRef.current.value = ''
     if (cameraPhotoAttachmentInputRef.current) cameraPhotoAttachmentInputRef.current.value = ''
@@ -559,9 +655,17 @@ export default function ChatPage() {
     if (fileAttachmentInputRef.current) fileAttachmentInputRef.current.value = ''
   }
 
-  const uploadComposerAttachment = async (file: File, source: ComposerAttachmentSource) => {
+  const uploadComposerAttachment = async (
+    file: File,
+    source: ComposerAttachmentSource,
+    options?: { durationMs?: number | null },
+  ) => {
     if (!selectedChatId) {
       setErrorText('Сначала выберите чат')
+      return
+    }
+    if (isRecordingVoice) {
+      setErrorText('Остановите запись голосового перед добавлением другого вложения')
       return
     }
     if (composerAttachments.length >= 1 || hasUploadingAttachments) {
@@ -573,6 +677,17 @@ export default function ChatPage() {
     if (source === 'media' || source === 'paste') {
       if (!isMediaAttachment(contentType)) {
         setErrorText('Кнопка "Фото/Видео" принимает только фото и видео')
+        return
+      }
+    }
+    if (source === 'voice') {
+      if (!isVoiceAttachment(contentType)) {
+        setErrorText('Голосовые сообщения должны быть в аудио-формате')
+        return
+      }
+      const durationMs = Number(options?.durationMs || 0)
+      if (!Number.isFinite(durationMs) || durationMs <= 0 || durationMs > VOICE_NOTE_MAX_DURATION_MS) {
+        setErrorText('Голосовое сообщение не должно превышать 1 минуту')
         return
       }
     }
@@ -594,6 +709,7 @@ export default function ChatPage() {
         originalName: file.name,
         contentType,
         size: file.size,
+        durationMs: typeof options?.durationMs === 'number' ? options.durationMs : null,
         status: 'uploading',
         error: null,
       },
@@ -659,6 +775,7 @@ export default function ChatPage() {
                 originalName: finished.original_name,
                 contentType: finished.content_type,
                 size: finished.size,
+                durationMs: item.durationMs,
                 status: 'ready',
                 error: null,
               }
@@ -704,6 +821,10 @@ export default function ChatPage() {
       setErrorText('Сначала выберите чат')
       return
     }
+    if (isRecordingVoice) {
+      setErrorText('Сначала остановите запись голосового')
+      return
+    }
     if (files.length > 1 || composerAttachments.length >= 1 || hasUploadingAttachments) {
       setErrorText('В сообщении может быть только 1 вложение')
       return
@@ -732,6 +853,10 @@ export default function ChatPage() {
       setErrorText('Сначала выберите чат')
       return
     }
+    if (isRecordingVoice) {
+      setErrorText('Остановите запись голосового перед добавлением другого вложения')
+      return
+    }
     if (composerAttachments.length >= 1 || hasUploadingAttachments) {
       setErrorText('В сообщении может быть только 1 вложение')
       return
@@ -742,6 +867,10 @@ export default function ChatPage() {
   const openCameraPhotoPicker = () => {
     if (!selectedChatId) {
       setErrorText('Сначала выберите чат')
+      return
+    }
+    if (isRecordingVoice) {
+      setErrorText('Остановите запись голосового перед добавлением другого вложения')
       return
     }
     if (composerAttachments.length >= 1 || hasUploadingAttachments) {
@@ -756,6 +885,10 @@ export default function ChatPage() {
       setErrorText('Сначала выберите чат')
       return
     }
+    if (isRecordingVoice) {
+      setErrorText('Остановите запись голосового перед добавлением другого вложения')
+      return
+    }
     if (composerAttachments.length >= 1 || hasUploadingAttachments) {
       setErrorText('В сообщении может быть только 1 вложение')
       return
@@ -768,11 +901,132 @@ export default function ChatPage() {
       setErrorText('Сначала выберите чат')
       return
     }
+    if (isRecordingVoice) {
+      setErrorText('Остановите запись голосового перед добавлением другого вложения')
+      return
+    }
     if (composerAttachments.length >= 1 || hasUploadingAttachments) {
       setErrorText('В сообщении может быть только 1 вложение')
       return
     }
     fileAttachmentInputRef.current?.click()
+  }
+
+  const stopVoiceRecording = (uploadAfterStop = true) => {
+    const recorder = voiceRecorderRef.current
+    if (!recorder || recorder.state === 'inactive') {
+      clearVoiceRecordingTimers()
+      setIsRecordingVoice(false)
+      setVoiceRecordingElapsedMs(0)
+      voiceElapsedMsRef.current = 0
+      stopVoiceStreamTracks()
+      return
+    }
+    voiceShouldUploadOnStopRef.current = uploadAfterStop
+    voiceDurationOnStopRef.current = Math.min(voiceElapsedMsRef.current, VOICE_NOTE_MAX_DURATION_MS)
+    recorder.stop()
+  }
+
+  const startVoiceRecording = async () => {
+    if (!selectedChatId) {
+      setErrorText('Сначала выберите чат')
+      return
+    }
+    if (isRecordingVoice) {
+      stopVoiceRecording(true)
+      return
+    }
+    if (composerAttachments.length >= 1 || hasUploadingAttachments) {
+      setErrorText('В сообщении может быть только 1 вложение')
+      return
+    }
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setErrorText('Запись голосовых не поддерживается в этом браузере')
+      return
+    }
+
+    setErrorText('')
+    setVoiceRecordingElapsedMs(0)
+    voiceElapsedMsRef.current = 0
+    voiceChunksRef.current = []
+    voiceShouldUploadOnStopRef.current = true
+    voiceDurationOnStopRef.current = 0
+
+    const mimeType = resolveVoiceRecorderMimeType()
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      voiceStreamRef.current = stream
+
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+      voiceRecorderRef.current = recorder
+      setIsRecordingVoice(true)
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          voiceChunksRef.current.push(event.data)
+        }
+      }
+
+      recorder.onerror = () => {
+        setErrorText('Ошибка записи голосового сообщения')
+        clearVoiceRecordingTimers()
+        setIsRecordingVoice(false)
+        setVoiceRecordingElapsedMs(0)
+        stopVoiceStreamTracks()
+      }
+
+      recorder.onstop = () => {
+        clearVoiceRecordingTimers()
+        setIsRecordingVoice(false)
+        stopVoiceStreamTracks()
+        const durationMs = Math.min(
+          voiceDurationOnStopRef.current || voiceElapsedMsRef.current,
+          VOICE_NOTE_MAX_DURATION_MS,
+        )
+        setVoiceRecordingElapsedMs(0)
+        voiceElapsedMsRef.current = 0
+        const shouldUpload = voiceShouldUploadOnStopRef.current
+        const chunks = [...voiceChunksRef.current]
+        voiceChunksRef.current = []
+        voiceRecorderRef.current = null
+
+        if (!shouldUpload || chunks.length === 0) return
+        if (durationMs <= 0) {
+          setErrorText('Не удалось определить длительность голосового сообщения')
+          return
+        }
+
+        const finalMimeType = recorder.mimeType || mimeType || 'audio/webm'
+        const extension = getVoiceFileExtension(finalMimeType)
+        const voiceBlob = new Blob(chunks, { type: finalMimeType })
+        const voiceFile = new File([voiceBlob], `voice-${Date.now()}.${extension}`, { type: finalMimeType })
+        void uploadComposerAttachment(voiceFile, 'voice', { durationMs })
+      }
+
+      recorder.start(VOICE_NOTE_TICK_MS)
+      voiceTickTimerRef.current = window.setInterval(() => {
+        setVoiceRecordingElapsedMs((prev) => {
+          const next = prev + VOICE_NOTE_TICK_MS
+          voiceElapsedMsRef.current = next
+          if (next >= VOICE_NOTE_MAX_DURATION_MS) {
+            stopVoiceRecording(true)
+            return VOICE_NOTE_MAX_DURATION_MS
+          }
+          return next
+        })
+      }, VOICE_NOTE_TICK_MS)
+      voiceStopTimerRef.current = window.setTimeout(() => {
+        stopVoiceRecording(true)
+      }, VOICE_NOTE_MAX_DURATION_MS)
+    } catch {
+      clearVoiceRecordingTimers()
+      setIsRecordingVoice(false)
+      setVoiceRecordingElapsedMs(0)
+      voiceElapsedMsRef.current = 0
+      stopVoiceStreamTracks()
+      setErrorText('Не удалось получить доступ к микрофону')
+    }
   }
 
   const handleComposerPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
@@ -1237,6 +1491,10 @@ export default function ChatPage() {
   const handleSend = async () => {
     const trimmedDraft = draft.trim()
     if (!selectedChatId || sending) return
+    if (isRecordingVoice) {
+      setErrorText('Сначала остановите запись голосового')
+      return
+    }
     if (hasUploadingAttachments) {
       setErrorText('Дождитесь завершения загрузки вложений')
       return
@@ -1250,11 +1508,23 @@ export default function ChatPage() {
     setErrorText('')
     try {
       const attachmentIds = readyComposerAttachments.map((attachment) => attachment.fileId)
+      const voiceAttachment = readyComposerAttachments.find((attachment) => isVoiceAttachment(attachment.contentType)) || null
       const meta: ChatMessageMeta | undefined =
-        replyToMessageId || attachmentIds.length > 0
+        replyToMessageId || attachmentIds.length > 0 || Boolean(voiceAttachment)
           ? {
               ...(replyToMessageId ? { reply_to_message_id: replyToMessageId } : {}),
               ...(attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
+              ...(voiceAttachment
+                ? {
+                    voice_note: {
+                      file_id: voiceAttachment.fileId,
+                      duration_ms: Math.min(
+                        VOICE_NOTE_MAX_DURATION_MS,
+                        Math.max(1, voiceAttachment.durationMs || VOICE_NOTE_MAX_DURATION_MS),
+                      ),
+                    },
+                  }
+                : {}),
             }
           : undefined
       const response = await chatApi.sendMessage(selectedChatId, { body: trimmedDraft, meta })
@@ -1557,7 +1827,7 @@ export default function ChatPage() {
                       size="icon"
                       variant="ghost"
                       onClick={openMediaPicker}
-                      disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
+                      disabled={!selectedChatId || sending || isRecordingVoice || composerAttachments.length >= 1 || hasUploadingAttachments}
                       aria-label="Добавить фото или видео"
                       title="Фото/Видео"
                     >
@@ -1568,7 +1838,7 @@ export default function ChatPage() {
                       size="icon"
                       variant="ghost"
                       onClick={openCameraPhotoPicker}
-                      disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
+                      disabled={!selectedChatId || sending || isRecordingVoice || composerAttachments.length >= 1 || hasUploadingAttachments}
                       aria-label="Сделать фото с камеры"
                       title="Камера фото"
                     >
@@ -1579,7 +1849,7 @@ export default function ChatPage() {
                       size="icon"
                       variant="ghost"
                       onClick={openCameraVideoPicker}
-                      disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
+                      disabled={!selectedChatId || sending || isRecordingVoice || composerAttachments.length >= 1 || hasUploadingAttachments}
                       aria-label="Снять видео с камеры"
                       title="Камера видео"
                     >
@@ -1590,7 +1860,7 @@ export default function ChatPage() {
                       size="icon"
                       variant="ghost"
                       onClick={openFilePicker}
-                      disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
+                      disabled={!selectedChatId || sending || isRecordingVoice || composerAttachments.length >= 1 || hasUploadingAttachments}
                       aria-label="Добавить файл"
                       title="Файл"
                     >
@@ -1815,6 +2085,7 @@ export default function ChatPage() {
                       const isUploading = attachment.status === 'uploading'
                       const isReady = attachment.status === 'ready'
                       const isError = attachment.status === 'error'
+                      const isVoice = isVoiceAttachment(attachment.contentType)
                       return (
                         <div
                           key={attachment.clientId}
@@ -1830,7 +2101,13 @@ export default function ChatPage() {
                           <div className="min-w-0">
                             <div className="max-w-[220px] truncate">{attachment.originalName}</div>
                             <div className="text-[10px] opacity-80">
-                              {isUploading ? 'Загрузка...' : isReady ? formatFileSize(attachment.size) : attachment.error || 'Ошибка'}
+                              {isUploading
+                                ? 'Загрузка...'
+                                : isReady
+                                  ? isVoice
+                                    ? `${formatDurationLabel(attachment.durationMs || 0)} · ${formatFileSize(attachment.size)}`
+                                    : formatFileSize(attachment.size)
+                                  : attachment.error || 'Ошибка'}
                             </div>
                           </div>
                           <button
@@ -1847,8 +2124,14 @@ export default function ChatPage() {
                   </div>
                 )}
                 <div className="mb-2 text-xs text-muted-foreground">
-                  Вложения: 1 файл до {CHAT_ATTACHMENT_MAX_MB} MB. Есть отдельные действия: Фото/Видео, Камера фото, Камера видео и Файл. Скриншот можно вставить из буфера.
+                  Вложения: 1 файл до {CHAT_ATTACHMENT_MAX_MB} MB. Голосовое: до 1 минуты. Доступны действия: Фото/Видео, Камера фото, Камера видео, Файл и ГС.
                 </div>
+                {isRecordingVoice && (
+                  <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-400">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
+                    Идет запись: {formatDurationLabel(voiceRecordingElapsedMs)} / 01:00
+                  </div>
+                )}
 
                 <input
                   ref={mediaAttachmentInputRef}
@@ -1887,7 +2170,7 @@ export default function ChatPage() {
                     variant="outline"
                     className="hidden sm:inline-flex"
                     onClick={openMediaPicker}
-                    disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
+                    disabled={!selectedChatId || sending || isRecordingVoice || composerAttachments.length >= 1 || hasUploadingAttachments}
                     aria-label="Добавить фото или видео"
                     title="Фото/Видео"
                   >
@@ -1900,12 +2183,25 @@ export default function ChatPage() {
                     variant="outline"
                     className="hidden sm:inline-flex"
                     onClick={openFilePicker}
-                    disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
+                    disabled={!selectedChatId || sending || isRecordingVoice || composerAttachments.length >= 1 || hasUploadingAttachments}
                     aria-label="Добавить файл"
                     title="Файл"
                   >
                     <Paperclip className="mr-1 h-4 w-4" />
                     Файл
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={isRecordingVoice ? 'destructive' : 'outline'}
+                    onClick={() => void startVoiceRecording()}
+                    disabled={!selectedChatId || sending || (!isRecordingVoice && (composerAttachments.length >= 1 || hasUploadingAttachments))}
+                    aria-label={isRecordingVoice ? 'Остановить запись голосового' : 'Начать запись голосового'}
+                    title={isRecordingVoice ? 'Стоп запись' : 'Записать ГС'}
+                    className="shrink-0"
+                  >
+                    {isRecordingVoice ? <Square className="mr-1 h-4 w-4" /> : <Mic className="mr-1 h-4 w-4" />}
+                    {isRecordingVoice ? 'Стоп' : 'ГС'}
                   </Button>
                   <textarea
                     ref={composerRef}
@@ -1917,7 +2213,7 @@ export default function ChatPage() {
                     maxLength={MESSAGE_MAX_CHARS}
                     rows={1}
                     placeholder={selectedChat ? 'Напишите сообщение (Enter — отправить, Shift+Enter — новая строка)' : 'Сначала выберите чат'}
-                    disabled={!selectedChat || sending}
+                    disabled={!selectedChat || sending || isRecordingVoice}
                     className="max-h-40 min-h-[40px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onBlur={() => stopTyping()}
                     onPaste={handleComposerPaste}
@@ -1931,7 +2227,7 @@ export default function ChatPage() {
                   <Button
                     type="button"
                     onClick={() => void handleSend()}
-                    disabled={!canSendMessage || draft.trim().length > MESSAGE_MAX_CHARS || hasUploadingAttachments}
+                    disabled={!canSendMessage || isRecordingVoice || draft.trim().length > MESSAGE_MAX_CHARS || hasUploadingAttachments}
                   >
                     {sending ? '...' : 'Отправить'}
                   </Button>

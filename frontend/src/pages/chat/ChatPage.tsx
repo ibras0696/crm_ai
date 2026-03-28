@@ -74,6 +74,8 @@ const attachmentDownloadUrlCache = new Map<string, CachedAttachmentDownloadUrl>(
 
 function getMessageAttachments(message: ChatMessageInfo): ChatAttachmentInfo[] {
   const result: ChatAttachmentInfo[] = []
+  const bodyName = message.body.trim()
+  const bodyLooksLikeFilename = /^[^\s]+\.[a-z0-9]{2,5}$/i.test(bodyName)
   const rawAttachments = message.meta?.attachments as Array<Record<string, unknown>> | undefined
   if (Array.isArray(rawAttachments)) {
     for (const item of rawAttachments) {
@@ -89,6 +91,8 @@ function getMessageAttachments(message: ChatMessageInfo): ChatAttachmentInfo[] {
           ? item.original_name
           : typeof item.filename === 'string'
             ? item.filename
+            : bodyLooksLikeFilename
+              ? bodyName
             : `file-${item.file_id.slice(0, 8)}`
       result.push({
         file_id: item.file_id,
@@ -107,7 +111,7 @@ function getMessageAttachments(message: ChatMessageInfo): ChatAttachmentInfo[] {
       if (typeof value !== 'string') continue
       result.push({
         file_id: value,
-        original_name: `Файл ${value.slice(0, 8)}`,
+        original_name: bodyLooksLikeFilename ? bodyName : `Файл ${value.slice(0, 8)}`,
         content_type: 'application/octet-stream',
         size: 0,
         status: 'ready',
@@ -1713,6 +1717,7 @@ export default function ChatPage() {
                     type="button"
                     size="sm"
                     variant="outline"
+                    className="hidden sm:inline-flex"
                     onClick={openMediaPicker}
                     disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
                     aria-label="Добавить фото или видео"
@@ -1725,6 +1730,7 @@ export default function ChatPage() {
                     type="button"
                     size="sm"
                     variant="outline"
+                    className="hidden sm:inline-flex"
                     onClick={openFilePicker}
                     disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
                     aria-label="Добавить файл"

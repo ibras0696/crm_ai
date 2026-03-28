@@ -88,6 +88,14 @@ function chatTypeLabel(chatType: ChatInfo['chat_type']): string {
   return 'Канал'
 }
 
+function safeDecodeURIComponent(value: string): string {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
 function pickFirstString(item: Record<string, unknown>, keys: string[]): string {
   for (const key of keys) {
     const value = item[key]
@@ -237,7 +245,7 @@ function inferMediaKind(contentType: string, originalName: string): 'image' | 'v
   if (mime.startsWith('video/') || mime.includes('video/')) return 'video'
   if (mime.startsWith('audio/') || mime.includes('audio/')) return 'audio'
 
-  const name = decodeURIComponent(String(originalName || ''))
+  const name = safeDecodeURIComponent(String(originalName || ''))
     .trim()
     .toLowerCase()
   if (/\.(png|jpe?g|gif|webp|bmp|svg|heic|heif|avif)(?:$|[?#\s])/i.test(name)) return 'image'
@@ -670,6 +678,10 @@ export default function ChatPage() {
     if (typeof window === 'undefined') return
     window.localStorage.setItem(CHAT_SIDEBAR_COLLAPSED_STORAGE_KEY, isDesktopSidebarCollapsed ? '1' : '0')
   }, [isDesktopSidebarCollapsed])
+
+  useEffect(() => {
+    setMediaViewer(null)
+  }, [selectedChatId])
 
   useEffect(() => {
     if (!isAttachMenuOpen) return

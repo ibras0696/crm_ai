@@ -438,3 +438,152 @@ async def test_chat_voice_note_rejects_duration_over_1_minute(client: AsyncClien
     assert send_voice.status_code == 200, f"Voice limit request failed: {send_voice.text}"
     assert send_voice.json()["ok"] is False
     assert send_voice.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_chat_delete_message_removes_attachment_from_s3(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    token = await _register_owner(client, org_name="Chat Delete Message Attachments Org")
+
+    created = await client.post(
+        "/api/v1/chat/chats",
+        json={
+            "chat_type": "group",
+            "title": "Delete Message Attachment Chat",
+            "member_ids": [],
+        },
+        headers=_headers(token),
+    )
+    assert created.status_code == 200, f"Create chat failed: {created.text}"
+    chat_id = created.json()["data"]["id"]
+
+    deleted_from_s3: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        "src.modules.chat.service.files_storage.generate_presigned_put_url",
+        lambda **kwargs: ("https://upload.example.com/put", {"Content-Type": kwargs["content_type"]}),
+    )
+    monkeypatch.setattr(
+        "src.modules.chat.service.files_storage.head_object",
+        lambda _s3_key, _bucket: {"ContentLength": 3210},
+    )
+
+    def _fake_delete_file(s3_key: str, bucket: str) -> None:
+        deleted_from_s3.append((s3_key, bucket))
+
+    monkeypatch.setattr("src.modules.chat.service.files_storage.delete_file", _fake_delete_file)
+
+    init_upload = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/attachments/init-upload",
+        json={
+            "filename": "photo.png",
+            "size_bytes": 3210,
+            "content_type": "image/png",
+        },
+        headers=_headers(token),
+    )
+    assert init_upload.status_code == 200, f"Init upload failed: {init_upload.text}"
+    assert init_upload.json()["ok"] is True
+    file_id = init_upload.json()["data"]["file_id"]
+
+    finish_upload = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/attachments/finish-upload",
+        json={"file_id": file_id, "size_bytes": 3210},
+        headers=_headers(token),
+    )
+    assert finish_upload.status_code == 200, f"Finish upload failed: {finish_upload.text}"
+    assert finish_upload.json()["ok"] is True
+
+    send_message = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/messages",
+        json={"body": "", "meta": {"attachment_ids": [file_id]}},
+        headers=_headers(token),
+    )
+    assert send_message.status_code == 200, f"Send message failed: {send_message.text}"
+    assert send_message.json()["ok"] is True
+    message_id = send_message.json()["data"]["id"]
+
+    deleted_message = await client.delete(f"/api/v1/chat/messages/{message_id}", headers=_headers(token))
+    assert deleted_message.status_code == 200, f"Delete message failed: {deleted_message.text}"
+    assert deleted_message.json()["ok"] is True
+    assert len(deleted_from_s3) == 1
+
+    no_download = await client.get(
+        f"/api/v1/chat/chats/{chat_id}/attachments/{file_id}/download-url",
+        headers=_headers(token),
+    )
+    assert no_download.status_code == 200
+    assert no_download.json()["ok"] is False
+    assert no_download.json()["error"]["code"] == "NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_chat_delete_chat_removes_chat_attachments_from_s3(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    token = await _register_owner(client, org_name="Chat Delete Chat Attachments Org")
+
+    created = await client.post(
+        "/api/v1/chat/chats",
+        json={
+            "chat_type": "group",
+            "title": "Delete Chat Attachment Chat",
+            "member_ids": [],
+        },
+        headers=_headers(token),
+    )
+    assert created.status_code == 200, f"Create chat failed: {created.text}"
+    chat_id = created.json()["data"]["id"]
+
+    deleted_from_s3: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        "src.modules.chat.service.files_storage.generate_presigned_put_url",
+        lambda **kwargs: ("https://upload.example.com/put", {"Content-Type": kwargs["content_type"]}),
+    )
+    monkeypatch.setattr(
+        "src.modules.chat.service.files_storage.head_object",
+        lambda _s3_key, _bucket: {"ContentLength": 4096},
+    )
+
+    def _fake_delete_file(s3_key: str, bucket: str) -> None:
+        deleted_from_s3.append((s3_key, bucket))
+
+    monkeypatch.setattr("src.modules.chat.service.files_storage.delete_file", _fake_delete_file)
+
+    init_upload = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/attachments/init-upload",
+        json={
+            "filename": "voice.ogg",
+            "size_bytes": 4096,
+            "content_type": "audio/ogg",
+        },
+        headers=_headers(token),
+    )
+    assert init_upload.status_code == 200, f"Init upload failed: {init_upload.text}"
+    assert init_upload.json()["ok"] is True
+    file_id = init_upload.json()["data"]["file_id"]
+
+    finish_upload = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/attachments/finish-upload",
+        json={"file_id": file_id, "size_bytes": 4096},
+        headers=_headers(token),
+    )
+    assert finish_upload.status_code == 200, f"Finish upload failed: {finish_upload.text}"
+    assert finish_upload.json()["ok"] is True
+
+    send_message = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/messages",
+        json={
+            "body": "",
+            "meta": {
+                "attachment_ids": [file_id],
+                "voice_note": {"file_id": file_id, "duration_ms": 3000},
+            },
+        },
+        headers=_headers(token),
+    )
+    assert send_message.status_code == 200, f"Send message failed: {send_message.text}"
+    assert send_message.json()["ok"] is True
+
+    deleted_chat = await client.delete(f"/api/v1/chat/chats/{chat_id}", headers=_headers(token))
+    assert deleted_chat.status_code == 200, f"Delete chat failed: {deleted_chat.text}"
+    assert deleted_chat.json()["ok"] is True
+    assert len(deleted_from_s3) == 1

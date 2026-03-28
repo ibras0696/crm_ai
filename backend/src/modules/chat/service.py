@@ -415,13 +415,54 @@ class ChatService:
             raise ChatServiceError(code="FORBIDDEN", message="Нет доступа к сообщению", status_code=403)
         if member.role not in self.CHAT_ADMIN_ROLES and message.sender_id != actor_id:
             raise ChatServiceError(code="FORBIDDEN", message="Можно удалять только свои сообщения", status_code=403)
+        attachment_ids = self._extract_attachment_ids(message.meta if isinstance(message.meta, dict) else None)
         await self.repo.delete_message(message)
+        for file_id in attachment_ids:
+            await self._cleanup_orphan_chat_attachment(
+                org_id=message.org_id,
+                file_id=file_id,
+                exclude_message_id=message.id,
+            )
 
     async def delete_chat(self, *, chat: Chat, actor_id: uuid.UUID) -> None:
         member = await self.repo.get_chat_member(chat_id=chat.id, user_id=actor_id)
         if member is None or member.role not in self.CHAT_ADMIN_ROLES:
             raise ChatServiceError(code="FORBIDDEN", message="Недостаточно прав для удаления чата", status_code=403)
+        file_ids = await self.repo.list_chat_upload_file_ids(org_id=chat.org_id, chat_id=chat.id)
         await self.repo.delete_chat(chat)
+        for file_id in file_ids:
+            await self._cleanup_orphan_chat_attachment(org_id=chat.org_id, file_id=file_id)
+
+    async def _cleanup_orphan_chat_attachment(
+        self,
+        *,
+        org_id: uuid.UUID,
+        file_id: uuid.UUID,
+        exclude_message_id: uuid.UUID | None = None,
+    ) -> None:
+        ref_count = await self.repo.count_attachment_references(
+            org_id=org_id,
+            file_id=file_id,
+            exclude_message_id=exclude_message_id,
+        )
+        if ref_count > 0:
+            return
+
+        db_file = await self.files_repo.get_by_id_for_org(file_id=file_id, org_id=org_id)
+        if db_file is None:
+            return
+        if str(db_file.type or "") != "chat_attachment":
+            return
+
+        try:
+            files_storage.delete_file(db_file.s3_key, db_file.s3_bucket)
+        except (BotoCoreError, ClientError, KeyError, OSError, ValueError) as exc:
+            raise ChatServiceError(
+                code="STORAGE_DELETE_ERROR",
+                message="Не удалось удалить вложение из хранилища",
+                status_code=503,
+            ) from exc
+        await self.files_repo.delete(db_file)
 
     async def _resolve_attachments_for_message(
         self,
@@ -498,7 +539,10 @@ class ChatService:
         try:
             duration_ms = int(duration_raw)
         except (TypeError, ValueError) as exc:
-            raise ChatServiceError(code="VALIDATION_ERROR", message="voice_note.duration_ms должен быть числом") from exc
+            raise ChatServiceError(
+                code="VALIDATION_ERROR",
+                message="voice_note.duration_ms должен быть числом",
+            ) from exc
         if duration_ms <= 0 or duration_ms > cls.VOICE_NOTE_MAX_DURATION_MS:
             raise ChatServiceError(code="VALIDATION_ERROR", message="Голосовое сообщение не должно превышать 1 минуту")
 

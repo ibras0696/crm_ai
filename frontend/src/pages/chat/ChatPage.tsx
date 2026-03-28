@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { isAxiosError } from 'axios'
 import { ArrowDown, Camera, ChevronLeft, ChevronRight, Image, Loader2, MessageSquare, Mic, Paperclip, Pause, Play, Plus, Search, SendHorizontal, Square, Video, X } from 'lucide-react'
 import { chatApi, type ChatAttachmentInfo, type ChatInfo, type ChatMemberInfo, type ChatMessageInfo, type ChatMessageMeta } from '@/lib/api'
@@ -286,6 +286,11 @@ function formatClockSeconds(secondsValue: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  return Math.min(1, Math.max(0, value))
+}
+
 function resolveVoiceRecorderMimeType(): string {
   if (typeof MediaRecorder === 'undefined') return ''
   const candidates = [
@@ -445,6 +450,20 @@ function AttachmentPreview({
     }
   }, [downloadUrl, errorText, loading, mediaKind])
 
+  useEffect(() => {
+    if (mediaKind !== 'audio' || audioFailed || !isAudioPlaying) return
+    let frameId = 0
+    const tick = () => {
+      const audio = audioRef.current
+      if (!audio) return
+      const nextTime = Number.isFinite(audio.currentTime) ? audio.currentTime : 0
+      setAudioCurrentTime((prev) => (Math.abs(prev - nextTime) >= 0.03 ? nextTime : prev))
+      frameId = window.requestAnimationFrame(tick)
+    }
+    frameId = window.requestAnimationFrame(tick)
+    return () => window.cancelAnimationFrame(frameId)
+  }, [audioFailed, isAudioPlaying, mediaKind])
+
   if (loading) {
     return <div className="text-xs text-muted-foreground">Загрузка вложения...</div>
   }
@@ -472,6 +491,22 @@ function AttachmentPreview({
     if (!audio || audioFailed) return
     audio.currentTime = Math.max(0, nextValue)
     setAudioCurrentTime(Math.max(0, nextValue))
+  }
+
+  const audioProgressPercent = (() => {
+    if (audioDuration <= 0) return 0
+    return clamp01(audioCurrentTime / audioDuration) * 100
+  })()
+
+  const handleAudioTrackSeek = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    const audio = audioRef.current
+    if (!audio || audioFailed) return
+    const rect = event.currentTarget.getBoundingClientRect()
+    if (rect.width <= 0) return
+    const ratio = clamp01((event.clientX - rect.left) / rect.width)
+    const duration = Math.max(audioDuration, Number.isFinite(audio.duration) ? audio.duration : 0)
+    if (duration <= 0) return
+    handleAudioSeek(ratio * duration)
   }
 
   if (mediaKind === 'image') {
@@ -525,7 +560,7 @@ function AttachmentPreview({
   }
   if (mediaKind === 'audio') {
     return (
-      <div className="max-w-full rounded-2xl border border-primary/30 bg-primary/[0.08] p-2.5">
+      <div className="max-w-full">
         <audio
           ref={audioRef}
           preload="metadata"
@@ -536,25 +571,32 @@ function AttachmentPreview({
           <source src={downloadUrl} />
         </audio>
         {!audioFailed ? (
-          <div className="flex min-w-[240px] items-center gap-2">
+          <div className="flex min-w-[230px] items-center gap-2">
             <button
               type="button"
               onClick={() => void toggleAudioPlayback()}
-              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/80 text-primary-foreground hover:bg-primary"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/85 text-primary-foreground transition-colors hover:bg-primary"
               aria-label={isAudioPlaying ? 'Пауза' : 'Воспроизвести'}
             >
               {isAudioPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 fill-current" />}
             </button>
             <div className="min-w-0 flex-1">
-              <input
-                type="range"
-                min={0}
-                max={Math.max(audioDuration, 1)}
-                step={0.1}
-                value={Math.min(audioCurrentTime, Math.max(audioDuration, 1))}
-                onChange={(event) => handleAudioSeek(Number(event.target.value))}
-                className="h-1.5 w-full cursor-pointer accent-primary"
-              />
+              <button
+                type="button"
+                onClick={handleAudioTrackSeek}
+                className="relative mt-0.5 block h-4 w-full cursor-pointer rounded-full"
+                aria-label="Перемотать голосовое сообщение"
+              >
+                <span className="absolute left-0 right-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-background/70" />
+                <span
+                  className="absolute left-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-primary/80"
+                  style={{ width: `${audioProgressPercent}%` }}
+                />
+                <span
+                  className="pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full border border-primary/80 bg-primary shadow-[0_0_0_2px_rgba(2,6,23,0.45)] transition-[left] duration-100 ease-linear"
+                  style={{ left: `calc(${audioProgressPercent}% - 0.4375rem)` }}
+                />
+              </button>
               <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
                 <span>{formatClockSeconds(audioCurrentTime)}</span>
                 <span>{formatClockSeconds(audioDuration)}</span>
@@ -788,7 +830,7 @@ export default function ChatPage() {
   const isExpandableMessage = (body: string): boolean => {
     if (body.length > 280) return true
     if (/(https?:\/\/\S{80,})/i.test(body)) return true
-    if (/^[\[{]/.test(body.trim()) && body.length > 120) return true
+    if (/^(?:\[|\{)/.test(body.trim()) && body.length > 120) return true
     return false
   }
 

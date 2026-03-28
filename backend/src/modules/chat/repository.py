@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.modules.chat.models import Chat, ChatMember, ChatMessage, ChatUploadSession
@@ -174,11 +174,46 @@ class ChatRepository:
         )
         return list((await self.session.execute(stmt)).scalars().all())
 
+    async def list_chat_upload_file_ids(self, *, org_id: uuid.UUID, chat_id: uuid.UUID) -> list[uuid.UUID]:
+        stmt = (
+            select(ChatUploadSession.file_id)
+            .where(ChatUploadSession.org_id == org_id, ChatUploadSession.chat_id == chat_id)
+            .distinct()
+        )
+        return [row[0] for row in (await self.session.execute(stmt)).all()]
+
     async def list_files_for_org_ids(self, *, org_id: uuid.UUID, file_ids: list[uuid.UUID]) -> list[File]:
         if not file_ids:
             return []
         stmt = select(File).where(File.org_id == org_id, File.id.in_(file_ids))
         return list((await self.session.execute(stmt)).scalars().all())
+
+    async def count_attachment_references(
+        self,
+        *,
+        org_id: uuid.UUID,
+        file_id: uuid.UUID,
+        exclude_message_id: uuid.UUID | None = None,
+    ) -> int:
+        sql = """
+            SELECT COUNT(*)
+            FROM chat_messages
+            WHERE org_id = :org_id
+              AND (
+                COALESCE(meta->'attachment_ids', '[]'::jsonb) ? :file_id_text
+                OR EXISTS (
+                    SELECT 1
+                    FROM jsonb_array_elements(COALESCE(meta->'attachments', '[]'::jsonb)) AS elem
+                    WHERE elem->>'file_id' = :file_id_text
+                )
+              )
+        """
+        params: dict[str, object] = {"org_id": org_id, "file_id_text": str(file_id)}
+        if exclude_message_id is not None:
+            sql += " AND id <> :exclude_message_id"
+            params["exclude_message_id"] = exclude_message_id
+        result = await self.session.execute(text(sql), params)
+        return int(result.scalar_one() or 0)
 
     async def get_message_for_org(self, *, message_id: uuid.UUID, org_id: uuid.UUID) -> ChatMessage | None:
         stmt = select(ChatMessage).where(ChatMessage.id == message_id, ChatMessage.org_id == org_id).limit(1)

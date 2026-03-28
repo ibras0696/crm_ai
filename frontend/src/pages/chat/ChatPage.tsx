@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent } from 'react'
 import { isAxiosError } from 'axios'
-import { ArrowDown, ChevronLeft, ChevronRight, Loader2, MessageSquare, Paperclip, Plus, Search, X } from 'lucide-react'
+import { ArrowDown, ChevronLeft, ChevronRight, Image, Loader2, MessageSquare, Paperclip, Plus, Search, X } from 'lucide-react'
 import { chatApi, type ChatAttachmentInfo, type ChatInfo, type ChatMemberInfo, type ChatMessageInfo, type ChatMessageMeta } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
@@ -52,6 +52,7 @@ const CHAT_ATTACHMENT_MAX_MB = 10
 const CHAT_ATTACHMENT_MAX_BYTES = CHAT_ATTACHMENT_MAX_MB * 1024 * 1024
 
 type ComposerAttachmentStatus = 'uploading' | 'ready' | 'error'
+type ComposerAttachmentSource = 'media' | 'file' | 'paste'
 
 interface ComposerAttachment {
   clientId: string
@@ -265,7 +266,8 @@ export default function ChatPage() {
   const selectedChatIdRef = useRef<string | null>(null)
   const messagesViewportRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
-  const attachmentInputRef = useRef<HTMLInputElement | null>(null)
+  const mediaAttachmentInputRef = useRef<HTMLInputElement | null>(null)
+  const fileAttachmentInputRef = useRef<HTMLInputElement | null>(null)
   const attachmentUploadControllersRef = useRef<Record<string, AbortController>>({})
   const typingStopTimerRef = useRef<number | null>(null)
   const lastTypingSentAtRef = useRef(0)
@@ -381,9 +383,8 @@ export default function ChatPage() {
     }
     attachmentUploadControllersRef.current = {}
     setComposerAttachments([])
-    if (attachmentInputRef.current) {
-      attachmentInputRef.current.value = ''
-    }
+    if (mediaAttachmentInputRef.current) mediaAttachmentInputRef.current.value = ''
+    if (fileAttachmentInputRef.current) fileAttachmentInputRef.current.value = ''
   }, [])
 
   useEffect(() => {
@@ -411,24 +412,29 @@ export default function ChatPage() {
     }
 
     setComposerAttachments((prev) => prev.filter((item) => item.clientId !== clientId))
-    if (attachmentInputRef.current) {
-      attachmentInputRef.current.value = ''
-    }
+    if (mediaAttachmentInputRef.current) mediaAttachmentInputRef.current.value = ''
+    if (fileAttachmentInputRef.current) fileAttachmentInputRef.current.value = ''
   }
 
-  const uploadComposerAttachment = async (file: File) => {
+  const uploadComposerAttachment = async (file: File, source: ComposerAttachmentSource) => {
     if (!selectedChatId) {
       setErrorText('Сначала выберите чат')
       return
     }
-    if (composerAttachments.length >= 1) {
-      setErrorText('Можно прикрепить только 1 файл')
+    if (composerAttachments.length >= 1 || hasUploadingAttachments) {
+      setErrorText('В сообщении может быть только 1 вложение')
       return
     }
 
     const contentType = file.type || 'application/octet-stream'
-    if (!isMediaAttachment(contentType)) {
-      setErrorText('Разрешены только фото и видео')
+    if (source === 'media' || source === 'paste') {
+      if (!isMediaAttachment(contentType)) {
+        setErrorText('Кнопка "Фото/Видео" принимает только фото и видео')
+        return
+      }
+    }
+    if (source === 'paste' && !contentType.startsWith('image/')) {
+      setErrorText('Из буфера можно вставлять только изображения')
       return
     }
     if (file.size > CHAT_ATTACHMENT_MAX_BYTES) {
@@ -547,7 +553,7 @@ export default function ChatPage() {
     }
   }
 
-  const handleAttachmentInputChange = async (event: ChangeEvent<HTMLInputElement>) => {
+  const handleAttachmentInputChange = async (event: ChangeEvent<HTMLInputElement>, source: ComposerAttachmentSource) => {
     const files = Array.from(event.target.files || [])
     event.target.value = ''
     if (files.length === 0) return
@@ -555,10 +561,58 @@ export default function ChatPage() {
       setErrorText('Сначала выберите чат')
       return
     }
-    if (files.length > 1) {
-      setErrorText('Можно выбрать только 1 файл')
+    if (files.length > 1 || composerAttachments.length >= 1 || hasUploadingAttachments) {
+      setErrorText('В сообщении может быть только 1 вложение')
+      return
     }
-    await uploadComposerAttachment(files[0]!)
+    await uploadComposerAttachment(files[0]!, source)
+  }
+
+  const handleMediaInputChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    await handleAttachmentInputChange(event, 'media')
+  }
+
+  const handleFileInputChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    await handleAttachmentInputChange(event, 'file')
+  }
+
+  const openMediaPicker = () => {
+    if (!selectedChatId) {
+      setErrorText('Сначала выберите чат')
+      return
+    }
+    if (composerAttachments.length >= 1 || hasUploadingAttachments) {
+      setErrorText('В сообщении может быть только 1 вложение')
+      return
+    }
+    mediaAttachmentInputRef.current?.click()
+  }
+
+  const openFilePicker = () => {
+    if (!selectedChatId) {
+      setErrorText('Сначала выберите чат')
+      return
+    }
+    if (composerAttachments.length >= 1 || hasUploadingAttachments) {
+      setErrorText('В сообщении может быть только 1 вложение')
+      return
+    }
+    fileAttachmentInputRef.current?.click()
+  }
+
+  const handleComposerPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = Array.from(event.clipboardData?.items || [])
+    const imageItem = items.find((item) => item.kind === 'file' && item.type.startsWith('image/'))
+    if (!imageItem) return
+    const pastedFile = imageItem.getAsFile()
+    if (!pastedFile) return
+
+    event.preventDefault()
+    const extension = pastedFile.type.split('/')[1] || 'png'
+    const file = new File([pastedFile], `screenshot-${Date.now()}.${extension}`, {
+      type: pastedFile.type || 'image/png',
+    })
+    void uploadComposerAttachment(file, 'paste')
   }
 
   useEffect(() => {
@@ -1327,15 +1381,21 @@ export default function ChatPage() {
                       type="button"
                       size="icon"
                       variant="ghost"
-                      onClick={() => {
-                        if (!selectedChatId) {
-                          setErrorText('Сначала выберите чат')
-                          return
-                        }
-                        attachmentInputRef.current?.click()
-                      }}
-                      aria-label="Вложения"
-                      title="Прикрепить файлы"
+                      onClick={openMediaPicker}
+                      disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
+                      aria-label="Добавить фото или видео"
+                      title="Фото/Видео"
+                    >
+                      <Image className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      onClick={openFilePicker}
+                      disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
+                      aria-label="Добавить файл"
+                      title="Файл"
                     >
                       <Paperclip className="h-4 w-4" />
                     </Button>
@@ -1581,34 +1641,47 @@ export default function ChatPage() {
                   </div>
                 )}
                 <div className="mb-2 text-xs text-muted-foreground">
-                  Вложения: только фото/видео, 1 файл, до {CHAT_ATTACHMENT_MAX_MB} MB.
+                  Вложения: 1 файл до {CHAT_ATTACHMENT_MAX_MB} MB. Кнопки отдельно: Фото/Видео и Файл. Скриншот можно вставить из буфера.
                 </div>
 
                 <input
-                  ref={attachmentInputRef}
+                  ref={mediaAttachmentInputRef}
                   type="file"
                   accept="image/*,video/*"
                   className="hidden"
-                  onChange={(event) => void handleAttachmentInputChange(event)}
+                  onChange={(event) => void handleMediaInputChange(event)}
+                />
+                <input
+                  ref={fileAttachmentInputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={(event) => void handleFileInputChange(event)}
                 />
 
                 <div className="flex items-end gap-2">
                   <Button
                     type="button"
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => {
-                      if (!selectedChatId) {
-                        setErrorText('Сначала выберите чат')
-                        return
-                      }
-                      attachmentInputRef.current?.click()
-                    }}
-                    disabled={!selectedChatId || sending || composerAttachments.length >= 1}
-                    aria-label="Прикрепить файлы"
-                    title="Прикрепить файлы"
+                    size="sm"
+                    variant="outline"
+                    onClick={openMediaPicker}
+                    disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
+                    aria-label="Добавить фото или видео"
+                    title="Фото/Видео"
                   >
-                    <Paperclip className="h-4 w-4" />
+                    <Image className="mr-1 h-4 w-4" />
+                    Фото/Видео
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={openFilePicker}
+                    disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
+                    aria-label="Добавить файл"
+                    title="Файл"
+                  >
+                    <Paperclip className="mr-1 h-4 w-4" />
+                    Файл
                   </Button>
                   <textarea
                     ref={composerRef}
@@ -1623,6 +1696,7 @@ export default function ChatPage() {
                     disabled={!selectedChat || sending}
                     className="max-h-40 min-h-[40px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onBlur={() => stopTyping()}
+                    onPaste={handleComposerPaste}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey && (draft.trim().length > 0 || readyComposerAttachments.length > 0)) {
                         e.preventDefault()

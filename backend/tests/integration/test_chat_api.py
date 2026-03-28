@@ -254,7 +254,7 @@ async def test_chat_attachment_init_finish_send_and_download_url(client: AsyncCl
 
 
 @pytest.mark.asyncio
-async def test_chat_attachment_limits_media_only_one_file_and_10mb(client: AsyncClient):
+async def test_chat_attachment_limits_one_file_and_10mb(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
     token = await _register_owner(client, org_name="Chat Attachments Limits Org")
 
     created = await client.post(
@@ -269,7 +269,12 @@ async def test_chat_attachment_limits_media_only_one_file_and_10mb(client: Async
     assert created.status_code == 200, f"Create chat failed: {created.text}"
     chat_id = created.json()["data"]["id"]
 
-    wrong_mime = await client.post(
+    monkeypatch.setattr(
+        "src.modules.chat.service.files_storage.generate_presigned_put_url",
+        lambda **kwargs: ("https://upload.example.com/put", {"Content-Type": kwargs["content_type"]}),
+    )
+
+    plain_file = await client.post(
         f"/api/v1/chat/chats/{chat_id}/attachments/init-upload",
         json={
             "filename": "note.txt",
@@ -278,9 +283,8 @@ async def test_chat_attachment_limits_media_only_one_file_and_10mb(client: Async
         },
         headers=_headers(token),
     )
-    assert wrong_mime.status_code == 200, f"Wrong mime request failed: {wrong_mime.text}"
-    assert wrong_mime.json()["ok"] is False
-    assert wrong_mime.json()["error"]["code"] == "UNSUPPORTED_MIME"
+    assert plain_file.status_code == 200, f"Plain file request failed: {plain_file.text}"
+    assert plain_file.json()["ok"] is True
 
     too_large = await client.post(
         f"/api/v1/chat/chats/{chat_id}/attachments/init-upload",

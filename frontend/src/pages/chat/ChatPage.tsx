@@ -73,18 +73,59 @@ interface CachedAttachmentDownloadUrl {
 const attachmentDownloadUrlCache = new Map<string, CachedAttachmentDownloadUrl>()
 
 function getMessageAttachments(message: ChatMessageInfo): ChatAttachmentInfo[] {
-  const attachments = message.meta?.attachments
-  if (!Array.isArray(attachments)) return []
-  return attachments.filter((item): item is ChatAttachmentInfo => {
-    return Boolean(
-      item &&
-        typeof item.file_id === 'string' &&
-        typeof item.original_name === 'string' &&
-        typeof item.content_type === 'string' &&
-        typeof item.size === 'number' &&
-        typeof item.status === 'string',
-    )
-  })
+  const result: ChatAttachmentInfo[] = []
+  const rawAttachments = message.meta?.attachments as Array<Record<string, unknown>> | undefined
+  if (Array.isArray(rawAttachments)) {
+    for (const item of rawAttachments) {
+      if (!item || typeof item.file_id !== 'string') continue
+      const size =
+        typeof item.size === 'number'
+          ? item.size
+          : typeof item.size === 'string'
+            ? Number.parseInt(item.size, 10) || 0
+            : 0
+      const originalName =
+        typeof item.original_name === 'string'
+          ? item.original_name
+          : typeof item.filename === 'string'
+            ? item.filename
+            : `file-${item.file_id.slice(0, 8)}`
+      result.push({
+        file_id: item.file_id,
+        original_name: originalName,
+        content_type: typeof item.content_type === 'string' ? item.content_type : 'application/octet-stream',
+        size,
+        status: typeof item.status === 'string' ? item.status : 'ready',
+      })
+    }
+    if (result.length > 0) return result
+  }
+
+  const fallbackIds = message.meta?.attachment_ids
+  if (Array.isArray(fallbackIds)) {
+    for (const value of fallbackIds) {
+      if (typeof value !== 'string') continue
+      result.push({
+        file_id: value,
+        original_name: `Файл ${value.slice(0, 8)}`,
+        content_type: 'application/octet-stream',
+        size: 0,
+        status: 'ready',
+      })
+    }
+  }
+  return result
+}
+
+function inferMediaKind(contentType: string, originalName: string): 'image' | 'video' | 'file' {
+  const mime = String(contentType || '').toLowerCase()
+  if (mime.startsWith('image/')) return 'image'
+  if (mime.startsWith('video/')) return 'video'
+
+  const ext = originalName.toLowerCase().split('.').pop() || ''
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].includes(ext)) return 'image'
+  if (['mp4', 'webm', 'mov', 'm4v', 'avi', 'mkv'].includes(ext)) return 'video'
+  return 'file'
 }
 
 function isMediaAttachment(contentType: string): boolean {
@@ -185,19 +226,19 @@ function AttachmentPreview({
     return <div className="text-xs text-destructive">{errorText}</div>
   }
 
-  if (isMediaAttachment(attachment.content_type)) {
-    if (attachment.content_type.toLowerCase().startsWith('image/')) {
-      return (
-        <a href={downloadUrl} target="_blank" rel="noreferrer" className="block">
-          <img
-            src={downloadUrl}
-            alt={attachment.original_name}
-            className="max-h-64 max-w-full rounded-lg border border-border/60 object-contain"
-          />
-        </a>
-      )
-    }
-
+  const mediaKind = inferMediaKind(attachment.content_type, attachment.original_name)
+  if (mediaKind === 'image') {
+    return (
+      <a href={downloadUrl} target="_blank" rel="noreferrer" className="block">
+        <img
+          src={downloadUrl}
+          alt={attachment.original_name}
+          className="max-h-64 max-w-full rounded-lg border border-border/60 object-contain"
+        />
+      </a>
+    )
+  }
+  if (mediaKind === 'video') {
     return (
       <video
         controls
@@ -1439,16 +1480,25 @@ export default function ChatPage() {
                       const showDayDivider = !prev || toDayKey(prev.created_at) !== toDayKey(message.created_at)
                       const senderLabel = getMessageOwnerLabel(message)
                       const ownStatus = getOwnMessageStatus(message)
-                      const expanded = Boolean(expandedMessages[message.id])
-                      const hasBody = message.body.trim().length > 0
                       const attachments = getMessageAttachments(message)
                       const hasAttachments = attachments.length > 0
-                      const expandable = hasBody && isExpandableMessage(message.body)
+                      const bodyText = message.body.trim()
+                      const hasBody = bodyText.length > 0
+                      const syntheticAttachmentBody = hasAttachments && attachments.length === 1 && bodyText === attachments[0]?.original_name
+                      const shouldRenderBody = hasBody && !syntheticAttachmentBody
+                      const expanded = Boolean(expandedMessages[message.id])
+                      const expandable = shouldRenderBody && isExpandableMessage(message.body)
                       const metaReplyToId = message.meta?.reply_to_message_id
                       const replyTarget = metaReplyToId ? messages.find((m) => m.id === metaReplyToId) || null : null
                       const showMenu = menuOpenMessageId === message.id
                       const replyPreviewText = replyTarget
-                        ? replyTarget.body.trim() || (getMessageAttachments(replyTarget).length > 0 ? 'Вложение' : '')
+                        ? (() => {
+                          const replyAttachments = getMessageAttachments(replyTarget)
+                          const replyBody = replyTarget.body.trim()
+                          const isSyntheticReplyBody =
+                              replyAttachments.length === 1 && replyBody === replyAttachments[0]?.original_name
+                          return (!isSyntheticReplyBody && replyBody) || (replyAttachments.length > 0 ? 'Вложение' : '')
+                        })()
                         : ''
 
                       return (
@@ -1496,7 +1546,7 @@ export default function ChatPage() {
                                   </button>
                                 )}
 
-                                {hasBody && (
+                                {shouldRenderBody && (
                                   <div
                                     className={`whitespace-pre-wrap break-all ${expandable && !expanded ? 'max-h-28 overflow-hidden' : ''} ${
                                       own ? 'text-right' : 'text-left'

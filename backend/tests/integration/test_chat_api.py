@@ -517,7 +517,9 @@ async def test_chat_delete_message_removes_attachment_from_s3(client: AsyncClien
 
 
 @pytest.mark.asyncio
-async def test_chat_delete_chat_removes_chat_attachments_from_s3(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+async def test_chat_delete_chat_enqueues_background_attachment_cleanup(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+):
     token = await _register_owner(client, org_name="Chat Delete Chat Attachments Org")
 
     created = await client.post(
@@ -532,7 +534,7 @@ async def test_chat_delete_chat_removes_chat_attachments_from_s3(client: AsyncCl
     assert created.status_code == 200, f"Create chat failed: {created.text}"
     chat_id = created.json()["data"]["id"]
 
-    deleted_from_s3: list[tuple[str, str]] = []
+    cleanup_calls: list[dict[str, object]] = []
 
     monkeypatch.setattr(
         "src.modules.chat.service.files_storage.generate_presigned_put_url",
@@ -543,10 +545,14 @@ async def test_chat_delete_chat_removes_chat_attachments_from_s3(client: AsyncCl
         lambda _s3_key, _bucket: {"ContentLength": 4096},
     )
 
-    def _fake_delete_file(s3_key: str, bucket: str) -> None:
-        deleted_from_s3.append((s3_key, bucket))
+    class _DummyTaskResult:
+        id = "chat-cleanup-task-1"
 
-    monkeypatch.setattr("src.modules.chat.service.files_storage.delete_file", _fake_delete_file)
+    def _fake_delay(*, org_id: str, file_ids: list[str]):
+        cleanup_calls.append({"org_id": org_id, "file_ids": file_ids})
+        return _DummyTaskResult()
+
+    monkeypatch.setattr("src.modules.chat.routes.chat_cleanup_attachments.delay", _fake_delay)
 
     init_upload = await client.post(
         f"/api/v1/chat/chats/{chat_id}/attachments/init-upload",
@@ -586,4 +592,70 @@ async def test_chat_delete_chat_removes_chat_attachments_from_s3(client: AsyncCl
     deleted_chat = await client.delete(f"/api/v1/chat/chats/{chat_id}", headers=_headers(token))
     assert deleted_chat.status_code == 200, f"Delete chat failed: {deleted_chat.text}"
     assert deleted_chat.json()["ok"] is True
-    assert len(deleted_from_s3) == 1
+    assert len(cleanup_calls) == 1
+    assert cleanup_calls[0]["file_ids"] == [file_id]
+
+
+@pytest.mark.asyncio
+async def test_chat_cleanup_task_removes_orphan_chat_attachments(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    from src.modules.chat.tasks import chat_cleanup_attachments
+
+    token = await _register_owner(client, org_name="Chat Task Cleanup Attachments Org")
+
+    created = await client.post(
+        "/api/v1/chat/chats",
+        json={
+            "chat_type": "group",
+            "title": "Cleanup Task Attachment Chat",
+            "member_ids": [],
+        },
+        headers=_headers(token),
+    )
+    assert created.status_code == 200, f"Create chat failed: {created.text}"
+    chat = created.json()["data"]
+    chat_id = chat["id"]
+    org_id = chat["org_id"]
+
+    deleted_from_s3: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        "src.modules.chat.service.files_storage.generate_presigned_put_url",
+        lambda **kwargs: ("https://upload.example.com/put", {"Content-Type": kwargs["content_type"]}),
+    )
+    monkeypatch.setattr(
+        "src.modules.chat.service.files_storage.head_object",
+        lambda _s3_key, _bucket: {"ContentLength": 4096},
+    )
+    def _fake_delete_file(s3_key: str, bucket: str) -> None:
+        deleted_from_s3.append((s3_key, bucket))
+
+    monkeypatch.setattr("src.modules.chat.tasks.files_storage.delete_file", _fake_delete_file)
+
+    init_upload = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/attachments/init-upload",
+        json={
+            "filename": "voice.ogg",
+            "size_bytes": 4096,
+            "content_type": "audio/ogg",
+        },
+        headers=_headers(token),
+    )
+    assert init_upload.status_code == 200, f"Init upload failed: {init_upload.text}"
+    assert init_upload.json()["ok"] is True
+    file_id = init_upload.json()["data"]["file_id"]
+
+    finish_upload = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/attachments/finish-upload",
+        json={"file_id": file_id, "size_bytes": 4096},
+        headers=_headers(token),
+    )
+    assert finish_upload.status_code == 200, f"Finish upload failed: {finish_upload.text}"
+    assert finish_upload.json()["ok"] is True
+
+    result = chat_cleanup_attachments.run(org_id=org_id, file_ids=[file_id])
+    assert result["received"] == 1
+    assert result["deleted"] in {0, 1}
+    assert result["skipped"] in {0, 1}
+    assert result["deleted"] + result["skipped"] == 1
+    if result["deleted"] == 1:
+        assert len(deleted_from_s3) == 1

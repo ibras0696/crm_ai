@@ -424,14 +424,13 @@ class ChatService:
                 exclude_message_id=message.id,
             )
 
-    async def delete_chat(self, *, chat: Chat, actor_id: uuid.UUID) -> None:
+    async def delete_chat(self, *, chat: Chat, actor_id: uuid.UUID) -> list[uuid.UUID]:
         member = await self.repo.get_chat_member(chat_id=chat.id, user_id=actor_id)
         if member is None or member.role not in self.CHAT_ADMIN_ROLES:
             raise ChatServiceError(code="FORBIDDEN", message="Недостаточно прав для удаления чата", status_code=403)
         file_ids = await self.repo.list_chat_upload_file_ids(org_id=chat.org_id, chat_id=chat.id)
         await self.repo.delete_chat(chat)
-        for file_id in file_ids:
-            await self._cleanup_orphan_chat_attachment(org_id=chat.org_id, file_id=file_id)
+        return file_ids
 
     async def _cleanup_orphan_chat_attachment(
         self,

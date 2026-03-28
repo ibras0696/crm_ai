@@ -80,6 +80,7 @@ celery.autodiscover_tasks(
         "src.modules.notifications",
         "src.modules.schedule",
         "src.modules.billing",
+        "src.modules.chat",
         "src.modules.docs",
         "src.modules.tables",
     ]

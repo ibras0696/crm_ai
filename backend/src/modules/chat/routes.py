@@ -1,3 +1,5 @@
+import asyncio
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, Query
@@ -26,9 +28,11 @@ from src.modules.chat.schemas import (
     UpdateReadCursorRequest,
 )
 from src.modules.chat.service import ChatService, ChatServiceError
+from src.modules.chat.tasks import chat_cleanup_attachments
 from src.modules.notifications.ws import manager as ws_manager
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+logger = logging.getLogger(__name__)
 
 CHAT_NOT_FOUND_MESSAGE = "Чат не найден"
 MESSAGE_NOT_FOUND_MESSAGE = "Сообщение не найдено"
@@ -149,6 +153,7 @@ async def delete_chat(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
     _: None = Depends(require_access(resource_type="chat", permission="can_delete", resource_id_param="chat_id")),
 ):
+    cleanup_file_ids: list[uuid.UUID] = []
     async with UnitOfWork() as uow:
         service = ChatService(uow.session)
         chat = await service.get_chat_for_user(
@@ -159,10 +164,30 @@ async def delete_chat(
         if chat is None:
             return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": CHAT_NOT_FOUND_MESSAGE})
         try:
-            await service.delete_chat(chat=chat, actor_id=current_user.user_id)
+            cleanup_file_ids = await service.delete_chat(chat=chat, actor_id=current_user.user_id)
         except ChatServiceError as error:
             return _service_error(error)
         await uow.commit()
+
+    if cleanup_file_ids:
+        cleanup_payload = [str(file_id) for file_id in cleanup_file_ids]
+        try:
+            chat_cleanup_attachments.delay(org_id=str(current_user.org_id), file_ids=cleanup_payload)
+        except Exception:
+            logger.exception(
+                "chat_cleanup_task_enqueue_failed_fallback_inline",
+                extra={
+                    "chat_id": str(chat_id),
+                    "org_id": str(current_user.org_id),
+                    "file_ids_count": len(cleanup_payload),
+                },
+            )
+            # Fallback to inline execution when broker is unavailable.
+            await asyncio.to_thread(
+                chat_cleanup_attachments.run,
+                org_id=str(current_user.org_id),
+                file_ids=cleanup_payload,
+            )
     return ApiResponse(data=None)
 
 
@@ -173,6 +198,7 @@ async def add_member(
     current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
     _: None = Depends(require_access(resource_type="chat", permission="can_write", resource_id_param="chat_id")),
 ):
+    member_ids: list[uuid.UUID] = []
     async with UnitOfWork() as uow:
         service = ChatService(uow.session)
         chat = await service.get_chat_for_user(
@@ -187,6 +213,7 @@ async def add_member(
         except ChatServiceError as error:
             return _service_error(error)
         await uow.commit()
+        member_ids = await service.get_member_ids(chat_id=chat.id)
         item = ChatMemberOut(
             id=member.id,
             chat_id=member.chat_id,
@@ -195,6 +222,15 @@ async def add_member(
             last_read_seq_no=member.last_read_seq_no,
             created_at=member.created_at,
         )
+
+    event_payload = {
+        "type": "chat.member.joined",
+        "schema_version": 1,
+        "chat_id": str(chat_id),
+        "member": item.model_dump(mode="json"),
+    }
+    for member_id in member_ids:
+        await ws_manager.send_personal_message(event_payload, member_id)
     return ApiResponse(data=item)
 
 

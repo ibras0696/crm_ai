@@ -82,6 +82,12 @@ interface InlineMediaViewerState {
 
 const attachmentDownloadUrlCache = new Map<string, CachedAttachmentDownloadUrl>()
 
+function chatTypeLabel(chatType: ChatInfo['chat_type']): string {
+  if (chatType === 'direct') return 'Личный'
+  if (chatType === 'group') return 'Группа'
+  return 'Канал'
+}
+
 function pickFirstString(item: Record<string, unknown>, keys: string[]): string {
   for (const key of keys) {
     const value = item[key]
@@ -703,6 +709,23 @@ export default function ChatPage() {
       return { userId: id, label, initials: getInitials(label), online: Boolean(presence[id]) }
     })
   }, [membersById, presence, selectedChat])
+
+  const getChatDisplayTitle = useCallback(
+    (chat: ChatInfo): string => {
+      if (chat.title?.trim()) return chat.title.trim()
+      if (chat.chat_type === 'direct') {
+        const peerIds = chat.member_ids.filter((id) => id !== user?.id)
+        if (peerIds.length > 0) {
+          const peerLabels = peerIds.map((id) => membersById.get(id) || id)
+          return peerLabels.join(', ')
+        }
+        return 'Личный чат'
+      }
+      if (chat.chat_type === 'group') return 'Группа без названия'
+      return 'Канал без названия'
+    },
+    [membersById, user?.id],
+  )
 
   const visibleMessages = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
@@ -1642,10 +1665,20 @@ export default function ChatPage() {
 
   const handleToggleMember = (memberId: string) => {
     setSelectedMemberIds((prev) => {
+      if (newChatType === 'direct') {
+        if (prev.includes(memberId)) return []
+        return [memberId]
+      }
       if (prev.includes(memberId)) return prev.filter((x) => x !== memberId)
       return [...prev, memberId]
     })
   }
+
+  useEffect(() => {
+    if (newChatType !== 'direct') return
+    setSelectedMemberIds((prev) => (prev.length > 1 ? [prev[0]!] : prev))
+    setNewChatTitle('')
+  }, [newChatType])
 
   const handleCreateChat = async () => {
     if (creatingChat) return
@@ -1654,7 +1687,7 @@ export default function ChatPage() {
       return
     }
     if (newChatType === 'direct' && selectedMemberIds.length !== 1) {
-      setErrorText('Для direct чата выберите ровно одного участника')
+      setErrorText('Для личного чата выберите одного участника')
       return
     }
 
@@ -1663,7 +1696,7 @@ export default function ChatPage() {
     try {
       const response = await chatApi.createChat({
         chat_type: newChatType,
-        title: newChatTitle.trim() || undefined,
+        title: newChatType === 'direct' ? undefined : newChatTitle.trim() || undefined,
         member_ids: selectedMemberIds,
       })
       if (response.data.ok && response.data.data) {
@@ -1769,7 +1802,7 @@ export default function ChatPage() {
 
     return chats.map((chat) => {
       const isActive = chat.id === selectedChatId
-      const title = chat.title || (chat.chat_type === 'direct' ? 'Direct чат' : 'Без названия')
+      const title = getChatDisplayTitle(chat)
 
       if (compact) {
         const compactLabel = getInitials(title).slice(0, 1)
@@ -1803,7 +1836,7 @@ export default function ChatPage() {
         >
           <div className="truncate font-medium">{title}</div>
           <div className="mt-1 text-xs text-muted-foreground">
-            {chat.chat_type} · {chat.member_ids.length} участников
+            {chatTypeLabel(chat.chat_type)} · {chat.member_ids.length} участников
           </div>
         </button>
       )
@@ -1857,12 +1890,19 @@ export default function ChatPage() {
                 <label className="text-xs text-muted-foreground">Тип</label>
                 <select
                   value={newChatType}
-                  onChange={(e) => setNewChatType(e.target.value as 'direct' | 'group' | 'channel')}
+                  onChange={(e) => {
+                    const value = e.target.value as 'direct' | 'group' | 'channel'
+                    setNewChatType(value)
+                    if (value === 'direct') {
+                      setNewChatTitle('')
+                      setSelectedMemberIds((prev) => prev.slice(0, 1))
+                    }
+                  }}
                   className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                 >
-                  <option value="group">Group</option>
-                  <option value="direct">Direct</option>
-                  <option value="channel">Channel</option>
+                  <option value="group">Группа</option>
+                  <option value="direct">Личный чат</option>
+                  <option value="channel">Канал</option>
                 </select>
               </div>
               <div className="space-y-1">
@@ -1870,12 +1910,12 @@ export default function ChatPage() {
                 <Input
                   value={newChatTitle}
                   onChange={(e) => setNewChatTitle(e.target.value)}
-                  placeholder={newChatType === 'direct' ? 'Для direct не обязательно' : 'Название чата'}
+                  placeholder={newChatType === 'direct' ? 'Для личного чата не обязательно' : 'Название чата'}
                 />
               </div>
               <div className="space-y-2">
                 <label className="text-xs text-muted-foreground">
-                  Участники {newChatType === 'direct' ? '(выберите 1)' : '(опционально)'}
+                  Участники {newChatType === 'direct' ? '(выберите одного)' : '(опционально)'}
                 </label>
                 <div className="max-h-56 space-y-1 overflow-y-auto rounded-md border border-border/60 p-2">
                   {members
@@ -1886,7 +1926,8 @@ export default function ChatPage() {
                       return (
                         <label key={m.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-muted/40">
                           <input
-                            type="checkbox"
+                            type={newChatType === 'direct' ? 'radio' : 'checkbox'}
+                            name={newChatType === 'direct' ? 'direct-chat-member' : undefined}
                             checked={checked}
                             onChange={() => handleToggleMember(m.user_id)}
                           />
@@ -1972,7 +2013,7 @@ export default function ChatPage() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="truncate text-sm font-semibold">
-                      {selectedChat ? selectedChat.title || 'Без названия' : 'Выберите чат'}
+                      {selectedChat ? getChatDisplayTitle(selectedChat) : 'Выберите чат'}
                     </div>
                     {selectedChat && (
                       isMobileViewport ? (
@@ -2385,7 +2426,7 @@ export default function ChatPage() {
                     }}
                     maxLength={MESSAGE_MAX_CHARS}
                     rows={1}
-                    placeholder={selectedChat ? 'Напишите сообщение (Enter — отправить, Shift+Enter — новая строка)' : 'Сначала выберите чат'}
+                    placeholder={selectedChat ? 'Пишите сообщение' : 'Выберите чат'}
                     disabled={!selectedChat || sending || isRecordingVoice}
                     className="max-h-40 min-h-[40px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onBlur={() => stopTyping()}

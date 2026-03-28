@@ -48,7 +48,7 @@ const MESSAGE_MAX_CHARS = 500
 const TYPING_TTL_MS = 3000
 const CHAT_SIDEBAR_COLLAPSED_STORAGE_KEY = 'chat.sidebar.collapsed.v1'
 const ATTACHMENT_URL_REFRESH_BUFFER_MS = 30_000
-const CHAT_ATTACHMENT_MAX_MB = 10
+const CHAT_ATTACHMENT_MAX_MB = 5
 const CHAT_ATTACHMENT_MAX_BYTES = CHAT_ATTACHMENT_MAX_MB * 1024 * 1024
 
 type ComposerAttachmentStatus = 'uploading' | 'ready' | 'error'

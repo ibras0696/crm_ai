@@ -35,7 +35,7 @@ class Settings(BaseSettings):
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "application/vnd.ms-excel",
     ]
-    CHAT_ATTACHMENT_MAX_UPLOAD_MB: int = 10
+    CHAT_ATTACHMENT_MAX_UPLOAD_MB: int = 5
     CHAT_ATTACHMENT_MAX_FILES_PER_MESSAGE: int = 1
     CHAT_ATTACHMENT_PRESIGNED_TTL_S: int = 900
     CHAT_ATTACHMENT_ALLOWED_MIME_TYPES: list[str] = []

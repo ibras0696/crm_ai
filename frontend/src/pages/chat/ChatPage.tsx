@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent } from 'react'
 import { isAxiosError } from 'axios'
-import { ArrowDown, Camera, ChevronLeft, ChevronRight, Image, Loader2, MessageSquare, Mic, Paperclip, Plus, Search, Square, Video, X } from 'lucide-react'
+import { ArrowDown, Camera, ChevronLeft, ChevronRight, Image, Loader2, MessageSquare, Mic, Paperclip, Plus, Search, SendHorizontal, Square, Video, X } from 'lucide-react'
 import { chatApi, type ChatAttachmentInfo, type ChatInfo, type ChatMemberInfo, type ChatMessageInfo, type ChatMessageMeta } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
@@ -252,6 +252,8 @@ function formatDurationLabel(durationMs: number): string {
 function resolveVoiceRecorderMimeType(): string {
   if (typeof MediaRecorder === 'undefined') return ''
   const candidates = [
+    'audio/mp4;codecs=mp4a.40.2',
+    'audio/mp4',
     'audio/ogg;codecs=opus',
     'audio/webm;codecs=opus',
     'audio/ogg',
@@ -334,12 +336,14 @@ function AttachmentPreview({
   const [downloadUrl, setDownloadUrl] = useState('')
   const [loading, setLoading] = useState(true)
   const [errorText, setErrorText] = useState('')
+  const [audioFailed, setAudioFailed] = useState(false)
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     setErrorText('')
     setDownloadUrl('')
+    setAudioFailed(false)
 
     void getAttachmentDownloadUrl(chatId, attachment.file_id)
       .then((url) => {
@@ -392,9 +396,31 @@ function AttachmentPreview({
   if (mediaKind === 'audio') {
     return (
       <div className="max-w-full rounded-lg border border-border/60 bg-background/20 p-2">
-        <audio controls preload="metadata" src={downloadUrl} className="w-full min-w-[220px] max-w-full">
-          Ваш браузер не поддерживает аудио.
-        </audio>
+        {!audioFailed ? (
+          <audio
+            controls
+            preload="metadata"
+            className="w-full min-w-[220px] max-w-full"
+            onError={() => setAudioFailed(true)}
+          >
+            <source src={downloadUrl} type={attachment.content_type || undefined} />
+            <source src={downloadUrl} />
+            Ваш браузер не поддерживает аудио.
+          </audio>
+        ) : (
+          <div className="flex items-center justify-between gap-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5">
+            <span className="truncate text-xs text-muted-foreground">Не удалось воспроизвести</span>
+            <a
+              href={downloadUrl}
+              target="_blank"
+              rel="noreferrer"
+              download={attachment.original_name}
+              className="shrink-0 text-xs text-primary hover:underline"
+            >
+              Скачать
+            </a>
+          </div>
+        )}
         <div className="mt-1 truncate text-[11px] text-muted-foreground">{attachment.original_name}</div>
       </div>
     )
@@ -456,9 +482,11 @@ export default function ChatPage() {
     return window.matchMedia('(max-width: 1023px)').matches
   })
   const [isMobileDialogsOpen, setIsMobileDialogsOpen] = useState(false)
+  const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false)
   const selectedChatIdRef = useRef<string | null>(null)
   const messagesViewportRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
+  const attachMenuRef = useRef<HTMLDivElement | null>(null)
   const mediaAttachmentInputRef = useRef<HTMLInputElement | null>(null)
   const cameraPhotoAttachmentInputRef = useRef<HTMLInputElement | null>(null)
   const cameraVideoAttachmentInputRef = useRef<HTMLInputElement | null>(null)
@@ -477,6 +505,7 @@ export default function ChatPage() {
 
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId
+    setIsAttachMenuOpen(false)
   }, [selectedChatId])
 
   useEffect(() => {
@@ -495,6 +524,18 @@ export default function ChatPage() {
     if (typeof window === 'undefined') return
     window.localStorage.setItem(CHAT_SIDEBAR_COLLAPSED_STORAGE_KEY, isDesktopSidebarCollapsed ? '1' : '0')
   }, [isDesktopSidebarCollapsed])
+
+  useEffect(() => {
+    if (!isAttachMenuOpen) return
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node | null
+      if (attachMenuRef.current && target && !attachMenuRef.current.contains(target)) {
+        setIsAttachMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    return () => document.removeEventListener('mousedown', onPointerDown)
+  }, [isAttachMenuOpen])
 
   const membersById = useMemo(() => {
     return new Map(
@@ -849,6 +890,7 @@ export default function ChatPage() {
   }
 
   const openMediaPicker = () => {
+    setIsAttachMenuOpen(false)
     if (!selectedChatId) {
       setErrorText('Сначала выберите чат')
       return
@@ -865,6 +907,7 @@ export default function ChatPage() {
   }
 
   const openCameraPhotoPicker = () => {
+    setIsAttachMenuOpen(false)
     if (!selectedChatId) {
       setErrorText('Сначала выберите чат')
       return
@@ -881,6 +924,7 @@ export default function ChatPage() {
   }
 
   const openCameraVideoPicker = () => {
+    setIsAttachMenuOpen(false)
     if (!selectedChatId) {
       setErrorText('Сначала выберите чат')
       return
@@ -897,6 +941,7 @@ export default function ChatPage() {
   }
 
   const openFilePicker = () => {
+    setIsAttachMenuOpen(false)
     if (!selectedChatId) {
       setErrorText('Сначала выберите чат')
       return
@@ -928,6 +973,7 @@ export default function ChatPage() {
   }
 
   const startVoiceRecording = async () => {
+    setIsAttachMenuOpen(false)
     if (!selectedChatId) {
       setErrorText('Сначала выберите чат')
       return
@@ -1030,6 +1076,7 @@ export default function ChatPage() {
   }
 
   const handleComposerPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    setIsAttachMenuOpen(false)
     const items = Array.from(event.clipboardData?.items || [])
     const imageItem = items.find((item) => item.kind === 'file' && item.type.startsWith('image/'))
     if (!imageItem) return
@@ -1491,6 +1538,7 @@ export default function ChatPage() {
   const handleSend = async () => {
     const trimmedDraft = draft.trim()
     if (!selectedChatId || sending) return
+    setIsAttachMenuOpen(false)
     if (isRecordingVoice) {
       setErrorText('Сначала остановите запись голосового')
       return
@@ -1822,50 +1870,6 @@ export default function ChatPage() {
                     <Button type="button" size="icon" variant="ghost" onClick={() => setSearchOpen((prev) => !prev)} aria-label="Поиск по сообщениям">
                       <Search className="h-4 w-4" />
                     </Button>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      onClick={openMediaPicker}
-                      disabled={!selectedChatId || sending || isRecordingVoice || composerAttachments.length >= 1 || hasUploadingAttachments}
-                      aria-label="Добавить фото или видео"
-                      title="Фото/Видео"
-                    >
-                      <Image className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      onClick={openCameraPhotoPicker}
-                      disabled={!selectedChatId || sending || isRecordingVoice || composerAttachments.length >= 1 || hasUploadingAttachments}
-                      aria-label="Сделать фото с камеры"
-                      title="Камера фото"
-                    >
-                      <Camera className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      onClick={openCameraVideoPicker}
-                      disabled={!selectedChatId || sending || isRecordingVoice || composerAttachments.length >= 1 || hasUploadingAttachments}
-                      aria-label="Снять видео с камеры"
-                      title="Камера видео"
-                    >
-                      <Video className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      onClick={openFilePicker}
-                      disabled={!selectedChatId || sending || isRecordingVoice || composerAttachments.length >= 1 || hasUploadingAttachments}
-                      aria-label="Добавить файл"
-                      title="Файл"
-                    >
-                      <Paperclip className="h-4 w-4" />
-                    </Button>
                   </div>
                 </div>
                 {searchOpen && (
@@ -2123,11 +2127,11 @@ export default function ChatPage() {
                     })}
                   </div>
                 )}
-                <div className="mb-2 text-xs text-muted-foreground">
-                  Вложения: 1 файл до {CHAT_ATTACHMENT_MAX_MB} MB. Голосовое: до 1 минуты. Доступны действия: Фото/Видео, Камера фото, Камера видео, Файл и ГС.
+                <div className="mb-2 hidden text-[11px] text-muted-foreground sm:block">
+                  До {CHAT_ATTACHMENT_MAX_MB} MB, 1 вложение на сообщение. Голосовое до 1 минуты.
                 </div>
                 {isRecordingVoice && (
-                  <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs text-red-400">
+                  <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-400">
                     <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
                     Идет запись: {formatDurationLabel(voiceRecordingElapsedMs)} / 01:00
                   </div>
@@ -2163,46 +2167,59 @@ export default function ChatPage() {
                   onChange={(event) => void handleFileInputChange(event)}
                 />
 
-                <div className="flex items-end gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="hidden sm:inline-flex"
-                    onClick={openMediaPicker}
-                    disabled={!selectedChatId || sending || isRecordingVoice || composerAttachments.length >= 1 || hasUploadingAttachments}
-                    aria-label="Добавить фото или видео"
-                    title="Фото/Видео"
-                  >
-                    <Image className="mr-1 h-4 w-4" />
-                    Фото/Видео
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="hidden sm:inline-flex"
-                    onClick={openFilePicker}
-                    disabled={!selectedChatId || sending || isRecordingVoice || composerAttachments.length >= 1 || hasUploadingAttachments}
-                    aria-label="Добавить файл"
-                    title="Файл"
-                  >
-                    <Paperclip className="mr-1 h-4 w-4" />
-                    Файл
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={isRecordingVoice ? 'destructive' : 'outline'}
-                    onClick={() => void startVoiceRecording()}
-                    disabled={!selectedChatId || sending || (!isRecordingVoice && (composerAttachments.length >= 1 || hasUploadingAttachments))}
-                    aria-label={isRecordingVoice ? 'Остановить запись голосового' : 'Начать запись голосового'}
-                    title={isRecordingVoice ? 'Стоп запись' : 'Записать ГС'}
-                    className="shrink-0"
-                  >
-                    {isRecordingVoice ? <Square className="mr-1 h-4 w-4" /> : <Mic className="mr-1 h-4 w-4" />}
-                    {isRecordingVoice ? 'Стоп' : 'ГС'}
-                  </Button>
+                <div className="relative flex items-end gap-2" ref={attachMenuRef}>
+                  <div className="relative shrink-0">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="outline"
+                      className="h-10 w-10 rounded-full"
+                      onClick={() => setIsAttachMenuOpen((prev) => !prev)}
+                      disabled={!selectedChatId || sending || isRecordingVoice || composerAttachments.length >= 1 || hasUploadingAttachments}
+                      aria-label="Открыть меню вложений"
+                      title="Вложения"
+                    >
+                      <Plus className="h-5 w-5" />
+                    </Button>
+                    {isAttachMenuOpen && (
+                      <div className="absolute bottom-12 left-0 z-40 w-[min(280px,calc(100vw-4rem))] rounded-xl border border-border/70 bg-background/95 p-2 shadow-2xl backdrop-blur">
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-2 text-left text-xs hover:bg-muted/30"
+                            onClick={openMediaPicker}
+                          >
+                            <Image className="h-4 w-4" />
+                            Фото/Видео
+                          </button>
+                          <button
+                            type="button"
+                            className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-2 text-left text-xs hover:bg-muted/30"
+                            onClick={openCameraPhotoPicker}
+                          >
+                            <Camera className="h-4 w-4" />
+                            Камера
+                          </button>
+                          <button
+                            type="button"
+                            className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-2 text-left text-xs hover:bg-muted/30"
+                            onClick={openCameraVideoPicker}
+                          >
+                            <Video className="h-4 w-4" />
+                            Видео
+                          </button>
+                          <button
+                            type="button"
+                            className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-2 text-left text-xs hover:bg-muted/30"
+                            onClick={openFilePicker}
+                          >
+                            <Paperclip className="h-4 w-4" />
+                            Файл
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                   <textarea
                     ref={composerRef}
                     value={draft}
@@ -2224,13 +2241,44 @@ export default function ChatPage() {
                       }
                     }}
                   />
-                  <Button
-                    type="button"
-                    onClick={() => void handleSend()}
-                    disabled={!canSendMessage || isRecordingVoice || draft.trim().length > MESSAGE_MAX_CHARS || hasUploadingAttachments}
-                  >
-                    {sending ? '...' : 'Отправить'}
-                  </Button>
+                  {isRecordingVoice ? (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="destructive"
+                      className="h-10 w-10 rounded-full"
+                      onClick={() => stopVoiceRecording(true)}
+                      aria-label="Остановить запись голосового"
+                      title="Стоп запись"
+                    >
+                      <Square className="h-4 w-4" />
+                    </Button>
+                  ) : canSendMessage ? (
+                    <Button
+                      type="button"
+                      size="icon"
+                      className="h-10 w-10 rounded-full"
+                      onClick={() => void handleSend()}
+                      disabled={sending || draft.trim().length > MESSAGE_MAX_CHARS || hasUploadingAttachments}
+                      aria-label="Отправить сообщение"
+                      title="Отправить"
+                    >
+                      <SendHorizontal className="h-4 w-4" />
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="outline"
+                      className="h-10 w-10 rounded-full"
+                      onClick={() => void startVoiceRecording()}
+                      disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
+                      aria-label="Записать голосовое сообщение"
+                      title="Голосовое"
+                    >
+                      <Mic className="h-4 w-4" />
+                    </Button>
+                  )}
                 </div>
                 {selectedChat && (
                   <div className="mt-2 text-right text-xs text-muted-foreground">

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent } from 'react'
 import { isAxiosError } from 'axios'
-import { ArrowDown, Camera, ChevronLeft, ChevronRight, Image, Loader2, MessageSquare, Mic, Paperclip, Plus, Search, SendHorizontal, Square, Video, X } from 'lucide-react'
+import { ArrowDown, Camera, ChevronLeft, ChevronRight, Image, Loader2, MessageSquare, Mic, Paperclip, Pause, Play, Plus, Search, SendHorizontal, Square, Video, X } from 'lucide-react'
 import { chatApi, type ChatAttachmentInfo, type ChatInfo, type ChatMemberInfo, type ChatMessageInfo, type ChatMessageMeta } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
@@ -55,6 +55,7 @@ const VOICE_NOTE_TICK_MS = 250
 
 type ComposerAttachmentStatus = 'uploading' | 'ready' | 'error'
 type ComposerAttachmentSource = 'media' | 'file' | 'paste' | 'voice'
+type InlineMediaKind = 'image' | 'video'
 
 interface ComposerAttachment {
   clientId: string
@@ -71,6 +72,12 @@ interface CachedAttachmentDownloadUrl {
   url: string
   expiresAt: number
   promise?: Promise<string>
+}
+
+interface InlineMediaViewerState {
+  kind: InlineMediaKind
+  url: string
+  originalName: string
 }
 
 const attachmentDownloadUrlCache = new Map<string, CachedAttachmentDownloadUrl>()
@@ -258,6 +265,13 @@ function formatDurationLabel(durationMs: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
+function formatClockSeconds(secondsValue: number): string {
+  const safeSeconds = Math.max(0, Math.floor(Number.isFinite(secondsValue) ? secondsValue : 0))
+  const minutes = Math.floor(safeSeconds / 60)
+  const seconds = safeSeconds % 60
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
 function resolveVoiceRecorderMimeType(): string {
   if (typeof MediaRecorder === 'undefined') return ''
   const candidates = [
@@ -338,14 +352,20 @@ async function getAttachmentDownloadUrl(chatId: string, fileId: string): Promise
 function AttachmentPreview({
   chatId,
   attachment,
+  onOpenMedia,
 }: {
   chatId: string
   attachment: ChatAttachmentInfo
+  onOpenMedia?: (payload: InlineMediaViewerState) => void
 }) {
   const [downloadUrl, setDownloadUrl] = useState('')
   const [loading, setLoading] = useState(true)
   const [errorText, setErrorText] = useState('')
   const [audioFailed, setAudioFailed] = useState(false)
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false)
+  const [audioCurrentTime, setAudioCurrentTime] = useState(0)
+  const [audioDuration, setAudioDuration] = useState(0)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -353,6 +373,9 @@ function AttachmentPreview({
     setErrorText('')
     setDownloadUrl('')
     setAudioFailed(false)
+    setIsAudioPlaying(false)
+    setAudioCurrentTime(0)
+    setAudioDuration(0)
 
     void getAttachmentDownloadUrl(chatId, attachment.file_id)
       .then((url) => {
@@ -381,42 +404,149 @@ function AttachmentPreview({
 
   const mediaKind = inferMediaKind(attachment.content_type, attachment.original_name)
   const playbackType = normalizeAttachmentMimeForPlayback(attachment.content_type)
+  useEffect(() => {
+    if (mediaKind !== 'audio') return
+    const audio = audioRef.current
+    if (!audio) return
+
+    const onLoadedMetadata = () => {
+      const duration = Number.isFinite(audio.duration) ? audio.duration : 0
+      setAudioDuration(duration)
+    }
+    const onTimeUpdate = () => {
+      setAudioCurrentTime(Number.isFinite(audio.currentTime) ? audio.currentTime : 0)
+    }
+    const onEnded = () => {
+      setIsAudioPlaying(false)
+      setAudioCurrentTime(Number.isFinite(audio.duration) ? audio.duration : 0)
+    }
+    const onPause = () => setIsAudioPlaying(false)
+    const onPlay = () => setIsAudioPlaying(true)
+
+    audio.addEventListener('loadedmetadata', onLoadedMetadata)
+    audio.addEventListener('timeupdate', onTimeUpdate)
+    audio.addEventListener('ended', onEnded)
+    audio.addEventListener('pause', onPause)
+    audio.addEventListener('play', onPlay)
+    onLoadedMetadata()
+
+    return () => {
+      audio.removeEventListener('loadedmetadata', onLoadedMetadata)
+      audio.removeEventListener('timeupdate', onTimeUpdate)
+      audio.removeEventListener('ended', onEnded)
+      audio.removeEventListener('pause', onPause)
+      audio.removeEventListener('play', onPlay)
+    }
+  }, [downloadUrl, mediaKind])
+
+  const toggleAudioPlayback = async () => {
+    const audio = audioRef.current
+    if (!audio || audioFailed) return
+    try {
+      if (audio.paused) {
+        await audio.play()
+      } else {
+        audio.pause()
+      }
+    } catch {
+      setAudioFailed(true)
+    }
+  }
+
+  const handleAudioSeek = (nextValue: number) => {
+    const audio = audioRef.current
+    if (!audio || audioFailed) return
+    audio.currentTime = Math.max(0, nextValue)
+    setAudioCurrentTime(Math.max(0, nextValue))
+  }
+
   if (mediaKind === 'image') {
     return (
-      <a href={downloadUrl} target="_blank" rel="noreferrer" className="block">
+      <button
+        type="button"
+        className="block max-w-full"
+        onClick={() =>
+          onOpenMedia?.({
+            kind: 'image',
+            url: downloadUrl,
+            originalName: attachment.original_name,
+          })
+        }
+      >
         <img
           src={downloadUrl}
           alt={attachment.original_name}
-          className="max-h-64 max-w-full rounded-lg border border-border/60 object-contain"
+          className="max-h-72 max-w-full rounded-lg border border-border/60 object-contain"
         />
-      </a>
+      </button>
     )
   }
   if (mediaKind === 'video') {
     return (
-      <video
-        controls
-        src={downloadUrl}
-        className="max-h-80 max-w-full rounded-lg border border-border/60"
-      >
-        Ваш браузер не поддерживает видео.
-      </video>
+      <div className="max-w-full rounded-lg border border-border/60 bg-background/20 p-2">
+        <video
+          controls
+          src={downloadUrl}
+          className="max-h-80 max-w-full rounded-md"
+        >
+          Ваш браузер не поддерживает видео.
+        </video>
+        <div className="mt-2 flex justify-end">
+          <button
+            type="button"
+            onClick={() =>
+              onOpenMedia?.({
+                kind: 'video',
+                url: downloadUrl,
+                originalName: attachment.original_name,
+              })
+            }
+            className="rounded-md border border-border/60 px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted/20"
+          >
+            Развернуть
+          </button>
+        </div>
+      </div>
     )
   }
   if (mediaKind === 'audio') {
     return (
-      <div className="max-w-full rounded-lg border border-border/60 bg-background/20 p-2">
+      <div className="max-w-full rounded-2xl border border-primary/30 bg-primary/[0.08] p-2.5">
+        <audio
+          ref={audioRef}
+          preload="metadata"
+          className="hidden"
+          onError={() => setAudioFailed(true)}
+        >
+          <source src={downloadUrl} type={playbackType || undefined} />
+          <source src={downloadUrl} />
+        </audio>
         {!audioFailed ? (
-          <audio
-            controls
-            preload="metadata"
-            className="w-full min-w-[220px] max-w-full"
-            onError={() => setAudioFailed(true)}
-          >
-            <source src={downloadUrl} type={playbackType || undefined} />
-            <source src={downloadUrl} />
-            Ваш браузер не поддерживает аудио.
-          </audio>
+          <div className="flex min-w-[240px] items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void toggleAudioPlayback()}
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/80 text-primary-foreground hover:bg-primary"
+              aria-label={isAudioPlaying ? 'Пауза' : 'Воспроизвести'}
+            >
+              {isAudioPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 fill-current" />}
+            </button>
+            <div className="min-w-0 flex-1">
+              <input
+                type="range"
+                min={0}
+                max={Math.max(audioDuration, 1)}
+                step={0.1}
+                value={Math.min(audioCurrentTime, Math.max(audioDuration, 1))}
+                onChange={(event) => handleAudioSeek(Number(event.target.value))}
+                className="h-1.5 w-full cursor-pointer accent-primary"
+              />
+              <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
+                <span>{formatClockSeconds(audioCurrentTime)}</span>
+                <span>{formatClockSeconds(audioDuration)}</span>
+              </div>
+            </div>
+          </div>
         ) : (
           <div className="flex items-center justify-between gap-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5">
             <span className="truncate text-xs text-muted-foreground">Не удалось воспроизвести</span>
@@ -431,7 +561,6 @@ function AttachmentPreview({
             </a>
           </div>
         )}
-        <div className="mt-1 truncate text-[11px] text-muted-foreground">{attachment.original_name}</div>
       </div>
     )
   }
@@ -493,6 +622,7 @@ export default function ChatPage() {
   })
   const [isMobileDialogsOpen, setIsMobileDialogsOpen] = useState(false)
   const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false)
+  const [mediaViewer, setMediaViewer] = useState<InlineMediaViewerState | null>(null)
   const selectedChatIdRef = useRef<string | null>(null)
   const messagesViewportRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
@@ -546,6 +676,15 @@ export default function ChatPage() {
     document.addEventListener('mousedown', onPointerDown)
     return () => document.removeEventListener('mousedown', onPointerDown)
   }, [isAttachMenuOpen])
+
+  useEffect(() => {
+    if (!mediaViewer) return
+    const onEsc = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMediaViewer(null)
+    }
+    document.addEventListener('keydown', onEsc)
+    return () => document.removeEventListener('keydown', onEsc)
+  }, [mediaViewer])
 
   const membersById = useMemo(() => {
     return new Map(
@@ -2008,7 +2147,12 @@ export default function ChatPage() {
                                 {hasAttachments && (
                                   <div className={`mt-2 space-y-2 ${own ? 'text-right' : 'text-left'}`}>
                                     {attachments.map((attachment) => (
-                                      <AttachmentPreview key={attachment.file_id} chatId={message.chat_id} attachment={attachment} />
+                                      <AttachmentPreview
+                                        key={attachment.file_id}
+                                        chatId={message.chat_id}
+                                        attachment={attachment}
+                                        onOpenMedia={setMediaViewer}
+                                      />
                                     ))}
                                   </div>
                                 )}
@@ -2112,8 +2256,10 @@ export default function ChatPage() {
                           }`}
                         >
                           {isUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
-                          <div className="min-w-0">
-                            <div className="max-w-[220px] truncate">{attachment.originalName}</div>
+                            <div className="min-w-0">
+                            <div className="max-w-[220px] truncate">
+                              {isVoice ? 'Голосовое сообщение' : attachment.originalName}
+                            </div>
                             <div className="text-[10px] opacity-80">
                               {isUploading
                                 ? 'Загрузка...'
@@ -2298,6 +2444,45 @@ export default function ChatPage() {
               </div>
             </div>
           </div>
+
+          {mediaViewer && (
+            <div
+              className="fixed inset-0 z-[80] flex items-center justify-center bg-black/85 p-4"
+              onClick={() => setMediaViewer(null)}
+            >
+              <div
+                className="relative w-full max-w-6xl"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className="absolute right-2 top-2 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+                  onClick={() => setMediaViewer(null)}
+                  aria-label="Закрыть просмотр"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+                <div className="max-h-[88vh] overflow-hidden rounded-xl border border-white/15 bg-black/40 p-2">
+                  {mediaViewer.kind === 'image' ? (
+                    <img
+                      src={mediaViewer.url}
+                      alt={mediaViewer.originalName}
+                      className="mx-auto max-h-[82vh] max-w-full object-contain"
+                    />
+                  ) : (
+                    <video
+                      src={mediaViewer.url}
+                      controls
+                      autoPlay
+                      className="mx-auto max-h-[82vh] max-w-full"
+                    >
+                      Ваш браузер не поддерживает видео.
+                    </video>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {isMobileDialogsOpen && (
             <div

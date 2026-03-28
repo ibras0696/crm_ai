@@ -1,0 +1,733 @@
+import { ArrowDown, Camera, ChevronLeft, ChevronRight, Image, Loader2, MessageSquare, Mic, Paperclip, Plus, Search, SendHorizontal, Square, Trash2, UserPlus, Video, X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import {
+  AttachmentPreview,
+  CHAT_ATTACHMENT_MAX_MB,
+  MESSAGE_MAX_CHARS,
+  formatDayDivider,
+  formatDurationLabel,
+  formatFileSize,
+  getInitials,
+  getMessageAttachments,
+  isVoiceAttachment,
+  toDayKey,
+} from '../chatHelpers'
+
+export function ChatDialogsCard(props: Record<string, unknown>) {
+  const {
+    isMobileDialogsOpen,
+    setIsMobileDialogsOpen,
+    isDesktopSidebarCollapsed,
+    setIsDesktopSidebarCollapsed,
+    renderChatList,
+    selectedChat,
+    getChatDisplayTitle,
+    selectedChatMembers,
+    isMobileViewport,
+    typingLabels,
+    canManageMembers,
+    setAddMemberOpen,
+    setSearchOpen,
+    searchOpen,
+    searchQuery,
+    setSearchQuery,
+    canDeleteSelectedChat,
+    handleDeleteSelectedChat,
+    deletingChat,
+    messagesViewportRef,
+    handleMessagesScroll,
+    loadingOlderMessages,
+    hasMoreMessages,
+    loadingMessages,
+    messages,
+    visibleMessages,
+    user,
+    membersById,
+    getMessageOwnerLabel,
+    getOwnMessageStatus,
+    expandedMessages,
+    isExpandableMessage,
+    setExpandedMessages,
+    menuOpenMessageId,
+    setMenuOpenMessageId,
+    handleCopyMessage,
+    setReplyToMessageId,
+    composerRef,
+    handleDeleteMessage,
+    newMessagesCount,
+    isNearBottom,
+    scrollToLatest,
+    replyToMessage,
+    composerAttachments,
+    handleRemoveComposerAttachment,
+    isRecordingVoice,
+    voiceRecordingElapsedMs,
+    mediaAttachmentInputRef,
+    handleMediaInputChange,
+    cameraPhotoAttachmentInputRef,
+    handleCameraPhotoInputChange,
+    cameraVideoAttachmentInputRef,
+    handleCameraVideoInputChange,
+    fileAttachmentInputRef,
+    handleFileInputChange,
+    attachMenuRef,
+    isAttachMenuOpen,
+    setIsAttachMenuOpen,
+    selectedChatId,
+    sending,
+    hasUploadingAttachments,
+    openMediaPicker,
+    openCameraPhotoPicker,
+    openCameraVideoPicker,
+    openFilePicker,
+    draft,
+    setDraft,
+    touchTypingActivity,
+    stopTyping,
+    handleComposerPaste,
+    canSendMessage,
+    readyComposerAttachments,
+    handleSend,
+    startVoiceRecording,
+    stopVoiceRecording,
+    mediaPreview,
+    setMediaPreview,
+  } = props as any
+
+  const toggleMessageExpanded = (messageId: string) => {
+    setExpandedMessages((prev: Record<string, boolean>) => ({ ...prev, [messageId]: !prev[messageId] }))
+  }
+
+  return (
+      <Card className="border-border/60">
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
+          <CardTitle className="text-base">Диалоги</CardTitle>
+          <Button
+            type="button"
+            className="h-8 rounded-full border border-primary/30 bg-primary/10 px-3 text-xs text-primary hover:bg-primary/20 lg:hidden"
+            variant="ghost"
+            onClick={() => setIsMobileDialogsOpen(true)}
+            aria-label="Открыть диалоги"
+          >
+            <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
+            Чаты
+          </Button>
+        </CardHeader>
+        <CardContent className="relative h-[70vh] min-h-[520px] max-h-[760px] p-0">
+          <div className={`relative h-full min-h-0 p-4 ${isDesktopSidebarCollapsed ? 'lg:pl-16' : ''}`}>
+            {isDesktopSidebarCollapsed ? (
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="absolute left-4 top-6 z-30 hidden h-9 w-9 rounded-full border border-border/70 bg-background/90 shadow-sm backdrop-blur lg:flex"
+                onClick={() => setIsDesktopSidebarCollapsed(false)}
+                aria-label="Открыть панель чатов"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  aria-label="Закрыть панель чатов"
+                  onClick={() => setIsDesktopSidebarCollapsed(true)}
+                  className="absolute inset-0 z-10 hidden bg-black/20 lg:block"
+                />
+                <div className="absolute inset-y-4 left-4 z-20 hidden w-[280px] lg:block">
+                  <div className="flex h-full min-h-0 flex-col rounded-md border border-border/60 bg-background/95 shadow-xl backdrop-blur">
+                    <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
+                      <span className="text-xs text-muted-foreground">Чаты</span>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        onClick={() => setIsDesktopSidebarCollapsed(true)}
+                        aria-label="Свернуть панель чатов"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                      {renderChatList(false)}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            <div className="flex h-full min-h-0 min-w-0 flex-col rounded-md border border-border/60">
+              <div className="border-b border-border/60 px-3 py-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold">
+                      {selectedChat ? getChatDisplayTitle(selectedChat) : 'Выберите чат'}
+                    </div>
+                    {selectedChat && (
+                      isMobileViewport ? (
+                        <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                          <div className="flex -space-x-1">
+                            {selectedChatMembers.slice(0, 3).map((member: any) => (
+                              <span
+                                key={member.userId}
+                                className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-border/70 bg-muted/20 text-[9px] font-medium"
+                                title={member.label}
+                              >
+                                {member.initials}
+                              </span>
+                            ))}
+                          </div>
+                          <span>{selectedChatMembers.length} участников</span>
+                          <span className="text-emerald-400">
+                            {selectedChatMembers.filter((member: any) => member.online).length} онлайн
+                          </span>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                            {selectedChatMembers.slice(0, 5).map((member: any) => (
+                              <span key={member.userId} className="inline-flex items-center gap-1 rounded-full border border-border/60 px-2 py-0.5 text-[11px] text-muted-foreground">
+                                <span className={`h-1.5 w-1.5 rounded-full ${member.online ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
+                                <span className="max-w-[120px] truncate">{member.label}</span>
+                              </span>
+                            ))}
+                          </div>
+                          <div className="mt-1 text-[11px] text-muted-foreground">
+                            Онлайн: {selectedChatMembers.filter((member: any) => member.online).length}/{selectedChatMembers.length}
+                          </div>
+                        </>
+                      )
+                    )}
+                    {typingLabels.length > 0 && (
+                      <div className="mt-1 text-[11px] text-primary">
+                        {typingLabels.join(', ')} печатает...
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {canManageMembers && (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => setAddMemberOpen(true)}
+                        aria-label="Добавить участника"
+                        title="Добавить участника"
+                      >
+                        <UserPlus className="h-4 w-4" />
+                      </Button>
+                    )}
+                    <Button type="button" size="icon" variant="ghost" onClick={() => setSearchOpen((prev: boolean) => !prev)} aria-label="Поиск по сообщениям">
+                      <Search className="h-4 w-4" />
+                    </Button>
+                    {canDeleteSelectedChat && (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => void handleDeleteSelectedChat()}
+                        disabled={deletingChat}
+                        aria-label="Удалить группу"
+                        title="Удалить группу"
+                      >
+                        {deletingChat ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                      </Button>
+                    )}
+                  </div>
+                </div>
+                {searchOpen && (
+                  <div className="mt-2">
+                    <Input
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Поиск в текущем чате..."
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div
+                ref={messagesViewportRef}
+                onScroll={handleMessagesScroll}
+                className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3"
+              >
+                {loadingOlderMessages && (
+                  <div className="pb-1 text-center text-xs text-muted-foreground">Загрузка предыдущих сообщений...</div>
+                )}
+                {!selectedChat ? (
+                  <div className="text-sm text-muted-foreground">{isMobileViewport ? 'Откройте список через кнопку "Чаты"' : 'Откройте чат слева'}</div>
+                ) : loadingMessages ? (
+                  <div className="text-sm text-muted-foreground">Загрузка сообщений...</div>
+                ) : messages.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">Сообщений пока нет</div>
+                ) : visibleMessages.length === 0 ? (
+                  <div className="text-sm text-muted-foreground">Поиск не дал результатов</div>
+                ) : (
+                  <>
+                    {!hasMoreMessages && (
+                      <div className="pb-1 text-center text-xs text-muted-foreground">Начало переписки</div>
+                    )}
+                    {visibleMessages.map((message: any, index: number) => {
+                      const own = message.sender_id === user?.id
+                      const prev = visibleMessages[index - 1]
+                      const showDayDivider = !prev || toDayKey(prev.created_at) !== toDayKey(message.created_at)
+                      const senderLabel = getMessageOwnerLabel(message)
+                      const ownStatus = getOwnMessageStatus(message)
+                      const attachments = getMessageAttachments(message)
+                      const hasAttachments = attachments.length > 0
+                      const bodyText = message.body.trim()
+                      const hasBody = bodyText.length > 0
+                      const syntheticAttachmentBody = hasAttachments && attachments.length === 1 && bodyText === attachments[0]?.original_name
+                      const shouldRenderBody = hasBody && !syntheticAttachmentBody
+                      const expanded = Boolean(expandedMessages[message.id])
+                      const expandable = shouldRenderBody && isExpandableMessage(message.body)
+                      const metaReplyToId = message.meta?.reply_to_message_id
+                      const replyTarget = metaReplyToId ? messages.find((m: any) => m.id === metaReplyToId) || null : null
+                      const showMenu = menuOpenMessageId === message.id
+                      const replyPreviewText = replyTarget
+                        ? (() => {
+                          const replyAttachments = getMessageAttachments(replyTarget)
+                          const replyBody = replyTarget.body.trim()
+                          const isSyntheticReplyBody =
+                              replyAttachments.length === 1 && replyBody === replyAttachments[0]?.original_name
+                          return (!isSyntheticReplyBody && replyBody) || (replyAttachments.length > 0 ? 'Вложение' : '')
+                        })()
+                        : ''
+
+                      return (
+                        <div key={message.id}>
+                          {showDayDivider && (
+                            <div className="my-2 text-center text-[11px] text-muted-foreground">
+                              <span className="rounded-full border border-border/60 px-2 py-0.5">{formatDayDivider(message.created_at)}</span>
+                            </div>
+                          )}
+                          <div className={`group flex w-full ${own ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`w-fit ${own ? 'max-w-[82%] sm:max-w-[62%] text-right' : 'max-w-[90%] sm:max-w-[68%] text-left'}`}>
+                              {!own && (
+                                <div className="mb-1 flex items-center gap-2 px-1">
+                                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground">
+                                    {getInitials(senderLabel)}
+                                  </div>
+                                  <div className="truncate text-[11px] text-muted-foreground">{senderLabel}</div>
+                                </div>
+                              )}
+                              <div
+                                className={`relative w-fit max-w-full rounded-xl border px-3 py-2 text-sm ${
+                                  own
+                                    ? 'ml-auto border-primary/35 bg-primary/[0.14] text-right'
+                                    : 'mr-auto border-border/70 bg-muted/25 text-left'
+                                }`}
+                              >
+                                {replyTarget && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const indexInFull = messages.findIndex((m: any) => m.id === replyTarget.id)
+                                      if (indexInFull >= 0) {
+                                        setExpandedMessages((prev: Record<string, boolean>) => ({ ...prev, [replyTarget.id]: true }))
+                                      }
+                                    }}
+                                    className={`mb-2 block w-full overflow-hidden rounded border border-border/60 bg-background/40 px-2 py-1 text-[11px] text-muted-foreground ${
+                                      own ? 'text-right' : 'text-left'
+                                    }`}
+                                  >
+                                    <div>Ответ на: {(membersById.get(replyTarget.sender_id) || replyTarget.sender_id)} ·</div>
+                                    <div className="mt-0.5 break-all">
+                                      {replyPreviewText.slice(0, 80)}
+                                      {replyPreviewText.length > 80 ? '…' : ''}
+                                    </div>
+                                  </button>
+                                )}
+
+                                {shouldRenderBody && (
+                                  <div
+                                    className={`whitespace-pre-wrap break-all ${expandable && !expanded ? 'max-h-28 overflow-hidden' : ''} ${
+                                      own ? 'text-right' : 'text-left'
+                                    }`}
+                                  >
+                                    {message.body}
+                                  </div>
+                                )}
+                                {expandable && (
+                                  <button
+                                    type="button"
+                                    onClick={() => toggleMessageExpanded(message.id)}
+                                    className={`mt-1 text-[11px] text-primary hover:underline ${own ? 'ml-auto block text-right' : ''}`}
+                                  >
+                                    {expanded ? 'Свернуть' : 'Развернуть'}
+                                  </button>
+                                )}
+
+                                {hasAttachments && (
+                                  <div className={`mt-2 space-y-2 ${own ? 'text-right' : 'text-left'}`}>
+                                    {attachments.map((attachment: any) => (
+                                      <AttachmentPreview
+                                        key={attachment.file_id}
+                                        chatId={message.chat_id}
+                                        attachment={attachment}
+                                        onOpenMediaPreview={setMediaPreview}
+                                      />
+                                    ))}
+                                  </div>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={() => setMenuOpenMessageId((prev: string | null) => (prev === message.id ? null : message.id))}
+                                  className={`absolute top-1 hidden rounded px-1 py-0.5 text-[12px] text-muted-foreground hover:bg-background/40 group-hover:block ${
+                                    own ? 'right-1' : 'left-1'
+                                  }`}
+                                  aria-label="Действия с сообщением"
+                                >
+                                  ⋯
+                                </button>
+                                {showMenu && (
+                                  <div
+                                    className={`absolute top-7 z-20 min-w-[150px] rounded-md border border-border/70 bg-background p-1 shadow-lg ${
+                                      own ? 'right-1' : 'left-1'
+                                    }`}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleCopyMessage(message.body)}
+                                      className="w-full rounded px-2 py-1 text-left text-xs hover:bg-muted/40"
+                                    >
+                                      Копировать
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setReplyToMessageId(message.id)
+                                        setMenuOpenMessageId(null)
+                                        composerRef.current?.focus()
+                                      }}
+                                      className="w-full rounded px-2 py-1 text-left text-xs hover:bg-muted/40"
+                                    >
+                                      Ответить
+                                    </button>
+                                    {own && (
+                                      <button
+                                        type="button"
+                                        onClick={() => void handleDeleteMessage(message.id)}
+                                        className="w-full rounded px-2 py-1 text-left text-xs text-destructive hover:bg-destructive/10"
+                                      >
+                                        Удалить
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                              <div className={`mt-1 px-1 text-[10px] text-muted-foreground ${own ? 'text-right' : 'text-left'}`}>
+                                #{message.seq_no} · {new Date(message.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+                                {ownStatus && ` · ${ownStatus}`}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </>
+                )}
+                {newMessagesCount > 0 && !isNearBottom && (
+                  <div className="sticky bottom-2 mt-2 flex justify-center">
+                    <Button type="button" size="sm" onClick={scrollToLatest} className="h-8 rounded-full px-3">
+                      <ArrowDown className="mr-1 h-3.5 w-3.5" />
+                      {newMessagesCount} новых
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              <div className="sticky bottom-0 border-t border-border/60 bg-background/95 p-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+                {replyToMessage && (
+                  <div className="mb-2 flex items-center justify-between rounded-md border border-border/60 bg-muted/20 px-2 py-1 text-xs">
+                    <div className="truncate">
+                      Ответ на: <span className="text-muted-foreground">{getMessageOwnerLabel(replyToMessage)}</span> ·{' '}
+                      {replyToMessage.body.trim() || (getMessageAttachments(replyToMessage).length > 0 ? 'Вложение' : '')}
+                    </div>
+                    <button type="button" onClick={() => setReplyToMessageId(null)} className="ml-2 rounded px-1 hover:bg-muted/50">
+                      ×
+                    </button>
+                  </div>
+                )}
+
+                {composerAttachments.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    {composerAttachments.map((attachment: any) => {
+                      const isUploading = attachment.status === 'uploading'
+                      const isReady = attachment.status === 'ready'
+                      const isError = attachment.status === 'error'
+                      const isVoice = isVoiceAttachment(attachment.contentType)
+                      return (
+                        <div
+                          key={attachment.clientId}
+                          className={`inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1 text-xs ${
+                            isReady
+                              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600'
+                              : isError
+                                ? 'border-destructive/30 bg-destructive/10 text-destructive'
+                                : 'border-primary/30 bg-primary/10 text-primary'
+                          }`}
+                        >
+                          {isUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
+                            <div className="min-w-0">
+                            <div className="max-w-[220px] truncate">
+                              {isVoice ? 'Голосовое сообщение' : attachment.originalName}
+                            </div>
+                            <div className="text-[10px] opacity-80">
+                              {isUploading
+                                ? 'Загрузка...'
+                                : isReady
+                                  ? isVoice
+                                    ? `${formatDurationLabel(attachment.durationMs || 0)} · ${formatFileSize(attachment.size)}`
+                                    : formatFileSize(attachment.size)
+                                  : attachment.error || 'Ошибка'}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => void handleRemoveComposerAttachment(attachment.clientId)}
+                            className="ml-1 rounded-full p-0.5 hover:bg-black/10"
+                            aria-label={`Удалить вложение ${attachment.originalName}`}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+                <div className="mb-2 hidden text-[11px] text-muted-foreground sm:block">
+                  До {CHAT_ATTACHMENT_MAX_MB} MB, 1 вложение на сообщение. Голосовое до 1 минуты.
+                </div>
+                {isRecordingVoice && (
+                  <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-400">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
+                    Идет запись: {formatDurationLabel(voiceRecordingElapsedMs)} / 01:00
+                  </div>
+                )}
+
+                <input
+                  ref={mediaAttachmentInputRef}
+                  type="file"
+                  accept="image/*,video/*"
+                  className="hidden"
+                  onChange={(event) => void handleMediaInputChange(event)}
+                />
+                <input
+                  ref={cameraPhotoAttachmentInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(event) => void handleCameraPhotoInputChange(event)}
+                />
+                <input
+                  ref={cameraVideoAttachmentInputRef}
+                  type="file"
+                  accept="video/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(event) => void handleCameraVideoInputChange(event)}
+                />
+                <input
+                  ref={fileAttachmentInputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={(event) => void handleFileInputChange(event)}
+                />
+
+                <div className="relative flex items-end gap-2" ref={attachMenuRef}>
+                  <div className="relative shrink-0">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="outline"
+                      className="h-10 w-10 rounded-full"
+                      onClick={() => setIsAttachMenuOpen((prev: boolean) => !prev)}
+                      disabled={!selectedChatId || sending || isRecordingVoice || composerAttachments.length >= 1 || hasUploadingAttachments}
+                      aria-label="Открыть меню вложений"
+                      title="Вложения"
+                    >
+                      <Plus className="h-5 w-5" />
+                    </Button>
+                    {isAttachMenuOpen && (
+                      <div className="absolute bottom-12 left-0 z-40 w-[min(280px,calc(100vw-4rem))] rounded-xl border border-border/70 bg-background/95 p-2 shadow-2xl backdrop-blur">
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            type="button"
+                            className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-2 text-left text-xs hover:bg-muted/30"
+                            onClick={openMediaPicker}
+                          >
+                            <Image className="h-4 w-4" />
+                            Фото/Видео
+                          </button>
+                          <button
+                            type="button"
+                            className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-2 text-left text-xs hover:bg-muted/30"
+                            onClick={openCameraPhotoPicker}
+                          >
+                            <Camera className="h-4 w-4" />
+                            Камера
+                          </button>
+                          <button
+                            type="button"
+                            className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-2 text-left text-xs hover:bg-muted/30"
+                            onClick={openCameraVideoPicker}
+                          >
+                            <Video className="h-4 w-4" />
+                            Видео
+                          </button>
+                          <button
+                            type="button"
+                            className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-2 text-left text-xs hover:bg-muted/30"
+                            onClick={openFilePicker}
+                          >
+                            <Paperclip className="h-4 w-4" />
+                            Файл
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <textarea
+                    ref={composerRef}
+                    value={draft}
+                    onChange={(e) => {
+                      setDraft(e.target.value)
+                      touchTypingActivity()
+                    }}
+                    maxLength={MESSAGE_MAX_CHARS}
+                    rows={1}
+                    placeholder={selectedChat ? 'Пишите сообщение' : 'Выберите чат'}
+                    disabled={!selectedChat || sending || isRecordingVoice}
+                    className="max-h-40 min-h-[40px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onBlur={() => stopTyping()}
+                    onPaste={handleComposerPaste}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey && (draft.trim().length > 0 || readyComposerAttachments.length > 0)) {
+                        e.preventDefault()
+                        void handleSend()
+                      }
+                    }}
+                  />
+                  {isRecordingVoice ? (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="destructive"
+                      className="h-10 w-10 rounded-full"
+                      onClick={() => stopVoiceRecording(true)}
+                      aria-label="Остановить запись голосового"
+                      title="Стоп запись"
+                    >
+                      <Square className="h-4 w-4" />
+                    </Button>
+                  ) : canSendMessage ? (
+                    <Button
+                      type="button"
+                      size="icon"
+                      className="h-10 w-10 rounded-full"
+                      onClick={() => void handleSend()}
+                      disabled={sending || draft.trim().length > MESSAGE_MAX_CHARS || hasUploadingAttachments}
+                      aria-label="Отправить сообщение"
+                      title="Отправить"
+                    >
+                      <SendHorizontal className="h-4 w-4" />
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="outline"
+                      className="h-10 w-10 rounded-full"
+                      onClick={() => void startVoiceRecording()}
+                      disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
+                      aria-label="Записать голосовое сообщение"
+                      title="Голосовое"
+                    >
+                      <Mic className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+                {selectedChat && (
+                  <div className="mt-2 text-right text-xs text-muted-foreground">
+                    {draft.trim().length}/{MESSAGE_MAX_CHARS}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {mediaPreview && (
+            <div
+              className="fixed inset-0 z-[80] flex items-center justify-center bg-black/75 p-4"
+              onClick={() => setMediaPreview(null)}
+            >
+              <div
+                className="relative w-full max-w-6xl rounded-xl border border-white/20 bg-black/40 p-3"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+                  onClick={() => setMediaPreview(null)}
+                  aria-label="Закрыть просмотр"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+                {mediaPreview.kind === 'image' ? (
+                  <img
+                    src={mediaPreview.url}
+                    alt={mediaPreview.originalName}
+                    className="mx-auto max-h-[82vh] max-w-full rounded-lg object-contain"
+                  />
+                ) : (
+                  <video
+                    src={mediaPreview.url}
+                    controls
+                    autoPlay
+                    className="mx-auto max-h-[82vh] max-w-full rounded-lg"
+                  >
+                    Ваш браузер не поддерживает видео.
+                  </video>
+                )}
+              </div>
+            </div>
+          )}
+
+          {isMobileDialogsOpen && (
+            <div
+              className="fixed inset-0 z-50 lg:hidden"
+              onClick={() => setIsMobileDialogsOpen(false)}
+            >
+              <div className="absolute inset-0 bg-black/60 backdrop-blur-[1px]" />
+              <div className="absolute inset-y-0 left-0 w-[88vw] max-w-[340px] p-3" onClick={(e) => e.stopPropagation()}>
+                <div className="flex h-full min-h-0 flex-col rounded-xl border border-border/70 bg-background shadow-2xl">
+                  <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
+                    <span className="text-xs text-muted-foreground">Чаты</span>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7"
+                      onClick={() => setIsMobileDialogsOpen(false)}
+                      aria-label="Закрыть список диалогов"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                    {renderChatList(false)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+  )
+}

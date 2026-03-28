@@ -1,9 +1,8 @@
-import { type DragEvent as ReactDragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { isAxiosError } from 'axios'
 import {
   docsApi,
   type DocsAIGenerationJob,
-  type DocsAIGenerationJobStatus,
   type DocsFile,
   type DocsFileType,
   type DocsFolder,
@@ -26,245 +25,34 @@ import {
   Loader2,
   Pencil,
   Sparkles,
-  Maximize2,
-  Minimize2,
   Trash2,
   Upload,
   X,
 } from 'lucide-react'
 
-import { DocxEditorPanel } from './DocxEditorPanel'
-
-
-const MAX_DEPTH = 2
-const STATUS_POLL_INTERVAL_MS = 2000
-const STATUS_POLL_TIMEOUT_MS = 120000
-const AI_JOB_POLL_INTERVAL_MS = 2000
-const AI_JOB_POLL_TIMEOUT_MS = 180000
-const AI_JOB_HISTORY_LIMIT = 30
-const AI_DOCUMENT_PRESETS: Array<{
-  id: string
-  title: string
-  template: string
-  prompt: string
-  summary: string
-}> = [
-  {
-    id: 'commercial-offer',
-    title: 'Коммерческое предложение',
-    template: 'Коммерческое предложение',
-    summary: 'Короткое предложение с этапами, выгодой и стоимостью.',
-    prompt:
-      'Подготовь понятное коммерческое предложение. Нужны краткое описание задачи клиента, этапы запуска, сроки, ожидаемый результат, блок с выгодами и место под стоимость и реквизиты.',
-  },
-  {
-    id: 'service-agreement',
-    title: 'Договор на услуги',
-    template: 'Договор',
-    summary: 'Базовая структура договора с обязанностями сторон.',
-    prompt:
-      'Составь базовый договор на оказание услуг. Нужны разделы: предмет договора, обязанности сторон, сроки, стоимость, порядок оплаты, ответственность, реквизиты и подписи.',
-  },
-  {
-    id: 'internal-regulation',
-    title: 'Регламент работы',
-    template: 'Регламент',
-    summary: 'Внутренний документ с этапами и ответственными.',
-    prompt:
-      'Подготовь внутренний регламент работы. Нужны цель документа, роли участников, пошаговый порядок действий, сроки реакции, контроль качества и финальный чек-лист.',
-  },
-  {
-    id: 'instruction',
-    title: 'Инструкция для сотрудников',
-    template: 'Инструкция',
-    summary: 'Пошаговая инструкция простым языком.',
-    prompt:
-      'Сделай краткую инструкцию для сотрудников простым языком. Нужны шаги по порядку, частые ошибки, полезные советы и короткий итоговый список действий.',
-  },
-  {
-    id: 'meeting-summary',
-    title: 'Итоги встречи',
-    template: 'Протокол встречи',
-    summary: 'Сводка договоренностей, задач и сроков.',
-    prompt:
-      'Оформи итоги встречи в виде делового документа. Нужны участники, краткая повестка, принятые решения, список задач с ответственными и сроками, а также блок следующих шагов.',
-  },
-]
-
-type DocsVisualStatus =
-  | DocsFile['status']
-  | 'ai_queued'
-  | 'ai_running'
-  | 'ai_scanning'
-  | 'ai_failed'
-
-function formatBytes(value: number): string {
-  if (value <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
-  const scaled = value / 1024 ** index
-  return `${scaled.toFixed(index === 0 ? 0 : 1)} ${units[index]}`
-}
-
-function depthOf(folderId: string, map: Map<string, DocsFolder>): number {
-  let depth = 0
-  let cursor = map.get(folderId)
-  while (cursor?.parent_id) {
-    depth += 1
-    cursor = map.get(cursor.parent_id)
-  }
-  return depth
-}
-
-function isFolderInOwnBranch(
-  folderId: string,
-  candidateParentId: string | null,
-  map: Map<string, DocsFolder>,
-): boolean {
-  if (!candidateParentId) return false
-  if (folderId === candidateParentId) return true
-  let cursor = map.get(candidateParentId)
-  while (cursor?.parent_id) {
-    if (cursor.parent_id === folderId) return true
-    cursor = map.get(cursor.parent_id)
-  }
-  return false
-}
-
-function fileTypeLabel(file: DocsFile): string {
-  return (file.type || 'file').toUpperCase()
-}
-
-function statusLabel(status: DocsFile['status']): string {
-  if (status === 'uploading') return 'Загрузка'
-  if (status === 'scanning') return 'На проверке'
-  if (status === 'ready') return 'Готов'
-  if (status === 'blocked') return 'Заблокирован'
-  if (status === 'draft') return 'Генерируется'
-  return status || 'unknown'
-}
-
-function statusClass(status: DocsVisualStatus): string {
-  if (status === 'ready') return 'text-emerald-600'
-  if (status === 'scanning' || status === 'uploading' || status === 'draft' || status === 'ai_queued' || status === 'ai_running' || status === 'ai_scanning') {
-    return 'text-amber-600'
-  }
-  if (status === 'blocked' || status === 'ai_failed') return 'text-destructive'
-  return 'text-muted-foreground'
-}
-
-function aiJobStatusLabel(status: DocsAIGenerationJobStatus): string {
-  if (status === 'queued') return 'В очереди'
-  if (status === 'running') return 'Генерация'
-  if (status === 'scanning') return 'Проверка AV'
-  if (status === 'ready') return 'Готово'
-  if (status === 'blocked') return 'Заблокирован'
-  if (status === 'failed') return 'Ошибка'
-  return status
-}
-
-function aiJobStatusClass(status: DocsAIGenerationJobStatus): string {
-  if (status === 'ready') return 'text-emerald-600'
-  if (status === 'scanning' || status === 'running' || status === 'queued') return 'text-amber-600'
-  return 'text-destructive'
-}
-
-function isStoppedAiJob(job: DocsAIGenerationJob): boolean {
-  if (job.error_message?.trim() === 'Остановлено пользователем') return true
-  return Boolean(job.meta_json && typeof job.meta_json === 'object' && job.meta_json.stopped_by_user === true)
-}
-
-function aiJobDisplayLabel(job: DocsAIGenerationJob): string {
-  if (isStoppedAiJob(job)) return 'Остановлено'
-  return aiJobStatusLabel(job.status)
-}
-
-function aiJobDisplayClass(job: DocsAIGenerationJob): string {
-  if (isStoppedAiJob(job)) return 'text-muted-foreground'
-  return aiJobStatusClass(job.status)
-}
-
-function isActiveAiJob(job: DocsAIGenerationJob): boolean {
-  return job.status === 'queued' || job.status === 'running'
-}
-
-function visualStatusLabel(status: DocsVisualStatus): string {
-  if (status === 'ai_queued') return 'В очереди'
-  if (status === 'ai_running') return 'Генерация'
-  if (status === 'ai_scanning') return 'Проверка AV'
-  if (status === 'ai_failed') return 'Ошибка генерации'
-  return statusLabel(status)
-}
-
-function deriveFileVisualState(file: DocsFile, job: DocsAIGenerationJob | null): {
-  status: DocsVisualStatus
-  helperText: string | null
-} {
-  if (!job || job.file_id !== file.id) {
-    if (file.status === 'scanning') {
-      return {
-        status: 'scanning',
-        helperText: 'Файл на проверке. Скачивание будет доступно после сканирования.',
-      }
-    }
-    if (file.status === 'blocked') {
-      return {
-        status: 'blocked',
-        helperText: 'Заблокирован. Обратитесь к администратору.',
-      }
-    }
-    return { status: file.status, helperText: null }
-  }
-
-  if (job.status === 'failed') {
-    return {
-      status: 'ai_failed',
-      helperText: job.error_message?.trim() || 'AI-генерация завершилась ошибкой.',
-    }
-  }
-  if (job.status === 'queued') {
-    return {
-      status: 'ai_queued',
-      helperText: 'Документ принят в очередь на генерацию.',
-    }
-  }
-  if (job.status === 'running') {
-    return {
-      status: 'ai_running',
-      helperText: 'AI сейчас готовит содержимое документа.',
-    }
-  }
-  if (job.status === 'scanning') {
-    return {
-      status: 'ai_scanning',
-      helperText: 'Документ сгенерирован и проходит антивирусную проверку.',
-    }
-  }
-  if (job.status === 'blocked') {
-    return {
-      status: 'blocked',
-      helperText: 'Сгенерированный документ заблокирован после проверки.',
-    }
-  }
-  if (file.status === 'ready') {
-    return { status: 'ready', helperText: null }
-  }
-  return { status: file.status, helperText: null }
-}
-
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-function resolveDraggedDocsPayload(
-  event: ReactDragEvent<HTMLElement>,
-  draggedFileId: string | null,
-  draggedFolderId: string | null,
-): { fileId: string | null; folderId: string | null } {
-  const fileId = draggedFileId?.trim() || event.dataTransfer.getData('application/x-docs-file-id').trim() || null
-  const folderId = draggedFolderId?.trim() || event.dataTransfer.getData('application/x-docs-folder-id').trim() || null
-  return { fileId, folderId }
-}
+import { AI_DOCUMENT_PRESETS } from './docsAiPresets'
+import { DocsDialogs } from './components/DocsDialogs'
+import {
+  AI_JOB_HISTORY_LIMIT,
+  AI_JOB_POLL_INTERVAL_MS,
+  AI_JOB_POLL_TIMEOUT_MS,
+  MAX_DEPTH,
+  STATUS_POLL_INTERVAL_MS,
+  STATUS_POLL_TIMEOUT_MS,
+  aiJobDisplayClass,
+  aiJobDisplayLabel,
+  deriveFileVisualState,
+  depthOf,
+  fileTypeLabel,
+  formatBytes,
+  isActiveAiJob,
+  isFolderInOwnBranch,
+  isStoppedAiJob,
+  resolveDraggedDocsPayload,
+  statusClass,
+  visualStatusLabel,
+  wait,
+} from './docsPageHelpers'
 
 export default function DocsPage() {
   const [folderDialog, setFolderDialog] = useState<{
@@ -1512,232 +1300,39 @@ export default function DocsPage() {
 
           </CardContent>
         </Card>
-        {docxEditorFile && docxConfig && docxServerUrl && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 lg:p-6 bg-background/50 backdrop-blur-sm animate-in fade-in zoom-in duration-200">
-            <div
-              className={`flex flex-col bg-background shadow-2xl border border-border overflow-hidden transition-all duration-300 ${
-                isEditorFullscreen
-                  ? 'fixed inset-0 h-full w-full rounded-none border-0'
-                  : 'h-[min(820px,calc(100vh-32px))] w-[min(1180px,calc(100vw-24px))] rounded-2xl'
-              }`}
-            >
-              <div className="flex items-center justify-between border-b border-border bg-background px-4 py-3 shadow-md flex-shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100/80 text-blue-600 shadow-sm dark:bg-blue-900/40 dark:text-blue-400">
-                    <FileText className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <h2 className="text-base font-semibold leading-tight">{docxEditorFile.title || docxEditorFile.original_name}</h2>
-                    <p className="text-xs text-muted-foreground mt-0.5 font-medium flex items-center gap-1.5">
-                      <span className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-                      </span>
-                      Редактор OnlyOffice
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setIsEditorFullscreen(!isEditorFullscreen)}
-                    className="h-9 w-9 p-0 hover:bg-secondary"
-                    title={isEditorFullscreen ? 'Свернуть окно' : 'Развернуть на весь экран'}
-                  >
-                    {isEditorFullscreen ? <Minimize2 className="h-4 w-4 opacity-70" /> : <Maximize2 className="h-4 w-4 opacity-70" />}
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => {
-                    setDocxEditorFile(null)
-                    setDocxConfig(null)
-                    setDocxServerUrl('')
-                    setIsEditorFullscreen(false)
-                  }} className="h-9 gap-2 shadow-sm border-border hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all">
-                    <X className="h-4 w-4" />
-                    Закрыть редактор
-                  </Button>
-                </div>
-              </div>
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[#f4f4f4] dark:bg-neutral-900 shadow-inner pt-3">
-                <DocxEditorPanel
-                  file={docxEditorFile}
-                  documentServerUrl={docxServerUrl}
-                  config={docxConfig}
-                  loading={docxLoading}
-                  onError={setErrorText}
-                  onFileUpdated={onFileUpdated}
-                />
-              </div>
-            </div>
-          </div>
-        )}
-
-        {pendingDelete && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-background/60 p-4 backdrop-blur-sm">
-            <div className="w-full max-w-md rounded-2xl border border-border bg-background shadow-2xl">
-              <div className="border-b border-border px-5 py-4">
-                <h3 className="text-lg font-semibold">
-                  {pendingDelete.kind === 'folder' ? 'Удалить папку' : 'Удалить файл'}
-                </h3>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {pendingDelete.kind === 'folder'
-                    ? `Папка «${pendingDelete.title}» будет удалена. Если внутри есть файлы или вложенные папки, backend не даст удалить её, пока вы не очистите содержимое.`
-                    : `Файл «${pendingDelete.title}» будет удалён из документов. Это действие нельзя отменить.`}
-                </p>
-              </div>
-              <div className="flex items-center justify-end gap-2 px-5 py-4">
-                <Button
-                  variant="outline"
-                  onClick={() => setPendingDelete(null)}
-                  disabled={deletingTargetId === pendingDelete.id}
-                >
-                  Отмена
-                </Button>
-                <Button
-                  onClick={() => void confirmDelete()}
-                  disabled={deletingTargetId === pendingDelete.id}
-                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                >
-                  {deletingTargetId === pendingDelete.id ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Удаляем
-                    </>
-                  ) : (
-                    'Удалить'
-                  )}
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {folderDialog && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-background/60 p-4 backdrop-blur-sm">
-            <div className="w-full max-w-md rounded-2xl border border-border bg-background shadow-2xl">
-              <div className="border-b border-border px-5 py-4">
-                <h3 className="text-lg font-semibold">
-                  {folderDialog.mode === 'create' ? 'Создать папку' : 'Переименовать папку'}
-                </h3>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {folderDialog.mode === 'create'
-                    ? 'Укажите название новой папки.'
-                    : `Измените название папки «${folderDialog.initialName}».`}
-                </p>
-              </div>
-              <div className="px-5 py-4">
-                <input
-                  autoFocus
-                  value={folderNameDraft}
-                  onChange={(event) => setFolderNameDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      event.preventDefault()
-                      void submitFolderDialog()
-                    }
-                    if (event.key === 'Escape') {
-                      event.preventDefault()
-                      closeFolderDialog()
-                    }
-                  }}
-                  disabled={folderDialogSubmitting}
-                  placeholder="Название папки"
-                  className="h-11 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:cursor-not-allowed disabled:opacity-60"
-                />
-              </div>
-              <div className="flex items-center justify-end gap-2 px-5 py-4">
-                <Button
-                  variant="outline"
-                  onClick={closeFolderDialog}
-                  disabled={folderDialogSubmitting}
-                >
-                  Отмена
-                </Button>
-                <Button
-                  onClick={() => void submitFolderDialog()}
-                  disabled={folderDialogSubmitting}
-                >
-                  {folderDialogSubmitting ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      {folderDialog.mode === 'create' ? 'Создаём' : 'Сохраняем'}
-                    </>
-                  ) : (
-                    folderDialog.mode === 'create' ? 'Создать' : 'Сохранить'
-                  )}
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {fileDialog && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center bg-background/60 p-4 backdrop-blur-sm">
-            <div className="w-full max-w-md rounded-2xl border border-border bg-background shadow-2xl">
-              <div className="border-b border-border px-5 py-4">
-                <h3 className="text-lg font-semibold">Создать файл</h3>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {fileDialog.folderId
-                    ? `Файл будет создан в папке «${folderMap.get(fileDialog.folderId)?.name ?? 'Без названия'}».`
-                    : 'Файл будет создан в корне документов.'}
-                </p>
-              </div>
-              <div className="space-y-3 px-5 py-4">
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Тип файла</label>
-                  <select
-                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                    value={emptyType}
-                    onChange={(event) => setEmptyType(event.target.value as DocsFileType)}
-                    disabled={fileDialogSubmitting || creatingEmpty}
-                  >
-                    <option value="docx">DOCX</option>
-                  </select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-foreground">Название файла</label>
-                  <input
-                    autoFocus
-                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                    placeholder="Например, Договор или КП"
-                    value={emptyTitle}
-                    onChange={(event) => setEmptyTitle(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.preventDefault()
-                        void createEmptyFile()
-                      }
-                      if (event.key === 'Escape') {
-                        event.preventDefault()
-                        closeFileDialog()
-                      }
-                    }}
-                    maxLength={200}
-                    disabled={fileDialogSubmitting || creatingEmpty}
-                  />
-                </div>
-              </div>
-              <div className="flex items-center justify-end gap-2 px-5 py-4">
-                <Button variant="outline" onClick={closeFileDialog} disabled={fileDialogSubmitting || creatingEmpty}>
-                  Отмена
-                </Button>
-                <Button onClick={() => void createEmptyFile()} disabled={fileDialogSubmitting || creatingEmpty}>
-                  {fileDialogSubmitting || creatingEmpty ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Создаём
-                    </>
-                  ) : (
-                    <>
-                      <FilePlus2 className="mr-2 h-4 w-4" />
-                      Создать
-                    </>
-                  )}
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
+        <DocsDialogs
+          docxEditorFile={docxEditorFile}
+          docxConfig={docxConfig}
+          docxServerUrl={docxServerUrl}
+          isEditorFullscreen={isEditorFullscreen}
+          setIsEditorFullscreen={setIsEditorFullscreen}
+          setDocxEditorFile={setDocxEditorFile}
+          setDocxConfig={setDocxConfig}
+          setDocxServerUrl={setDocxServerUrl}
+          docxLoading={docxLoading}
+          setErrorText={setErrorText}
+          onFileUpdated={onFileUpdated}
+          pendingDelete={pendingDelete}
+          setPendingDelete={setPendingDelete}
+          deletingTargetId={deletingTargetId}
+          confirmDelete={confirmDelete}
+          folderDialog={folderDialog}
+          folderNameDraft={folderNameDraft}
+          setFolderNameDraft={setFolderNameDraft}
+          submitFolderDialog={submitFolderDialog}
+          closeFolderDialog={closeFolderDialog}
+          folderDialogSubmitting={folderDialogSubmitting}
+          fileDialog={fileDialog}
+          folderMap={folderMap}
+          emptyType={emptyType}
+          setEmptyType={setEmptyType}
+          creatingEmpty={creatingEmpty}
+          fileDialogSubmitting={fileDialogSubmitting}
+          emptyTitle={emptyTitle}
+          setEmptyTitle={setEmptyTitle}
+          createEmptyFile={createEmptyFile}
+          closeFileDialog={closeFileDialog}
+        />
       </div>
     </div>
   )

@@ -55,6 +55,7 @@ const VOICE_NOTE_TICK_MS = 250
 
 type ComposerAttachmentStatus = 'uploading' | 'ready' | 'error'
 type ComposerAttachmentSource = 'media' | 'file' | 'paste' | 'voice'
+type MediaPreviewKind = 'image' | 'video'
 
 interface ComposerAttachment {
   clientId: string
@@ -71,6 +72,12 @@ interface CachedAttachmentDownloadUrl {
   url: string
   expiresAt: number
   promise?: Promise<string>
+}
+
+interface MediaPreviewState {
+  kind: MediaPreviewKind
+  url: string
+  originalName: string
 }
 
 const attachmentDownloadUrlCache = new Map<string, CachedAttachmentDownloadUrl>()
@@ -359,9 +366,11 @@ async function getAttachmentDownloadUrl(chatId: string, fileId: string): Promise
 function AttachmentPreview({
   chatId,
   attachment,
+  onOpenMediaPreview,
 }: {
   chatId: string
   attachment: ChatAttachmentInfo
+  onOpenMediaPreview?: (preview: MediaPreviewState) => void
 }) {
   const [downloadUrl, setDownloadUrl] = useState('')
   const [loading, setLoading] = useState(true)
@@ -467,13 +476,23 @@ function AttachmentPreview({
 
   if (mediaKind === 'image') {
     return (
-      <div className="block max-w-full">
+      <button
+        type="button"
+        className="block max-w-full"
+        onClick={() =>
+          onOpenMediaPreview?.({
+            kind: 'image',
+            url: downloadUrl,
+            originalName: attachment.original_name,
+          })
+        }
+      >
         <img
           src={downloadUrl}
           alt={attachment.original_name}
           className="max-h-72 max-w-full rounded-lg border border-border/60 object-contain"
         />
-      </div>
+      </button>
     )
   }
   if (mediaKind === 'video') {
@@ -486,6 +505,21 @@ function AttachmentPreview({
         >
           Ваш браузер не поддерживает видео.
         </video>
+        <div className="mt-2 flex justify-end">
+          <button
+            type="button"
+            onClick={() =>
+              onOpenMediaPreview?.({
+                kind: 'video',
+                url: downloadUrl,
+                originalName: attachment.original_name,
+              })
+            }
+            className="rounded-md border border-border/60 px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted/20"
+          >
+            Открыть
+          </button>
+        </div>
       </div>
     )
   }
@@ -602,6 +636,7 @@ export default function ChatPage() {
   })
   const [isMobileDialogsOpen, setIsMobileDialogsOpen] = useState(false)
   const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false)
+  const [mediaPreview, setMediaPreview] = useState<MediaPreviewState | null>(null)
   const selectedChatIdRef = useRef<string | null>(null)
   const messagesViewportRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
@@ -625,6 +660,7 @@ export default function ChatPage() {
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId
     setIsAttachMenuOpen(false)
+    setMediaPreview(null)
   }, [selectedChatId])
 
   useEffect(() => {
@@ -655,6 +691,15 @@ export default function ChatPage() {
     document.addEventListener('mousedown', onPointerDown)
     return () => document.removeEventListener('mousedown', onPointerDown)
   }, [isAttachMenuOpen])
+
+  useEffect(() => {
+    if (!mediaPreview) return
+    const onEsc = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMediaPreview(null)
+    }
+    document.addEventListener('keydown', onEsc)
+    return () => document.removeEventListener('keydown', onEsc)
+  }, [mediaPreview])
 
   const membersById = useMemo(() => {
     return new Map(
@@ -2156,6 +2201,7 @@ export default function ChatPage() {
                                         key={attachment.file_id}
                                         chatId={message.chat_id}
                                         attachment={attachment}
+                                        onOpenMediaPreview={setMediaPreview}
                                       />
                                     ))}
                                   </div>
@@ -2448,6 +2494,43 @@ export default function ChatPage() {
               </div>
             </div>
           </div>
+
+          {mediaPreview && (
+            <div
+              className="fixed inset-0 z-[80] flex items-center justify-center bg-black/75 p-4"
+              onClick={() => setMediaPreview(null)}
+            >
+              <div
+                className="relative w-full max-w-6xl rounded-xl border border-white/20 bg-black/40 p-3"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  className="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
+                  onClick={() => setMediaPreview(null)}
+                  aria-label="Закрыть просмотр"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+                {mediaPreview.kind === 'image' ? (
+                  <img
+                    src={mediaPreview.url}
+                    alt={mediaPreview.originalName}
+                    className="mx-auto max-h-[82vh] max-w-full rounded-lg object-contain"
+                  />
+                ) : (
+                  <video
+                    src={mediaPreview.url}
+                    controls
+                    autoPlay
+                    className="mx-auto max-h-[82vh] max-w-full rounded-lg"
+                  >
+                    Ваш браузер не поддерживает видео.
+                  </video>
+                )}
+              </div>
+            </div>
+          )}
 
           {isMobileDialogsOpen && (
             <div

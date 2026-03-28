@@ -399,18 +399,10 @@ function AttachmentPreview({
     }
   }, [attachment.file_id, chatId])
 
-  if (loading) {
-    return <div className="text-xs text-muted-foreground">Загрузка вложения...</div>
-  }
-
-  if (errorText) {
-    return <div className="text-xs text-destructive">{errorText}</div>
-  }
-
   const mediaKind = inferMediaKind(attachment.content_type, attachment.original_name)
   const playbackType = normalizeAttachmentMimeForPlayback(attachment.content_type)
   useEffect(() => {
-    if (mediaKind !== 'audio') return
+    if (loading || errorText || mediaKind !== 'audio') return
     const audio = audioRef.current
     if (!audio) return
 
@@ -442,7 +434,15 @@ function AttachmentPreview({
       audio.removeEventListener('pause', onPause)
       audio.removeEventListener('play', onPlay)
     }
-  }, [downloadUrl, mediaKind])
+  }, [downloadUrl, errorText, loading, mediaKind])
+
+  if (loading) {
+    return <div className="text-xs text-muted-foreground">Загрузка вложения...</div>
+  }
+
+  if (errorText) {
+    return <div className="text-xs text-destructive">{errorText}</div>
+  }
 
   const toggleAudioPlayback = async () => {
     const audio = audioRef.current

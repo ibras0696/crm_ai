@@ -233,6 +233,15 @@ function inferMediaKind(contentType: string, originalName: string): 'image' | 'v
   return 'file'
 }
 
+function normalizeAttachmentMimeForPlayback(contentType: string): string {
+  const normalized = String(contentType || '')
+    .trim()
+    .toLowerCase()
+  if (!normalized) return ''
+  const [base] = normalized.split(';')
+  return (base || normalized).trim()
+}
+
 function isMediaAttachment(contentType: string): boolean {
   const normalized = contentType.toLowerCase()
   return normalized.startsWith('image/') || normalized.startsWith('video/')
@@ -252,12 +261,12 @@ function formatDurationLabel(durationMs: number): string {
 function resolveVoiceRecorderMimeType(): string {
   if (typeof MediaRecorder === 'undefined') return ''
   const candidates = [
-    'audio/mp4;codecs=mp4a.40.2',
-    'audio/mp4',
-    'audio/ogg;codecs=opus',
     'audio/webm;codecs=opus',
+    'audio/ogg;codecs=opus',
+    'audio/mp4;codecs=mp4a.40.2',
     'audio/ogg',
     'audio/webm',
+    'audio/mp4',
   ]
   for (const mimeType of candidates) {
     if (MediaRecorder.isTypeSupported(mimeType)) return mimeType
@@ -371,6 +380,7 @@ function AttachmentPreview({
   }
 
   const mediaKind = inferMediaKind(attachment.content_type, attachment.original_name)
+  const playbackType = normalizeAttachmentMimeForPlayback(attachment.content_type)
   if (mediaKind === 'image') {
     return (
       <a href={downloadUrl} target="_blank" rel="noreferrer" className="block">
@@ -403,7 +413,7 @@ function AttachmentPreview({
             className="w-full min-w-[220px] max-w-full"
             onError={() => setAudioFailed(true)}
           >
-            <source src={downloadUrl} type={attachment.content_type || undefined} />
+            <source src={downloadUrl} type={playbackType || undefined} />
             <source src={downloadUrl} />
             Ваш браузер не поддерживает аудио.
           </audio>

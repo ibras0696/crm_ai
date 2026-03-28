@@ -55,7 +55,6 @@ const VOICE_NOTE_TICK_MS = 250
 
 type ComposerAttachmentStatus = 'uploading' | 'ready' | 'error'
 type ComposerAttachmentSource = 'media' | 'file' | 'paste' | 'voice'
-type InlineMediaKind = 'image' | 'video'
 
 interface ComposerAttachment {
   clientId: string
@@ -72,12 +71,6 @@ interface CachedAttachmentDownloadUrl {
   url: string
   expiresAt: number
   promise?: Promise<string>
-}
-
-interface InlineMediaViewerState {
-  kind: InlineMediaKind
-  url: string
-  originalName: string
 }
 
 const attachmentDownloadUrlCache = new Map<string, CachedAttachmentDownloadUrl>()
@@ -366,11 +359,9 @@ async function getAttachmentDownloadUrl(chatId: string, fileId: string): Promise
 function AttachmentPreview({
   chatId,
   attachment,
-  onOpenMedia,
 }: {
   chatId: string
   attachment: ChatAttachmentInfo
-  onOpenMedia?: (payload: InlineMediaViewerState) => void
 }) {
   const [downloadUrl, setDownloadUrl] = useState('')
   const [loading, setLoading] = useState(true)
@@ -476,23 +467,13 @@ function AttachmentPreview({
 
   if (mediaKind === 'image') {
     return (
-      <button
-        type="button"
-        className="block max-w-full"
-        onClick={() =>
-          onOpenMedia?.({
-            kind: 'image',
-            url: downloadUrl,
-            originalName: attachment.original_name,
-          })
-        }
-      >
+      <div className="block max-w-full">
         <img
           src={downloadUrl}
           alt={attachment.original_name}
           className="max-h-72 max-w-full rounded-lg border border-border/60 object-contain"
         />
-      </button>
+      </div>
     )
   }
   if (mediaKind === 'video') {
@@ -505,21 +486,6 @@ function AttachmentPreview({
         >
           Ваш браузер не поддерживает видео.
         </video>
-        <div className="mt-2 flex justify-end">
-          <button
-            type="button"
-            onClick={() =>
-              onOpenMedia?.({
-                kind: 'video',
-                url: downloadUrl,
-                originalName: attachment.original_name,
-              })
-            }
-            className="rounded-md border border-border/60 px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted/20"
-          >
-            Развернуть
-          </button>
-        </div>
       </div>
     )
   }
@@ -636,7 +602,6 @@ export default function ChatPage() {
   })
   const [isMobileDialogsOpen, setIsMobileDialogsOpen] = useState(false)
   const [isAttachMenuOpen, setIsAttachMenuOpen] = useState(false)
-  const [mediaViewer, setMediaViewer] = useState<InlineMediaViewerState | null>(null)
   const selectedChatIdRef = useRef<string | null>(null)
   const messagesViewportRef = useRef<HTMLDivElement | null>(null)
   const composerRef = useRef<HTMLTextAreaElement | null>(null)
@@ -680,10 +645,6 @@ export default function ChatPage() {
   }, [isDesktopSidebarCollapsed])
 
   useEffect(() => {
-    setMediaViewer(null)
-  }, [selectedChatId])
-
-  useEffect(() => {
     if (!isAttachMenuOpen) return
     const onPointerDown = (event: MouseEvent) => {
       const target = event.target as Node | null
@@ -694,15 +655,6 @@ export default function ChatPage() {
     document.addEventListener('mousedown', onPointerDown)
     return () => document.removeEventListener('mousedown', onPointerDown)
   }, [isAttachMenuOpen])
-
-  useEffect(() => {
-    if (!mediaViewer) return
-    const onEsc = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMediaViewer(null)
-    }
-    document.addEventListener('keydown', onEsc)
-    return () => document.removeEventListener('keydown', onEsc)
-  }, [mediaViewer])
 
   const membersById = useMemo(() => {
     return new Map(
@@ -2204,7 +2156,6 @@ export default function ChatPage() {
                                         key={attachment.file_id}
                                         chatId={message.chat_id}
                                         attachment={attachment}
-                                        onOpenMedia={setMediaViewer}
                                       />
                                     ))}
                                   </div>
@@ -2497,45 +2448,6 @@ export default function ChatPage() {
               </div>
             </div>
           </div>
-
-          {mediaViewer && (
-            <div
-              className="fixed inset-0 z-[80] flex items-center justify-center bg-black/85 p-4"
-              onClick={() => setMediaViewer(null)}
-            >
-              <div
-                className="relative w-full max-w-6xl"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <button
-                  type="button"
-                  className="absolute right-2 top-2 z-10 inline-flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
-                  onClick={() => setMediaViewer(null)}
-                  aria-label="Закрыть просмотр"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-                <div className="max-h-[88vh] overflow-hidden rounded-xl border border-white/15 bg-black/40 p-2">
-                  {mediaViewer.kind === 'image' ? (
-                    <img
-                      src={mediaViewer.url}
-                      alt={mediaViewer.originalName}
-                      className="mx-auto max-h-[82vh] max-w-full object-contain"
-                    />
-                  ) : (
-                    <video
-                      src={mediaViewer.url}
-                      controls
-                      autoPlay
-                      className="mx-auto max-h-[82vh] max-w-full"
-                    >
-                      Ваш браузер не поддерживает видео.
-                    </video>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
 
           {isMobileDialogsOpen && (
             <div

@@ -72,47 +72,137 @@ interface CachedAttachmentDownloadUrl {
 
 const attachmentDownloadUrlCache = new Map<string, CachedAttachmentDownloadUrl>()
 
+function pickFirstString(item: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = item[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+function parseAttachmentSize(item: Record<string, unknown>): number {
+  const value = item.size ?? item.bytes ?? item.size_bytes
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return Math.floor(value)
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value, 10)
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed
+  }
+  return 0
+}
+
+function inferContentTypeFromName(filename: string): string {
+  const ext = filename.toLowerCase().split('.').pop() || ''
+  if (!ext) return 'application/octet-stream'
+  if (['png'].includes(ext)) return 'image/png'
+  if (['jpg', 'jpeg'].includes(ext)) return 'image/jpeg'
+  if (['gif'].includes(ext)) return 'image/gif'
+  if (['webp'].includes(ext)) return 'image/webp'
+  if (['bmp'].includes(ext)) return 'image/bmp'
+  if (['svg'].includes(ext)) return 'image/svg+xml'
+  if (['heic'].includes(ext)) return 'image/heic'
+  if (['heif'].includes(ext)) return 'image/heif'
+  if (['avif'].includes(ext)) return 'image/avif'
+  if (['mp4'].includes(ext)) return 'video/mp4'
+  if (['webm'].includes(ext)) return 'video/webm'
+  if (['mov'].includes(ext)) return 'video/quicktime'
+  if (['m4v'].includes(ext)) return 'video/x-m4v'
+  if (['avi'].includes(ext)) return 'video/x-msvideo'
+  if (['mkv'].includes(ext)) return 'video/x-matroska'
+  return 'application/octet-stream'
+}
+
+function normalizeAttachmentRecord(
+  item: Record<string, unknown>,
+  bodyName: string,
+  bodyLooksLikeFilename: boolean,
+): ChatAttachmentInfo | null {
+  const fileId = pickFirstString(item, ['file_id', 'fileId', 'id', 'attachment_id', 'attachmentId'])
+  if (!fileId) return null
+
+  const originalNameCandidate = pickFirstString(item, ['original_name', 'originalName', 'filename', 'name', 'title'])
+  const originalName =
+    originalNameCandidate || (bodyLooksLikeFilename ? bodyName : `file-${fileId.slice(0, 8)}`)
+
+  const contentTypeCandidate = pickFirstString(item, ['content_type', 'contentType', 'mime_type', 'mimeType', 'mime'])
+  const contentType = contentTypeCandidate || inferContentTypeFromName(originalName)
+  const status = pickFirstString(item, ['status']) || 'ready'
+
+  return {
+    file_id: fileId,
+    original_name: originalName,
+    content_type: contentType,
+    size: parseAttachmentSize(item),
+    status,
+  }
+}
+
+function normalizeIdList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((item) => (typeof item === 'string' ? item.trim() : ''))
+    .filter(Boolean)
+}
+
 function getMessageAttachments(message: ChatMessageInfo): ChatAttachmentInfo[] {
   const result: ChatAttachmentInfo[] = []
+  const seen = new Set<string>()
   const bodyName = message.body.trim()
-  const bodyLooksLikeFilename = /^[^\s]+\.[a-z0-9]{2,5}$/i.test(bodyName)
-  const rawAttachments = message.meta?.attachments as Array<Record<string, unknown>> | undefined
-  if (Array.isArray(rawAttachments)) {
-    for (const item of rawAttachments) {
-      if (!item || typeof item.file_id !== 'string') continue
-      const size =
-        typeof item.size === 'number'
-          ? item.size
-          : typeof item.size === 'string'
-            ? Number.parseInt(item.size, 10) || 0
-            : 0
-      const originalName =
-        typeof item.original_name === 'string'
-          ? item.original_name
-          : typeof item.filename === 'string'
-            ? item.filename
-            : bodyLooksLikeFilename
-              ? bodyName
-            : `file-${item.file_id.slice(0, 8)}`
-      result.push({
-        file_id: item.file_id,
-        original_name: originalName,
-        content_type: typeof item.content_type === 'string' ? item.content_type : 'application/octet-stream',
-        size,
-        status: typeof item.status === 'string' ? item.status : 'ready',
-      })
-    }
-    if (result.length > 0) return result
+  const bodyLooksLikeFilename = /^.+\.[a-z0-9]{2,8}$/i.test(bodyName)
+  const meta = (message.meta ?? {}) as Record<string, unknown>
+
+  const rawAttachmentValues: unknown[] = []
+  if (Array.isArray(meta.attachments)) rawAttachmentValues.push(...meta.attachments)
+  if (meta.attachment && typeof meta.attachment === 'object') rawAttachmentValues.push(meta.attachment)
+  if (Array.isArray(meta.files)) rawAttachmentValues.push(...meta.files)
+  if (meta.file && typeof meta.file === 'object') rawAttachmentValues.push(meta.file)
+
+  for (const candidate of rawAttachmentValues) {
+    if (!candidate || typeof candidate !== 'object') continue
+    const normalized = normalizeAttachmentRecord(candidate as Record<string, unknown>, bodyName, bodyLooksLikeFilename)
+    if (!normalized) continue
+    if (seen.has(normalized.file_id)) continue
+    seen.add(normalized.file_id)
+    result.push(normalized)
   }
 
-  const fallbackIds = message.meta?.attachment_ids
-  if (Array.isArray(fallbackIds)) {
-    for (const value of fallbackIds) {
-      if (typeof value !== 'string') continue
+  if (result.length > 0) {
+    return result
+  }
+
+  const fallbackIds = [
+    ...normalizeIdList(meta.attachment_ids),
+    ...normalizeIdList(meta.attachmentIds),
+    ...normalizeIdList(meta.file_ids),
+    ...normalizeIdList(meta.fileIds),
+  ]
+  const fallbackContentTypeCandidate = pickFirstString(meta, [
+    'content_type',
+    'contentType',
+    'mime_type',
+    'mimeType',
+    'mime',
+  ])
+  for (const fileId of fallbackIds) {
+    if (seen.has(fileId)) continue
+    seen.add(fileId)
+    const originalName = bodyLooksLikeFilename ? bodyName : `Файл ${fileId.slice(0, 8)}`
+    const contentType = fallbackContentTypeCandidate || inferContentTypeFromName(originalName)
+    result.push({
+      file_id: fileId,
+      original_name: originalName,
+      content_type: contentType,
+      size: 0,
+      status: 'ready',
+    })
+  }
+
+  if (result.length === 0 && bodyLooksLikeFilename) {
+    const directFileId = pickFirstString(meta, ['file_id', 'fileId'])
+    if (directFileId) {
       result.push({
-        file_id: value,
-        original_name: bodyLooksLikeFilename ? bodyName : `Файл ${value.slice(0, 8)}`,
-        content_type: 'application/octet-stream',
+        file_id: directFileId,
+        original_name: bodyName,
+        content_type: inferContentTypeFromName(bodyName),
         size: 0,
         status: 'ready',
       })

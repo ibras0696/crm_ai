@@ -455,7 +455,7 @@ export default function ReportsPage() {
               />
 
               <section className="grid gap-4 md:grid-cols-2 2xl:grid-cols-4">
-                {(metricItems.length > 0 ? metricItems.slice(0, 4) : Array.from({ length: 4 }, (_, idx) => null)).map((item, index) => (
+                {(metricItems.length > 0 ? metricItems.slice(0, 4) : Array.from({ length: 4 }, () => null)).map((item, index) => (
                   <button
                     key={item?.widget.id ?? `metric-fallback-${index}`}
                     onClick={() => item && setSelectedWidgetId(item.widget.id)}

@@ -26,11 +26,11 @@ import AnalyticsWidgetCardV2, { type AnalyticsWidgetPreview } from './AnalyticsW
 import { buildWidgetPlans, type DashboardPreset } from './presetBuilder'
 
 const PRESET_META: Array<{ key: DashboardPreset; label: string; description: string }> = [
-  { key: 'executive', label: 'Executive', description: 'Ключевые KPI и общий тренд' },
-  { key: 'revenue', label: 'Revenue', description: 'Деньги, источники и динамика' },
-  { key: 'ops', label: 'Ops', description: 'Операционные метрики и стабильность' },
-  { key: 'funnel', label: 'Funnel', description: 'Этапы и конверсия воронки' },
-  { key: 'marketing', label: 'Marketing', description: 'Каналы, доли и эффективность' },
+  { key: 'executive', label: 'Руководитель', description: 'Ключевые KPI и общий тренд' },
+  { key: 'revenue', label: 'Выручка', description: 'Деньги, источники и динамика' },
+  { key: 'ops', label: 'Операции', description: 'Операционные метрики и стабильность' },
+  { key: 'funnel', label: 'Воронка', description: 'Этапы и конверсия воронки' },
+  { key: 'marketing', label: 'Маркетинг', description: 'Каналы, доли и эффективность' },
 ]
 
 type DraftFilter = {
@@ -374,7 +374,7 @@ export default function ReportsV2Page() {
             Аналитика V2
           </h1>
           <p className="text-sm text-muted-foreground">
-            Универсальный semantic-layer для любых таблиц + единый query-contract
+            Универсальный слой аналитики для любых таблиц + единый контракт запросов
           </p>
         </div>
 
@@ -385,7 +385,7 @@ export default function ReportsV2Page() {
             onClick={onSaveView}
           >
             <Save className="h-4 w-4" />
-            Сохранить view
+            Сохранить вид
           </button>
           <button
             type="button"
@@ -393,7 +393,7 @@ export default function ReportsV2Page() {
             onClick={onLoadView}
           >
             <RefreshCcw className="h-4 w-4" />
-            Загрузить view
+            Загрузить вид
           </button>
           <button
             type="button"
@@ -401,7 +401,7 @@ export default function ReportsV2Page() {
             onClick={() => void onCopySnapshot()}
           >
             <Copy className="h-4 w-4" />
-            Snapshot
+            Снимок
           </button>
         </div>
       </header>
@@ -425,22 +425,22 @@ export default function ReportsV2Page() {
 
             <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
               <div className="rounded-lg border border-border/80 bg-muted/30 p-2">
-                <p className="text-muted-foreground">Dimensions</p>
+                <p className="text-muted-foreground">Измерения</p>
                 <p className="text-foreground">{schema?.dimensions.length ?? 0}</p>
               </div>
               <div className="rounded-lg border border-border/80 bg-muted/30 p-2">
-                <p className="text-muted-foreground">Measures</p>
+                <p className="text-muted-foreground">Метрики</p>
                 <p className="text-foreground">{schema?.measures.length ?? 0}</p>
               </div>
               <div className="rounded-lg border border-border/80 bg-muted/30 p-2">
-                <p className="text-muted-foreground">Time</p>
+                <p className="text-muted-foreground">Время</p>
                 <p className="text-foreground">{schema?.time_dimensions.length ?? 0}</p>
               </div>
             </div>
           </div>
 
           <div className="rounded-2xl border border-border bg-card p-4">
-            <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Layout Presets</p>
+            <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Шаблоны раскладки</p>
             <div className="space-y-2">
               {PRESET_META.map((item) => (
                 <button
@@ -585,7 +585,7 @@ export default function ReportsV2Page() {
           )}
 
           {loadingWidgets && (
-            <p className="text-xs text-muted-foreground">Обновление виджетов по unified-preview...</p>
+            <p className="text-xs text-muted-foreground">Обновление виджетов по единому превью...</p>
           )}
         </main>
       </section>

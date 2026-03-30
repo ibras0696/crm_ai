@@ -62,7 +62,14 @@ export default function App() {
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/schedule" element={<SchedulePage />} />
         <Route path="/reports" element={<ReportsPage />} />
-        <Route path="/reports-v2" element={<ReportsV2Page />} />
+        <Route
+          path="/reports-v2"
+          element={
+            <ErrorBoundary title="Аналитика V2">
+              <ReportsV2Page />
+            </ErrorBoundary>
+          }
+        />
         <Route path="/ai" element={<AIPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/billing" element={<BillingPage />} />

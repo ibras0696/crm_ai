@@ -106,6 +106,16 @@ function summarizeWidget(widget: AnalyticsWidgetPreview): string {
   return `${widget.title}: обновлено`
 }
 
+function extractQueryData(payload: unknown): Record<string, unknown> | null {
+  if (!payload || typeof payload !== 'object') return null
+  const root = payload as Record<string, unknown>
+  const query = root.query
+  if (!query || typeof query !== 'object') return null
+  const data = (query as Record<string, unknown>).data
+  if (!data || typeof data !== 'object') return null
+  return data as Record<string, unknown>
+}
+
 export default function ReportsV2Page() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [tables, setTables] = useState<TableInfo[]>([])
@@ -225,7 +235,8 @@ export default function ReportsV2Page() {
         try {
           const response = await reportsApi.unifiedPreviewV2({ mode: 'query', query: plan.query })
           const payload = response.data
-          if (!payload.ok || !payload.data?.query) {
+          const queryData = extractQueryData(payload.data)
+          if (!payload.ok || !queryData) {
             return {
               id: plan.id,
               title: plan.title,
@@ -239,7 +250,7 @@ export default function ReportsV2Page() {
             id: plan.id,
             title: plan.title,
             widgetType: plan.widget_type,
-            data: payload.data.query.data,
+            data: queryData,
             loading: false,
             error: null,
           } satisfies AnalyticsWidgetPreview

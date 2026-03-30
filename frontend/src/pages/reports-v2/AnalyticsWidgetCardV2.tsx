@@ -44,12 +44,15 @@ function toPoints(data: Record<string, unknown> | null): Array<{ x: string; y: n
 }
 
 export default function AnalyticsWidgetCardV2({ widget }: { widget: AnalyticsWidgetPreview }) {
-  const points = toPoints(widget.data)
-  const tableHeader = Array.isArray(widget.data?.header)
-    ? (widget.data?.header as Array<string | number>).map((item) => String(item))
+  const data = widget.data && typeof widget.data === 'object' ? widget.data : null
+  const points = toPoints(data)
+  const tableHeader = Array.isArray(data?.header)
+    ? (data.header as Array<string | number>).map((item) => String(item))
     : []
-  const tableRows = Array.isArray(widget.data?.rows)
-    ? (widget.data?.rows as Array<Array<string | number | null>>).map((row) => row.map((cell) => String(cell ?? '—')))
+  const tableRows = Array.isArray(data?.rows)
+    ? (data.rows as unknown[]).map((row) =>
+        Array.isArray(row) ? row.map((cell) => String(cell ?? '—')) : [],
+      )
     : []
 
   return (
@@ -74,8 +77,8 @@ export default function AnalyticsWidgetCardV2({ widget }: { widget: AnalyticsWid
 
         {!widget.loading && !widget.error && widget.widgetType === 'metric' && (
           <div className="space-y-2">
-            <p className="text-4xl font-semibold text-foreground">{String(widget.data?.value ?? '—')}</p>
-            <p className="text-xs text-muted-foreground">{String(widget.data?.label ?? 'Текущее значение')}</p>
+            <p className="text-4xl font-semibold text-foreground">{String(data?.value ?? '—')}</p>
+            <p className="text-xs text-muted-foreground">{String(data?.label ?? 'Текущее значение')}</p>
           </div>
         )}
 

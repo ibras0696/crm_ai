@@ -9,7 +9,7 @@ interface FilterValueInputProps {
 export default function FilterValueInput({ field, filter, onChange }: FilterValueInputProps) {
   if (!field) return null
   if (filter.op === 'is_empty' || filter.op === 'not_empty') {
-    return <div className="text-xs text-muted-foreground">Значение не требуется</div>
+    return <div className="text-xs text-[#8ea8cf]">Значение не требуется</div>
   }
   if (filter.op === 'between') {
     const type = field.analytics_type === 'date' ? 'date' : field.analytics_type === 'number' ? 'number' : 'text'
@@ -19,14 +19,14 @@ export default function FilterValueInput({ field, filter, onChange }: FilterValu
           type={type}
           value={String(filter.from_value ?? '')}
           onChange={(e) => onChange({ ...filter, from_value: e.target.value })}
-          className="h-10 rounded-xl border border-input bg-background px-3 text-sm"
+          className="h-10 rounded-xl border border-[#2d537f] bg-[#0a1f3e] px-3 text-sm text-[#f4f8ff]"
           placeholder="От"
         />
         <input
           type={type}
           value={String(filter.to_value ?? '')}
           onChange={(e) => onChange({ ...filter, to_value: e.target.value })}
-          className="h-10 rounded-xl border border-input bg-background px-3 text-sm"
+          className="h-10 rounded-xl border border-[#2d537f] bg-[#0a1f3e] px-3 text-sm text-[#f4f8ff]"
           placeholder="До"
         />
       </div>
@@ -37,7 +37,7 @@ export default function FilterValueInput({ field, filter, onChange }: FilterValu
       <select
         value={String(filter.value ?? 'true')}
         onChange={(e) => onChange({ ...filter, value: e.target.value })}
-        className="h-10 rounded-xl border border-input bg-background px-3 text-sm"
+        className="h-10 rounded-xl border border-[#2d537f] bg-[#0a1f3e] px-3 text-sm text-[#f4f8ff]"
       >
         <option value="true">Да</option>
         <option value="false">Нет</option>
@@ -50,7 +50,7 @@ export default function FilterValueInput({ field, filter, onChange }: FilterValu
       type={type}
       value={String(filter.value ?? '')}
       onChange={(e) => onChange({ ...filter, value: e.target.value })}
-      className="h-10 rounded-xl border border-input bg-background px-3 text-sm"
+      className="h-10 rounded-xl border border-[#2d537f] bg-[#0a1f3e] px-3 text-sm text-[#f4f8ff]"
       placeholder="Значение"
     />
   )

@@ -15,6 +15,7 @@ from src.modules.notifications.routes import router as notif_router
 from src.modules.notifications.ws import router as ws_router
 from src.modules.org.routes import router as org_router
 from src.modules.reports.routes import router as reports_router
+from src.modules.reports.routes_v2 import router as reports_v2_router
 from src.modules.schedule.routes import router as schedule_router
 from src.modules.superadmin.routes import router as superadmin_router
 from src.modules.tables.routes import router as tables_router
@@ -30,6 +31,7 @@ router.include_router(ws_router)
 router.include_router(tables_router)
 router.include_router(kb_router)
 router.include_router(reports_router)
+router.include_router(reports_v2_router)
 router.include_router(billing_router)
 router.include_router(chat_router)
 router.include_router(ai_router)

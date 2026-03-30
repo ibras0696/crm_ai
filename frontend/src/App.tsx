@@ -23,6 +23,7 @@ import DocsPage from './pages/docs/DocsPage'
 import KnowledgePage from './pages/knowledge/KnowledgePage'
 import SchedulePage from './pages/schedule/SchedulePage'
 import ReportsPage from './pages/reports/ReportsPage'
+import ReportsV2Page from './pages/reports-v2/ReportsV2Page'
 import AIPage from './pages/ai/AIPage'
 import ChatPage from './pages/chat/ChatPage'
 import AppLayout from './components/layout/AppLayout'
@@ -61,6 +62,7 @@ export default function App() {
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/schedule" element={<SchedulePage />} />
         <Route path="/reports" element={<ReportsPage />} />
+        <Route path="/reports-v2" element={<ReportsV2Page />} />
         <Route path="/ai" element={<AIPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/billing" element={<BillingPage />} />

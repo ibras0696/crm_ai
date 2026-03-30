@@ -20,7 +20,10 @@ from src.modules.reports.analytics_engine import (
 from src.modules.reports.models import ReportDashboard, ReportWidget
 from src.modules.reports.repository import ReportsRepository
 from src.modules.reports.schemas import (
+    AnalyticsFieldOut,
+    AnalyticsFilter,
     AnalyticsPreviewOut,
+    AnalyticsQueryRequest,
     ColumnAggRequest,
     ColumnAggResult,
     DashboardCreateRequest,
@@ -36,6 +39,16 @@ from src.modules.reports.schemas import (
     WidgetDataOut,
     WidgetOut,
     WidgetUpdateRequest,
+)
+from src.modules.reports.schemas_v2 import (
+    SEMANTIC_ROLE_DIMENSION,
+    SEMANTIC_ROLE_IDENTIFIER,
+    SEMANTIC_ROLE_MEASURE,
+    SEMANTIC_ROLE_TIME,
+    AnalyticsSemanticSchemaOut,
+    SemanticFieldOut,
+    UnifiedPreviewOut,
+    UnifiedPreviewRequest,
 )
 
 if TYPE_CHECKING:
@@ -144,6 +157,65 @@ class ReportsService:
         counts = await self.repo.count_records_by_table_ids([table.id])
         return build_table_schema(table, counts.get(table.id, 0))
 
+    async def semantic_schema(
+        self,
+        *,
+        org_id: uuid.UUID,
+        table_id: uuid.UUID,
+    ) -> AnalyticsSemanticSchemaOut | None:
+        schema = await self.table_schema(org_id=org_id, table_id=table_id)
+        if schema is None:
+            return None
+
+        dimensions: list[str] = []
+        measures: list[str] = []
+        time_dimensions: list[str] = []
+        semantic_fields: list[SemanticFieldOut] = []
+
+        for field in schema.fields:
+            role = self._semantic_role(field)
+            if role == SEMANTIC_ROLE_MEASURE:
+                measures.append(field.id)
+            elif role == SEMANTIC_ROLE_TIME:
+                time_dimensions.append(field.id)
+            else:
+                dimensions.append(field.id)
+
+            semantic_fields.append(
+                SemanticFieldOut(
+                    id=field.id,
+                    name=field.name,
+                    field_type=field.field_type,
+                    analytics_type=field.analytics_type,
+                    semantic_role=role,
+                    position=field.position,
+                    is_primary=field.is_primary,
+                    supported_aggregations=field.supported_aggregations,
+                    supported_filter_ops=field.supported_filter_ops,
+                ),
+            )
+
+        supported_widget_types = ["metric", "table"]
+        if dimensions:
+            supported_widget_types.extend(["bar", "pie", "donut"])
+        if time_dimensions:
+            supported_widget_types.extend(["line", "area"])
+
+        return AnalyticsSemanticSchemaOut(
+            table_id=schema.table_id,
+            table_name=schema.table_name,
+            total_records=schema.total_records,
+            fields=semantic_fields,
+            dimensions=dimensions,
+            measures=measures,
+            time_dimensions=time_dimensions,
+            default_metric_column_id=schema.default_metric_column_id,
+            default_group_by_column_id=schema.default_group_by_column_id,
+            default_time_column_id=schema.default_time_column_id,
+            supported_widget_types=list(dict.fromkeys(supported_widget_types)),
+            planned_widget_types=["funnel", "cohort", "heatmap"],
+        )
+
     async def query_preview(self, *, org_id: uuid.UUID, body) -> AnalyticsPreviewOut | None:
         table, data = await execute_query(self.repo, org_id, body)
         if table is None:
@@ -154,6 +226,42 @@ class ReportsService:
             query=body,
             data=data,
         )
+
+    async def unified_preview(
+        self,
+        *,
+        org_id: uuid.UUID,
+        body: UnifiedPreviewRequest,
+    ) -> UnifiedPreviewOut | None:
+        if body.mode == "query":
+            if body.query is None:
+                return None
+            parsed_query = AnalyticsQueryRequest.model_validate(body.query)
+            preview = await self.query_preview(org_id=org_id, body=parsed_query)
+            if preview is None:
+                return None
+            return UnifiedPreviewOut(
+                mode="query",
+                query=preview.model_dump(mode="json"),
+            )
+
+        if body.dashboard is None:
+            return None
+        try:
+            dashboard_uuid = uuid.UUID(body.dashboard.dashboard_id)
+        except ValueError:
+            return None
+        preview = await self.dashboard_preview(
+            org_id=org_id,
+            dashboard_id=dashboard_uuid,
+            body=DashboardPreviewRequest(
+                table_id=body.dashboard.table_id,
+                filters=[AnalyticsFilter.model_validate(item) for item in body.dashboard.filters],
+            ),
+        )
+        if preview is None:
+            return None
+        return UnifiedPreviewOut(mode="dashboard", dashboard=preview.model_dump(mode="json"))
 
     async def records_timeline(self, *, org_id: uuid.UUID, days: int) -> list[TimeSeriesPoint]:
         cutoff = datetime.now(UTC) - timedelta(days=days)
@@ -327,3 +435,13 @@ class ReportsService:
             widgets=[widget_to_out(widget) for widget in ordered_widgets],
         )
         return DashboardDataOut(dashboard=detail, items=items)
+
+    @staticmethod
+    def _semantic_role(field: AnalyticsFieldOut) -> str:
+        if field.analytics_type == "number":
+            return SEMANTIC_ROLE_MEASURE
+        if field.analytics_type == "date":
+            return SEMANTIC_ROLE_TIME
+        if field.is_primary:
+            return SEMANTIC_ROLE_IDENTIFIER
+        return SEMANTIC_ROLE_DIMENSION

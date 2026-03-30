@@ -356,3 +356,88 @@ async def test_reports_dashboard_preview_applies_global_filters(client: AsyncCli
     assert preview.status_code == 200
     payload = preview.json()["data"]["items"][0]["data"]["points"]
     assert payload == [{"x": "done", "y": 50}]
+
+
+@pytest.mark.asyncio
+async def test_reports_v2_semantic_schema_and_unified_query_preview(client: AsyncClient):
+    token = await _register_owner(client)
+
+    table = await client.post("/api/v1/tables/", json={"name": "Analytics"}, headers=_headers(token))
+    assert table.status_code == 200
+    table_id = table.json()["data"]["id"]
+
+    amount = await client.post(
+        f"/api/v1/tables/{table_id}/columns",
+        json={"name": "Amount", "field_type": "number"},
+        headers=_headers(token),
+    )
+    stage = await client.post(
+        f"/api/v1/tables/{table_id}/columns",
+        json={"name": "Stage", "field_type": "select", "config": {"options": ["new", "won"]}},
+        headers=_headers(token),
+    )
+    created = await client.post(
+        f"/api/v1/tables/{table_id}/columns",
+        json={"name": "Created", "field_type": "date"},
+        headers=_headers(token),
+    )
+    assert amount.status_code == stage.status_code == created.status_code == 200
+    amount_col_id = amount.json()["data"]["id"]
+    stage_col_id = stage.json()["data"]["id"]
+    created_col_id = created.json()["data"]["id"]
+
+    for payload in (
+        {amount_col_id: 80, stage_col_id: "new", created_col_id: "2026-03-20"},
+        {amount_col_id: 120, stage_col_id: "won", created_col_id: "2026-03-21"},
+    ):
+        resp = await client.post(f"/api/v1/tables/{table_id}/records/", json={"data": payload}, headers=_headers(token))
+        assert resp.status_code == 200
+
+    semantic = await client.get(
+        f"/api/v1/reports/v2/tables/{table_id}/semantic-schema",
+        headers=_headers(token),
+    )
+    assert semantic.status_code == 200
+    semantic_data = semantic.json()["data"]
+    assert semantic_data["contract_version"] == "2.0"
+    assert amount_col_id in semantic_data["measures"]
+    assert created_col_id in semantic_data["time_dimensions"]
+    assert stage_col_id in semantic_data["dimensions"]
+    assert "line" in semantic_data["supported_widget_types"]
+
+    unified = await client.post(
+        "/api/v1/reports/v2/unified-preview",
+        json={
+            "mode": "query",
+            "query": {
+                "table_id": table_id,
+                "widget_type": "bar",
+                "metrics": [{"key": "sum_amount", "aggregation": "sum", "column_id": amount_col_id}],
+                "group_by_column_id": stage_col_id,
+                "sort": {"by": "metric", "metric_key": "sum_amount", "direction": "desc"},
+                "limit": 10,
+            },
+        },
+        headers=_headers(token),
+    )
+    assert unified.status_code == 200
+    body = unified.json()
+    assert body["ok"] is True
+    points = body["data"]["query"]["data"]["points"]
+    assert points[0]["x"] == "won"
+    assert points[0]["y"] == 120
+
+
+@pytest.mark.asyncio
+async def test_reports_v2_unified_dashboard_preview_not_found(client: AsyncClient):
+    token = await _register_owner(client)
+
+    preview = await client.post(
+        "/api/v1/reports/v2/unified-preview",
+        json={"mode": "dashboard", "dashboard": {"dashboard_id": str(uuid.uuid4())}},
+        headers=_headers(token),
+    )
+    assert preview.status_code == 200
+    payload = preview.json()
+    assert payload["ok"] is False
+    assert payload["error"]["code"] == "NOT_FOUND"

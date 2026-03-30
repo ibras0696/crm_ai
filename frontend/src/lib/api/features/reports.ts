@@ -85,6 +85,34 @@ export interface AnalyticsTableSchema {
   default_time_column_id: string | null
 }
 
+export interface AnalyticsSemanticField {
+  id: string
+  name: string
+  field_type: string
+  analytics_type: 'number' | 'date' | 'list' | 'boolean' | 'text'
+  semantic_role: 'identifier' | 'dimension' | 'measure' | 'time'
+  position: number
+  is_primary: boolean
+  supported_aggregations: Array<'count' | 'sum' | 'avg' | 'min' | 'max'>
+  supported_filter_ops: AnalyticsFilter['op'][]
+}
+
+export interface AnalyticsSemanticSchema {
+  contract_version: string
+  table_id: string
+  table_name: string
+  total_records: number
+  fields: AnalyticsSemanticField[]
+  dimensions: string[]
+  measures: string[]
+  time_dimensions: string[]
+  default_metric_column_id: string | null
+  default_group_by_column_id: string | null
+  default_time_column_id: string | null
+  supported_widget_types: Array<'metric' | 'bar' | 'line' | 'area' | 'pie' | 'donut' | 'table'>
+  planned_widget_types: string[]
+}
+
 export interface AnalyticsQueryRequest {
   table_id: string
   widget_type: 'metric' | 'bar' | 'line' | 'donut' | 'table' | 'pie' | 'area'
@@ -104,6 +132,22 @@ export interface AnalyticsPreviewResponse {
   table_name: string
   query: AnalyticsQueryRequest
   data: Record<string, unknown>
+}
+
+export interface UnifiedPreviewRequest {
+  mode: 'query' | 'dashboard'
+  query?: AnalyticsQueryRequest
+  dashboard?: {
+    dashboard_id: string
+    table_id?: string | null
+    filters?: AnalyticsFilter[]
+  }
+}
+
+export interface UnifiedPreviewResponse {
+  mode: 'query' | 'dashboard'
+  query: AnalyticsPreviewResponse | null
+  dashboard: DashboardDataResponse | null
 }
 
 export interface DashboardInfo {
@@ -159,7 +203,11 @@ export const reportsApi = {
   summary: () => api.get<ApiResponse<OrgReport>>('/reports/summary'),
   tableAnalytics: (table_id: string, column_ids: string[] = []) => api.post<ApiResponse<TableAggResponse>>('/reports/table-analytics', { table_id, column_ids }),
   tableSchema: (tableId: string) => api.get<ApiResponse<AnalyticsTableSchema>>(`/reports/tables/${tableId}/schema`),
+  semanticSchemaV2: (tableId: string) =>
+    api.get<ApiResponse<AnalyticsSemanticSchema>>(`/reports/v2/tables/${tableId}/semantic-schema`),
   queryPreview: (data: AnalyticsQueryRequest) => api.post<ApiResponse<AnalyticsPreviewResponse>>('/reports/query-preview', data),
+  unifiedPreviewV2: (data: UnifiedPreviewRequest) =>
+    api.post<ApiResponse<UnifiedPreviewResponse>>('/reports/v2/unified-preview', data),
   timeline: (days = 30) => api.get<ApiResponse<TimeSeriesPoint[]>>(`/reports/timeline?days=${days}`),
   listDashboards: () => api.get<ApiResponse<DashboardInfo[]>>('/reports/dashboards'),
   createDashboard: (data: { name: string; description?: string }) => api.post<ApiResponse<DashboardInfo>>('/reports/dashboards', data),

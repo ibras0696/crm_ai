@@ -369,6 +369,37 @@ jobs:
               exit 1
             fi
 
+            echo "Tagging release images and keeping only 2 latest tags per service..."
+            RELEASE_ID="$(date +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
+            KEEP_RELEASES=2
+            APP_SERVICES="api migrate celery_worker celery_beat frontend"
+
+            for svc in $APP_SERVICES; do
+              IMAGE_ID=$(docker compose -f docker-compose.prod.yml images -q "$svc" | head -n 1)
+              if [ -z "$IMAGE_ID" ]; then
+                echo "skip $svc: image id not found"
+                continue
+              fi
+
+              REPO="crm-release/${svc}"
+              RELEASE_TAG="${REPO}:${RELEASE_ID}"
+              docker image tag "$IMAGE_ID" "$RELEASE_TAG" || true
+
+              OLD_TAGS=$(docker image ls --format '{{.Repository}}:{{.Tag}}' "$REPO" \
+                | grep -v '<none>' \
+                | sort -r \
+                | tail -n +$((KEEP_RELEASES + 1)) || true)
+
+              if [ -n "$OLD_TAGS" ]; then
+                echo "remove old ${svc} release tags:"
+                echo "$OLD_TAGS"
+                echo "$OLD_TAGS" | while read -r old_tag; do
+                  [ -z "$old_tag" ] && continue
+                  docker image rm "$old_tag" || true
+                done
+              fi
+            done
+
             echo "Cleanup dangling docker artifacts..."
             docker image prune -f || true
             docker builder prune -f --filter "until=168h" || true

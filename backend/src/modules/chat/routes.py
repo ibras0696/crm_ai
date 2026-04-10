@@ -3,6 +3,7 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, Query
+from kombu.exceptions import KombuError
 from pydantic import BaseModel
 
 from src.common.enums import UserRole
@@ -173,7 +174,7 @@ async def delete_chat(
         cleanup_payload = [str(file_id) for file_id in cleanup_file_ids]
         try:
             chat_cleanup_attachments.delay(org_id=str(current_user.org_id), file_ids=cleanup_payload)
-        except Exception:
+        except (KombuError, ConnectionError, OSError, RuntimeError):
             logger.exception(
                 "chat_cleanup_task_enqueue_failed_fallback_inline",
                 extra={

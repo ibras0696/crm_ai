@@ -68,7 +68,8 @@ class FilesService:
         db_file = File(
             org_id=org_id,
             uploaded_by=user_id,
-            filename=s3_key.split("/")[-1],
+            # Keep the storage identifier in `s3_key`; user-facing metadata should stay human-readable.
+            filename=original_name,
             original_name=original_name,
             content_type=content_type,
             size=total_size,

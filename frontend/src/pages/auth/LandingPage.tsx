@@ -414,27 +414,27 @@ const Showcase = () => {
                       </div>
                     </div>
                     <Card className="flex-1 glass-card border-none bg-white/10 p-12 relative overflow-hidden">
-                      <div className="max-w-2xl mx-auto bg-zinc-950 text-slate-200 p-12 shadow-[0_0_50px_rgba(0,0,0,0.5)] space-y-6 min-h-full border border-white/5 rounded-sm">
-                        <div className="border-b-2 border-slate-100 pb-4">
+                      <div className="max-w-2xl mx-auto rounded-sm border border-slate-200 bg-white p-12 text-slate-900 shadow-[0_0_40px_rgba(15,23,42,0.15)] space-y-6 min-h-full dark:border-white/5 dark:bg-zinc-950 dark:text-slate-200 dark:shadow-[0_0_50px_rgba(0,0,0,0.5)]">
+                        <div className="border-b-2 border-slate-300 pb-4 dark:border-slate-100">
                           <h1 className="text-2xl font-serif font-black uppercase text-center">Договор №124-Б</h1>
                         </div>
                         <p className="text-sm leading-relaxed font-serif">
                           Настоящее соглашение заключено между <strong>py it platform</strong> и вашим ООО "Успешный успех". Мы обязуемся предоставлять безупречный софт, а вы — радоваться прибыли.
                         </p>
-                        <div className="h-32 border-2 border-dashed border-slate-200 rounded-lg flex items-center justify-center flex-col text-slate-300">
+                        <div className="h-32 border-2 border-dashed border-slate-300 rounded-lg flex items-center justify-center flex-col text-slate-500 dark:border-slate-200 dark:text-slate-300">
                           <Plus className="h-8 w-8 mb-2" />
                           <span className="text-[10px] font-black uppercase tracking-widest">Перетащите сюда печать или подпись</span>
                         </div>
-                        <div className="pt-12 flex justify-between gap-12 text-[10px] font-black uppercase tracking-widest text-slate-400">
-                          <div className="flex-1 border-t border-slate-200 pt-2">Сторона А (Signature)</div>
-                          <div className="flex-1 border-t border-slate-200 pt-2">Сторона Б (Stamp)</div>
+                        <div className="pt-12 flex justify-between gap-12 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                          <div className="flex-1 border-t border-slate-300 pt-2 dark:border-slate-200">Сторона А (Signature)</div>
+                          <div className="flex-1 border-t border-slate-300 pt-2 dark:border-slate-200">Сторона Б (Stamp)</div>
                         </div>
                       </div>
                       {/* Mock Toolbar */}
-                      <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-4 glass bg-black/80 p-2 px-6 rounded-full border-white/20">
-                        <div className="h-4 w-20 bg-white/20 rounded" />
-                        <div className="h-4 w-4 bg-white/20 rounded" />
-                        <div className="h-4 w-px bg-white/10" />
+                      <div className="absolute top-4 left-1/2 -translate-x-1/2 flex gap-4 rounded-full border border-border bg-white/85 p-2 px-6 backdrop-blur dark:border-white/20 dark:bg-black/80">
+                        <div className="h-4 w-20 rounded bg-slate-300/80 dark:bg-white/20" />
+                        <div className="h-4 w-4 rounded bg-slate-300/80 dark:bg-white/20" />
+                        <div className="h-4 w-px bg-slate-300/80 dark:bg-white/10" />
                         <div className="flex gap-2">
                           <div className="h-4 w-4 bg-primary rounded-full cursor-pointer hover:scale-110 transition-transform" />
                           <div className="h-4 w-4 bg-purple-500 rounded-full cursor-pointer hover:scale-110 transition-transform" />
@@ -765,9 +765,6 @@ export default function LandingPage() {
                     </div>
                     <h3 className="text-3xl font-black tracking-tight">{f.title}</h3>
                     <p className="text-lg text-muted-foreground font-medium leading-relaxed">{f.desc}</p>
-                    <div className="pt-4 flex items-center text-xs font-black uppercase tracking-widest text-primary gap-2 opacity-0 group-hover:opacity-100 transition-opacity translate-x-[-10px] group-hover:translate-x-0 duration-500">
-                      Подробнее <ChevronRight className="h-4 w-4" />
-                    </div>
                   </CardContent>
                 </Card>
               </motion.div>
@@ -870,10 +867,13 @@ export default function LandingPage() {
                 whileHover={{ scale: 1.05 }}
                 className="pt-8 relative z-10"
               >
-                <Link to="/register">
-                  <Button size="lg" className="bg-primary text-white hover:bg-primary/90 h-20 px-16 text-2xl font-black rounded-3xl shadow-[0_30px_60px_-12px_rgba(37,99,235,0.6)]">
+                <Link to="/register" className="mx-auto block w-full max-w-[34rem]">
+                  <Button
+                    size="lg"
+                    className="h-14 w-full justify-center gap-2 rounded-2xl bg-primary px-4 text-base font-black text-white shadow-[0_30px_60px_-12px_rgba(37,99,235,0.6)] hover:bg-primary/90 sm:h-16 sm:gap-3 sm:px-6 sm:text-lg md:h-20 md:rounded-3xl md:px-16 md:text-2xl"
+                  >
                     Создать аккаунт сейчас
-                    <ArrowRight className="h-8 w-8 ml-4" />
+                    <ArrowRight className="h-5 w-5 shrink-0 sm:h-6 sm:w-6 md:h-8 md:w-8" />
                   </Button>
                 </Link>
               </motion.div>

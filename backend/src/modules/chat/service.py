@@ -214,7 +214,8 @@ class ChatService:
             id=file_id,
             org_id=chat.org_id,
             uploaded_by=actor_id,
-            filename=f"{file_id.hex}.{safe_ext}",
+            # Preserve the user-visible name here as well; the UUID-based storage key already lives in `s3_key`.
+            filename=filename,
             original_name=filename,
             content_type=content_type,
             size=size_bytes,

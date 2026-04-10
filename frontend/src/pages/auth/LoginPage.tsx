@@ -3,6 +3,7 @@ import { useNavigate, Link, Navigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import PasswordInput from '@/components/auth/PasswordInput'
 import { useAuth } from '@/contexts/AuthContext'
 import { AuthError } from '@/contexts/AuthContext'
 import { Loader2, ArrowRight, Zap, Shield, Users } from 'lucide-react'
@@ -155,9 +156,8 @@ export default function LoginPage() {
             </div>
             <div className="space-y-1">
               <Label htmlFor="password">Пароль</Label>
-              <Input
+              <PasswordInput
                 id="password"
-                type="password"
                 placeholder="Минимум 8 символов"
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); clearFieldError('password') }}

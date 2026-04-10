@@ -35,13 +35,13 @@ export default function AppLayout() {
       />
       <div
         className={cn(
-          'flex flex-1 flex-col overflow-hidden transition-all duration-300',
+          'flex flex-1 flex-col overflow-hidden transition-[margin] duration-300',
           sidebarCollapsed ? 'md:ml-[68px]' : 'md:ml-[260px]'
         )}
         id="main-content"
       >
         <Header onMenuToggle={() => setMobileMenuOpen(true)} />
-        <main className="flex-1 overflow-y-auto p-4 md:p-6 scrollbar-thin">
+        <main className="flex-1 overflow-y-auto bg-background p-4 md:p-6 scrollbar-thin">
           <Outlet />
         </main>
       </div>

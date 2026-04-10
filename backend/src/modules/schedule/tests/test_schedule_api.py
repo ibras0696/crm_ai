@@ -3,6 +3,8 @@ import uuid
 import pytest
 from httpx import AsyncClient
 
+from src.modules.notifications.public_api import NotificationEnqueueResult
+
 
 def _headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
@@ -173,6 +175,147 @@ async def test_schedule_event_participants_reminders_and_dispatch(client: AsyncC
     assert emp_notifs.status_code == 200
     emp_event_notifs = [n for n in emp_notifs.json()["data"] if (n.get("meta") or {}).get("event_id") == event_id]
     assert len(emp_event_notifs) == 3
+
+
+@pytest.mark.asyncio
+async def test_schedule_dispatch_enqueues_email_notifications_for_each_offset_and_participant(client: AsyncClient):
+    owner_token = await _register_owner(client)
+
+    invite_email = f"schedule-rem-email-{uuid.uuid4().hex[:8]}@example.com"
+    inv = await client.post(
+        "/api/v1/orgs/invites",
+        json={"email": invite_email, "role": "employee"},
+        headers=_headers(owner_token),
+    )
+    assert inv.status_code == 201
+    invite_token = inv.json()["data"]["token"]
+
+    acc = await client.post(
+        "/api/v1/orgs/invites/accept",
+        json={
+            "token": invite_token,
+            "password": "StrongPass123!",
+            "first_name": "Emp",
+            "last_name": "Email",
+        },
+    )
+    assert acc.status_code == 200
+
+    members = await client.get("/api/v1/orgs/members", headers=_headers(owner_token))
+    assert members.status_code == 200
+    member_items = members.json()["data"]
+    owner_user_id = next(x["user_id"] for x in member_items if x["role"] == "owner")
+    emp_user_id = next(x["user_id"] for x in member_items if x["role"] == "employee")
+
+    create = await client.post(
+        "/api/v1/schedule/events",
+        json={
+            "title": "Email reminder call",
+            "description": "Detailed reminder body",
+            "start_at": "2026-03-10T12:00:00Z",
+            "end_at": "2026-03-10T13:30:00Z",
+            "all_day": False,
+            "participant_ids": [owner_user_id, emp_user_id],
+            "reminder_offsets_minutes": [60, 120, 1440],
+        },
+        headers=_headers(owner_token),
+    )
+    assert create.status_code == 200
+
+    calls: list[dict[str, str]] = []
+
+    def _capture_schedule_email(*, to_email: str, subject: str, body: str, kind: str = "generic"):
+        calls.append({"to_email": to_email, "subject": subject, "body": body, "kind": kind})
+        return NotificationEnqueueResult(queued=True, kind=kind, to_email=to_email, reason="queued")
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "src.modules.schedule.service.queue_email_notification",
+            _capture_schedule_email,
+        )
+        d1 = await client.post(
+            "/api/v1/schedule/events/dispatch-reminders",
+            json={"now": "2026-03-09T12:00:00Z"},
+            headers=_headers(owner_token),
+        )
+        d2 = await client.post(
+            "/api/v1/schedule/events/dispatch-reminders",
+            json={"now": "2026-03-10T10:00:00Z"},
+            headers=_headers(owner_token),
+        )
+        d3 = await client.post(
+            "/api/v1/schedule/events/dispatch-reminders",
+            json={"now": "2026-03-10T11:00:00Z"},
+            headers=_headers(owner_token),
+        )
+
+    assert d1.status_code == 200
+    assert d2.status_code == 200
+    assert d3.status_code == 200
+    assert d1.json()["data"]["created_notifications"] == 2
+    assert d2.json()["data"]["created_notifications"] == 2
+    assert d3.json()["data"]["created_notifications"] == 2
+    assert len(calls) == 6
+    assert all(call["kind"] == "schedule_reminder" for call in calls)
+    assert all("Email reminder call" in call["subject"] for call in calls)
+    assert all(
+        "Событие:" in call["body"] and "Начало:" in call["body"] and "Описание:" in call["body"]
+        for call in calls
+    )
+
+
+@pytest.mark.asyncio
+async def test_schedule_list_hides_events_for_non_participants(client: AsyncClient):
+    owner_token = await _register_owner(client)
+
+    invite_email = f"schedule-visibility-{uuid.uuid4().hex[:8]}@example.com"
+    inv = await client.post(
+        "/api/v1/orgs/invites",
+        json={"email": invite_email, "role": "employee"},
+        headers=_headers(owner_token),
+    )
+    assert inv.status_code == 201
+    invite_token = inv.json()["data"]["token"]
+
+    acc = await client.post(
+        "/api/v1/orgs/invites/accept",
+        json={
+            "token": invite_token,
+            "password": "StrongPass123!",
+            "first_name": "Emp",
+            "last_name": "Private",
+        },
+    )
+    assert acc.status_code == 200
+    emp_token = acc.json()["data"]["access_token"]
+
+    create = await client.post(
+        "/api/v1/schedule/events",
+        json={
+            "title": "Private owner event",
+            "start_at": "2026-03-11T12:00:00Z",
+            "end_at": "2026-03-11T13:00:00Z",
+            "all_day": False,
+            "participant_ids": [],
+            "reminder_offsets_minutes": [60],
+        },
+        headers=_headers(owner_token),
+    )
+    assert create.status_code == 200
+    event_id = create.json()["data"]["id"]
+
+    owner_list = await client.get("/api/v1/schedule/events", headers=_headers(owner_token))
+    assert owner_list.status_code == 200
+    assert any(item["id"] == event_id for item in owner_list.json()["data"])
+
+    emp_list = await client.get("/api/v1/schedule/events", headers=_headers(emp_token))
+    assert emp_list.status_code == 200
+    assert all(item["id"] != event_id for item in emp_list.json()["data"])
+
+    emp_get = await client.get(f"/api/v1/schedule/events/{event_id}", headers=_headers(emp_token))
+    assert emp_get.status_code == 200
+    assert emp_get.json()["ok"] is False
+    assert emp_get.json()["error"]["code"] == "NOT_FOUND"
 
 
 @pytest.mark.asyncio

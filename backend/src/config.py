@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     AUTH_COOKIE_PATH: str = "/"
     AUTH_PASSWORD_RESET_TOKEN_TTL_SECONDS: int = 1800
     AUTH_PASSWORD_RESET_TOKEN_BYTES: int = 48
+    AUTH_REGISTRATION_CONFIRM_TOKEN_TTL_SECONDS: int = 1800
+    AUTH_REGISTRATION_CONFIRM_TOKEN_BYTES: int = 48
+    AUTH_REGISTRATION_REQUEST_RPM_PER_EMAIL: int = 3
+    AUTH_REGISTRATION_REQUEST_RPM_PER_IP: int = 20
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://crm_user:crm_pass@localhost:5432/crm_db"

@@ -115,7 +115,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
             Чаты
           </Button>
         </CardHeader>
-        <CardContent className="relative h-[70vh] min-h-[520px] max-h-[760px] p-0">
+        <CardContent className="relative h-[70vh] min-h-[420px] max-h-[760px] p-0 sm:min-h-[520px]">
           <div className={`relative h-full min-h-0 p-4 ${isDesktopSidebarCollapsed ? 'lg:pl-16' : ''}`}>
             {isDesktopSidebarCollapsed ? (
               <Button
@@ -252,7 +252,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
               <div
                 ref={messagesViewportRef}
                 onScroll={handleMessagesScroll}
-                className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3"
+                className="min-h-0 flex-1 space-y-2 overflow-x-hidden overflow-y-auto p-3"
               >
                 {loadingOlderMessages && (
                   <div className="pb-1 text-center text-xs text-muted-foreground">Загрузка предыдущих сообщений...</div>
@@ -304,8 +304,8 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                               <span className="rounded-full border border-border/60 px-2 py-0.5">{formatDayDivider(message.created_at)}</span>
                             </div>
                           )}
-                          <div className={`group flex w-full ${own ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`w-fit ${own ? 'max-w-[82%] sm:max-w-[62%] text-right' : 'max-w-[90%] sm:max-w-[68%] text-left'}`}>
+                          <div className={`group flex w-full min-w-0 ${own ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`min-w-0 ${own ? 'max-w-[82%] sm:max-w-[62%] text-right' : 'max-w-[90%] sm:max-w-[68%] text-left'}`}>
                               {!own && (
                                 <div className="mb-1 flex items-center gap-2 px-1">
                                   <div className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground">
@@ -315,7 +315,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                                 </div>
                               )}
                               <div
-                                className={`relative w-fit max-w-full rounded-xl border px-3 py-2 text-sm ${
+                                className={`relative max-w-full rounded-xl border px-3 py-2 text-sm ${
                                   own
                                     ? 'ml-auto border-primary/35 bg-primary/[0.14] text-right'
                                     : 'mr-auto border-border/70 bg-muted/25 text-left'
@@ -344,7 +344,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
 
                                 {shouldRenderBody && (
                                   <div
-                                    className={`whitespace-pre-wrap break-all ${expandable && !expanded ? 'max-h-28 overflow-hidden' : ''} ${
+                                    className={`min-w-0 whitespace-pre-wrap break-words ${expandable && !expanded ? 'max-h-28 overflow-hidden' : ''} ${
                                       own ? 'text-right' : 'text-left'
                                     }`}
                                   >

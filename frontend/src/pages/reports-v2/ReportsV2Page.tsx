@@ -371,7 +371,7 @@ export default function ReportsV2Page() {
         <div className="space-y-1">
           <h1 className="flex items-center gap-2 text-2xl font-semibold text-foreground">
             <LayoutDashboard className="h-6 w-6 text-primary" />
-            Аналитика V2
+            Аналитика
           </h1>
           <p className="text-sm text-muted-foreground">
             Универсальный слой аналитики для любых таблиц + единый контракт запросов

@@ -105,7 +105,7 @@ export default function Header({ onMenuToggle }: HeaderProps) {
     : '??'
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 md:h-16 items-center gap-2 md:gap-4 border-b border-border bg-background/80 backdrop-blur-md px-3 md:px-6">
+    <header className="sticky top-0 z-30 flex h-14 md:h-16 items-center gap-2 md:gap-4 border-b border-border bg-background supports-[backdrop-filter]:bg-background/85 supports-[backdrop-filter]:backdrop-blur-md px-3 md:px-6">
       <Button variant="ghost" size="icon" className="md:hidden text-muted-foreground" onClick={onMenuToggle}>
         <Menu className="h-5 w-5" />
       </Button>

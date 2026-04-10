@@ -1,10 +1,13 @@
-import { useState } from 'react'
-import { useNavigate, Link, Navigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { useNavigate, Link, Navigate, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useAuth } from '@/contexts/AuthContext'
 import { AuthError } from '@/contexts/AuthContext'
+import { authApi } from '@/lib/api/auth/auth'
+import PasswordInput from '@/components/auth/PasswordInput'
+import { isAxiosError } from 'axios'
 import { Loader2, ArrowRight, Building2 } from 'lucide-react'
 
 const AUTH_ERRORS_RU: Record<string, string> = {
@@ -20,18 +23,55 @@ type FieldErrors = Partial<Record<keyof FormFields, string>>
 
 export default function RegisterPage() {
   const navigate = useNavigate()
-  const { register, isAuthenticated } = useAuth()
+  const [searchParams] = useSearchParams()
+  const confirmToken = searchParams.get('confirm_token')
+  const { refresh, isAuthenticated } = useAuth()
   const [form, setForm] = useState<FormFields>({ email: '', password: '', first_name: '', last_name: '', org_name: '' })
   const [error, setError] = useState('')
+  const [successEmail, setSuccessEmail] = useState('')
+  const [confirmError, setConfirmError] = useState('')
+  const [confirming, setConfirming] = useState(false)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [acceptedPolicy, setAcceptedPolicy] = useState(false)
   const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!confirmToken) return
+    let cancelled = false
+    setConfirming(true)
+    setConfirmError('')
+
+    authApi
+      .confirmRegistration({ token: confirmToken })
+      .then(async () => {
+        if (cancelled) return
+        await refresh()
+        navigate('/dashboard', { replace: true })
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        if (isAxiosError(err)) {
+          const msg = err.response?.data?.error?.message
+          setConfirmError(typeof msg === 'string' && msg.trim() ? msg : 'Ссылка подтверждения недействительна или истекла.')
+          return
+        }
+        setConfirmError('Ссылка подтверждения недействительна или истекла.')
+      })
+      .finally(() => {
+        if (!cancelled) setConfirming(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [confirmToken, navigate, refresh])
 
   if (isAuthenticated) return <Navigate to="/dashboard" replace />
 
   const update = (field: keyof FormFields) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setForm((prev) => ({ ...prev, [field]: e.target.value }))
     if (fieldErrors[field]) setFieldErrors((prev) => ({ ...prev, [field]: undefined }))
+    if (successEmail) setSuccessEmail('')
   }
 
   const validate = (): boolean => {
@@ -63,8 +103,8 @@ export default function RegisterPage() {
     if (!validate()) return
     setLoading(true)
     try {
-      await register({ ...form, accepted_privacy_policy: true })
-      navigate('/dashboard')
+      await authApi.requestRegistration({ ...form, accepted_privacy_policy: true })
+      setSuccessEmail(form.email.trim())
     } catch (err: unknown) {
       if (err instanceof AuthError) {
         const ruMessage = AUTH_ERRORS_RU[err.code ?? ''] || err.message || 'Ошибка регистрации'
@@ -73,6 +113,9 @@ export default function RegisterPage() {
         } else {
           setError(ruMessage)
         }
+      } else if (isAxiosError(err)) {
+        const apiMessage = err.response?.data?.error?.message
+        setError(typeof apiMessage === 'string' && apiMessage.trim() ? apiMessage : 'Ошибка регистрации. Попробуйте позже.')
       } else {
         setError('Ошибка регистрации. Попробуйте позже.')
       }
@@ -83,6 +126,33 @@ export default function RegisterPage() {
 
   const fieldClass = (field: keyof FormFields) =>
     `h-11 bg-secondary/50${fieldErrors[field] ? ' border-red-500 focus-visible:ring-red-500' : ''}`
+
+  if (confirmToken) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-8">
+        <div className="w-full max-w-sm space-y-6">
+          <div>
+            <h2 className="text-2xl font-bold">Подтверждение регистрации</h2>
+            <p className="text-muted-foreground mt-1">Завершаем создание аккаунта по ссылке из письма.</p>
+          </div>
+          {confirming && (
+            <div className="rounded-lg bg-secondary/50 border border-border p-4 text-sm flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Проверяем ссылку...
+            </div>
+          )}
+          {!confirming && confirmError && (
+            <div className="space-y-4">
+              <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-sm text-red-400">{confirmError}</div>
+              <Link to="/register" className="text-primary hover:underline font-medium">
+                Запросить новую ссылку
+              </Link>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex min-h-screen">
@@ -142,6 +212,11 @@ export default function RegisterPage() {
             {error && (
               <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-sm text-red-400">{error}</div>
             )}
+            {successEmail && (
+              <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-3 text-sm text-emerald-500">
+                Ссылка для завершения регистрации отправлена на {successEmail}. Перейдите по ней для активации аккаунта.
+              </div>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label htmlFor="first_name">Имя</Label>
@@ -166,12 +241,18 @@ export default function RegisterPage() {
             </div>
             <div className="space-y-1">
               <Label htmlFor="password">Пароль</Label>
-              <Input id="password" type="password" placeholder="Минимум 8 символов" value={form.password} onChange={update('password')} className={fieldClass('password')} />
+              <PasswordInput
+                id="password"
+                placeholder="Минимум 8 символов"
+                value={form.password}
+                onChange={update('password')}
+                className={fieldClass('password')}
+              />
               {fieldErrors.password && <p className="text-xs text-red-400">{fieldErrors.password}</p>}
             </div>
             <Button type="submit" className="w-full h-11 gradient-primary border-0 text-white font-semibold" disabled={loading}>
               {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <ArrowRight className="h-4 w-4 mr-2" />}
-              {loading ? 'Создание...' : 'Создать аккаунт'}
+              {loading ? 'Отправка...' : successEmail ? 'Отправить ссылку повторно' : 'Создать аккаунт'}
             </Button>
             <label className="flex items-start gap-2 text-xs text-muted-foreground">
               <input

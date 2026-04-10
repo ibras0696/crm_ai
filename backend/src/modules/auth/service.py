@@ -38,6 +38,17 @@ class AuthService:
     ) -> tuple[User, Organization, TokenResponse]:
         return await self._registration.register(data, ip_address=ip_address)
 
+    async def request_registration_confirmation(self, data: RegisterRequest, ip_address: str | None = None) -> None:
+        await self._registration.request_registration_confirmation(data, ip_address=ip_address)
+
+    async def confirm_registration(
+        self,
+        *,
+        token: str,
+        ip_address: str | None = None,
+    ) -> tuple[User, Organization, TokenResponse]:
+        return await self._registration.confirm_registration(token=token, ip_address=ip_address)
+
     async def login(
         self,
         email: str,

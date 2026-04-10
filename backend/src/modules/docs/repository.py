@@ -10,6 +10,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.enums import SubscriptionStatus
+from src.modules.auth.models import User
 from src.modules.billing.models import Plan
 from src.modules.docs.domain import FileStatus, FileType
 from src.modules.docs.models import DocsAIGenerationJob, FileVersion, Folder, OrgStorageUsage
@@ -116,6 +117,28 @@ class DocsRepository:
             .order_by(File.created_at.desc())
         )
         return list((await self.session.execute(stmt)).scalars().all())
+
+    async def exists_doc_title(
+        self,
+        *,
+        org_id: uuid.UUID,
+        folder_id: uuid.UUID | None,
+        title: str,
+    ) -> bool:
+        """Проверить занятость user-facing заголовка в рамках папки."""
+        folder_filter = File.folder_id.is_(None) if folder_id is None else File.folder_id == folder_id
+        stmt = (
+            select(File.id)
+            .where(
+                File.org_id == org_id,
+                folder_filter,
+                File.title == title,
+                File.type.in_([FileType.TXT.value, FileType.PDF.value, FileType.DOCX.value]),
+                File.status != FileStatus.DELETED.value,
+            )
+            .limit(1)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none() is not None
 
     async def update_file(self, file_obj: File) -> File:
         """Обновить файл."""
@@ -242,6 +265,30 @@ class DocsRepository:
     async def get_ai_generation_job_for_update(self, *, job_id: uuid.UUID) -> DocsAIGenerationJob | None:
         """Получить AI job с блокировкой строки FOR UPDATE."""
         stmt = select(DocsAIGenerationJob).where(DocsAIGenerationJob.id == job_id).with_for_update().limit(1)
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def lock_user_for_docs_ai(self, *, user_id: uuid.UUID) -> None:
+        """Сериализовать запуск AI-генерации документов на одного пользователя."""
+        stmt = select(User.id).where(User.id == user_id).with_for_update()
+        await self.session.execute(stmt)
+
+    async def get_active_ai_generation_job_for_user(
+        self,
+        *,
+        org_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> DocsAIGenerationJob | None:
+        """Получить активную AI-задачу пользователя в рамках организации."""
+        stmt = (
+            select(DocsAIGenerationJob)
+            .where(
+                DocsAIGenerationJob.org_id == org_id,
+                DocsAIGenerationJob.user_id == user_id,
+                DocsAIGenerationJob.status.in_(("queued", "running", "scanning")),
+            )
+            .order_by(DocsAIGenerationJob.created_at.desc())
+            .limit(1)
+        )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def update_ai_generation_job(self, job: DocsAIGenerationJob) -> DocsAIGenerationJob:

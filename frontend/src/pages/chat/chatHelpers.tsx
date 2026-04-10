@@ -567,7 +567,7 @@ export function AttachmentPreview({
           <source src={downloadUrl} />
         </audio>
         {!audioFailed ? (
-          <div className="flex min-w-[230px] items-center gap-2">
+          <div className="flex w-full min-w-0 max-w-full items-center gap-2">
             <button
               type="button"
               onClick={() => void toggleAudioPlayback()}
@@ -600,7 +600,7 @@ export function AttachmentPreview({
             </div>
           </div>
         ) : (
-          <div className="flex items-center justify-between gap-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5">
+          <div className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5">
             <span className="truncate text-xs text-muted-foreground">Не удалось воспроизвести</span>
             <a
               href={downloadUrl}
@@ -623,11 +623,10 @@ export function AttachmentPreview({
       target="_blank"
       rel="noreferrer"
       download={attachment.original_name}
-      className="inline-flex max-w-full items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-xs text-primary hover:bg-primary/5"
+      className="flex w-full min-w-0 max-w-full items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-xs text-primary hover:bg-primary/5"
     >
-      <span className="truncate">{attachment.original_name}</span>
+      <span className="min-w-0 flex-1 truncate">{attachment.original_name}</span>
       <span className="shrink-0 text-muted-foreground">{formatFileSize(attachment.size)}</span>
     </a>
   )
 }
-

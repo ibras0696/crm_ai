@@ -230,6 +230,8 @@ async def test_chat_attachment_init_finish_send_and_download_url(client: AsyncCl
     assert finish_upload.status_code == 200, f"Finish upload failed: {finish_upload.text}"
     assert finish_upload.json()["ok"] is True
     assert finish_upload.json()["data"]["status"] == "ready"
+    assert finish_upload.json()["data"]["filename"] == "preview.png"
+    assert finish_upload.json()["data"]["original_name"] == "preview.png"
 
     send_message = await client.post(
         f"/api/v1/chat/chats/{chat_id}/messages",
@@ -243,6 +245,8 @@ async def test_chat_attachment_init_finish_send_and_download_url(client: AsyncCl
     assert message_meta["attachment_ids"] == [file_id]
     assert len(message_meta["attachments"]) == 1
     assert message_meta["attachments"][0]["file_id"] == file_id
+    assert message_meta["attachments"][0]["filename"] == "preview.png"
+    assert message_meta["attachments"][0]["original_name"] == "preview.png"
 
     download_url = await client.get(
         f"/api/v1/chat/chats/{chat_id}/attachments/{file_id}/download-url",

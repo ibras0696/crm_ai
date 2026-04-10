@@ -25,6 +25,7 @@ env/
 
 # Docker
 docker-compose.override.yml
+docker-compose.no-onlyoffice.yml
 secrets.yml
 
 # Node

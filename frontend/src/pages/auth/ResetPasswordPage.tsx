@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import PasswordInput from '@/components/auth/PasswordInput'
 import { authApi } from '@/lib/api/auth/auth'
 import { Loader2, ArrowRight } from 'lucide-react'
 
@@ -80,9 +80,8 @@ export default function ResetPasswordPage() {
                         )}
                         <div className="space-y-1">
                             <Label htmlFor="password">Новый пароль</Label>
-                            <Input
+                            <PasswordInput
                                 id="password"
-                                type="password"
                                 placeholder="Минимум 8 символов"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}

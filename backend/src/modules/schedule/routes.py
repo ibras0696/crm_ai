@@ -66,7 +66,13 @@ async def list_events(
 ):
     async with UnitOfWork() as uow:
         service = ScheduleService(uow.session)
-        events = await service.list_events(org_id=current_user.org_id, start=start, end=end)
+        events = await service.list_events(
+            org_id=current_user.org_id,
+            start=start,
+            end=end,
+            viewer_user_id=current_user.user_id,
+            viewer_role=current_user.role,
+        )
         items = [EventOut.model_validate(event) for event in events]
     return ApiResponse(data=items)
 
@@ -82,7 +88,12 @@ async def get_event(
     async with UnitOfWork() as uow:
         service = ScheduleService(uow.session)
         event = await service.get_event_by_id(event_id=event_id, org_id=current_user.org_id)
-        if event is None:
+        has_access = event is not None and service.can_user_access_event(
+            event,
+            user_id=current_user.user_id,
+            role=current_user.role,
+        )
+        if not has_access:
             return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": EVENT_NOT_FOUND_MESSAGE})
         item = EventOut.model_validate(event)
     return ApiResponse(data=item)
@@ -100,7 +111,12 @@ async def update_event(
     async with UnitOfWork() as uow:
         service = ScheduleService(uow.session)
         event = await service.get_event_by_id(event_id=event_id, org_id=current_user.org_id)
-        if event is None:
+        has_access = event is not None and service.can_user_access_event(
+            event,
+            user_id=current_user.user_id,
+            role=current_user.role,
+        )
+        if not has_access:
             return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": EVENT_NOT_FOUND_MESSAGE})
         try:
             updated = await service.update_event(event=event, body=body)
@@ -120,7 +136,12 @@ async def delete_event(
     async with UnitOfWork() as uow:
         service = ScheduleService(uow.session)
         event = await service.get_event_by_id(event_id=event_id, org_id=current_user.org_id)
-        if event is None:
+        has_access = event is not None and service.can_user_access_event(
+            event,
+            user_id=current_user.user_id,
+            role=current_user.role,
+        )
+        if not has_access:
             return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": EVENT_NOT_FOUND_MESSAGE})
         await service.delete_event(event=event)
         await uow.commit()

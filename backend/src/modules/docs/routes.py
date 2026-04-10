@@ -52,7 +52,16 @@ logger = logging.getLogger(__name__)
 
 def _error_response(error: DocsModuleError) -> ApiResponse[None]:
     """Преобразовать бизнес-ошибку в API-ответ."""
-    return ApiResponse(ok=False, data=None, error={"code": error.code, "message": error.message})
+    return ApiResponse(
+        ok=False,
+        data=None,
+        error={
+            "code": error.code,
+            "message": error.message,
+            "field": getattr(error, "field", None),
+            "details": getattr(error, "details", None),
+        },
+    )
 
 
 @router.get("/tree", response_model=ApiResponse[DocsTreeOut])

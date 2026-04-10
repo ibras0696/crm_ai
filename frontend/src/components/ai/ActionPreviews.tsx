@@ -56,7 +56,7 @@ export function DashboardPreview({ result }: { result: Record<string, unknown> }
           <p className="text-xs text-muted-foreground">Создан дашборд</p>
           <p className="text-sm font-semibold">{asString(dashboard.name) || 'AI дашборд'}</p>
         </div>
-        <Link to="/reports" className="text-xs rounded-md border border-border px-2 py-1 hover:bg-secondary">
+        <Link to="/reports-v2" className="text-xs rounded-md border border-border px-2 py-1 hover:bg-secondary">
           Открыть в аналитике
         </Link>
       </div>

@@ -65,11 +65,16 @@ async def test_files_upload_list_download_delete(client: AsyncClient, monkeypatc
     assert upload.status_code == 200
     assert upload.json()["ok"] is True
     file_id = upload.json()["data"]["id"]
+    assert upload.json()["data"]["filename"] == "spec.txt"
+    assert upload.json()["data"]["original_name"] == "spec.txt"
 
     listed = await client.get("/api/v1/files/?limit=50&offset=0", headers=_headers(token))
     assert listed.status_code == 200
     assert listed.json()["ok"] is True
-    assert any(x["id"] == file_id for x in listed.json()["data"])
+    listed_item = next((x for x in listed.json()["data"] if x["id"] == file_id), None)
+    assert listed_item is not None
+    assert listed_item["filename"] == "spec.txt"
+    assert listed_item["original_name"] == "spec.txt"
 
     downloaded = await client.get(f"/api/v1/files/{file_id}/download", headers=_headers(token))
     assert downloaded.status_code == 200

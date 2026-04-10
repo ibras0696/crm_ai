@@ -1554,7 +1554,79 @@ async def test_docs_ai_generate_docx_allows_regular_prompt_with_free_request_lim
 
 
 @pytest.mark.asyncio
-async def test_docs_ai_generate_deduplicates_same_recent_request(
+async def test_docs_ai_generate_uses_suffix_for_duplicate_title(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    token = await _register_owner(client)
+    _patch_ai_generation_stubs(monkeypatch, text="AI документ с одинаковым заголовком")
+
+    async def _allow_limits(*_args, **_kwargs):
+        return True, None
+
+    async def _fake_spend_tokens(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("src.modules.docs.service.check_ai_limits", _allow_limits)
+    monkeypatch.setattr("src.modules.docs.tasks.check_ai_limits", _allow_limits)
+    monkeypatch.setattr("src.modules.docs.tasks.spend_tokens", _fake_spend_tokens)
+    monkeypatch.setattr("src.modules.docs.routes.ai_generate.delay", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("src.modules.docs.routes.scan_version.delay", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("src.modules.docs.tasks.sync_session_factory", _build_test_sync_session_factory())
+
+    storage_map: dict[str, bytes] = {}
+
+    def _put_object_bytes(*, bucket: str, key: str, payload: bytes, content_type: str) -> None:
+        _ = bucket, content_type
+        storage_map[key] = payload
+
+    def _get_object_bytes(*, bucket: str, key: str) -> bytes:
+        _ = bucket
+        return storage_map[key]
+
+    monkeypatch.setattr("src.modules.docs.tasks.DEFAULT_STORAGE_PROVIDER.put_object_bytes", _put_object_bytes)
+    monkeypatch.setattr("src.modules.docs.tasks.DEFAULT_STORAGE_PROVIDER.get_object_bytes", _get_object_bytes)
+
+    first = await client.post(
+        "/api/v1/docs/files/ai/generate",
+        json={"type": "docx", "prompt": "Сделай КП для клиента Альфа", "title": "Коммерческое предложение"},
+        headers=_headers(token),
+    )
+    assert first.status_code == 200
+    assert first.json()["ok"] is True
+    first_job_id = str(first.json()["data"]["job_id"])
+    first_file_id = str(first.json()["data"]["file_id"])
+
+    first_task_result = await run_ai_generate_inline(job_id=first_job_id, task_id="suffix-first")
+    assert first_task_result["status"] == "scanning", first_task_result
+
+    first_file_scanning = await client.get(f"/api/v1/docs/files/{first_file_id}", headers=_headers(token))
+    assert first_file_scanning.status_code == 200
+    assert first_file_scanning.json()["ok"] is True
+    version_id = str(first_file_scanning.json()["data"]["current_version_id"])
+    assert version_id
+
+    first_scan_result = scan_version.run(version_id)
+    assert first_scan_result["status"] == "ready"
+
+    second = await client.post(
+        "/api/v1/docs/files/ai/generate",
+        json={"type": "docx", "prompt": "Сделай КП для клиента Бета", "title": "Коммерческое предложение"},
+        headers=_headers(token),
+    )
+    assert second.status_code == 200
+    assert second.json()["ok"] is True
+    second_file_id = str(second.json()["data"]["file_id"])
+
+    second_file = await client.get(f"/api/v1/docs/files/{second_file_id}", headers=_headers(token))
+    assert second_file.status_code == 200
+    assert second_file.json()["ok"] is True
+    assert second_file.json()["data"]["title"] == "Коммерческое предложение (2)"
+    assert second_file.json()["data"]["original_name"] == "Коммерческое предложение (2).docx"
+
+
+@pytest.mark.asyncio
+async def test_docs_ai_generate_rejects_second_request_when_active(
     client: AsyncClient,
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -1592,12 +1664,11 @@ async def test_docs_ai_generate_deduplicates_same_recent_request(
 
     second = await client.post("/api/v1/docs/files/ai/generate", json=payload, headers=_headers(token))
     assert second.status_code == 200
-    assert second.json()["ok"] is True
+    assert second.json()["ok"] is False
+    assert second.json()["error"]["code"] == "AI_GENERATION_ALREADY_RUNNING"
 
     first_data = first.json()["data"]
-    second_data = second.json()["data"]
-    assert second_data["job_id"] == first_data["job_id"]
-    assert second_data["file_id"] == first_data["file_id"]
+    assert second.json()["error"]["details"]["active_job_id"] == first_data["job_id"]
 
     jobs_list = await client.get("/api/v1/docs/files/ai/jobs?limit=10", headers=_headers(token))
     assert jobs_list.status_code == 200

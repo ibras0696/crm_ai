@@ -22,7 +22,6 @@ import TableDetailPage from './pages/tables/TableDetailPage'
 import DocsPage from './pages/docs/DocsPage'
 import KnowledgePage from './pages/knowledge/KnowledgePage'
 import SchedulePage from './pages/schedule/SchedulePage'
-import ReportsPage from './pages/reports/ReportsPage'
 import ReportsV2Page from './pages/reports-v2/ReportsV2Page'
 import AIPage from './pages/ai/AIPage'
 import ChatPage from './pages/chat/ChatPage'
@@ -61,11 +60,10 @@ export default function App() {
         <Route path="/knowledge" element={<KnowledgePage />} />
         <Route path="/chat" element={<ChatPage />} />
         <Route path="/schedule" element={<SchedulePage />} />
-        <Route path="/reports" element={<ReportsPage />} />
         <Route
           path="/reports-v2"
           element={
-            <ErrorBoundary title="Аналитика V2">
+            <ErrorBoundary title="Аналитика">
               <ReportsV2Page />
             </ErrorBoundary>
           }

@@ -85,6 +85,7 @@ async def handle_create_document_action(
             "error": error.code,
             "message": error.message,
             "status_code": error.status_code,
+            **({"details": error.details} if getattr(error, "details", None) is not None else {}),
         }
 
     should_enqueue_task = bool(getattr(result, "should_enqueue_task", True))

@@ -1,7 +1,10 @@
 import uuid
+from re import search
 
 import pytest
 from httpx import AsyncClient
+
+from src.modules.notifications.public_api import NotificationEnqueueResult
 
 
 @pytest.mark.asyncio
@@ -59,6 +62,134 @@ async def test_register_duplicate_email(client: AsyncClient):
     assert resp2.status_code == 409
     assert resp2.json()["ok"] is False
     assert resp2.json()["error"]["code"] == "CONFLICT"
+
+
+@pytest.mark.asyncio
+async def test_register_request_and_confirm_flow(client: AsyncClient):
+    email = f"confirm-{uuid.uuid4().hex[:8]}@example.com"
+    payload = {
+        "email": email,
+        "password": "StrongPass123!",
+        "first_name": "Mail",
+        "last_name": "Confirm",
+        "org_name": "Mail Confirm Org",
+        "accepted_privacy_policy": True,
+    }
+    captured: dict[str, str] = {}
+
+    def _capture_registration_email(*, to_email: str, subject: str, body: str, kind: str = "generic"):
+        captured["to_email"] = to_email
+        captured["subject"] = subject
+        captured["kind"] = kind
+        match = search(r"confirm_token=([^\s]+)", body)
+        if match:
+            captured["token"] = match.group(1)
+        return NotificationEnqueueResult(queued=True, kind=kind, to_email=to_email, reason="queued")
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "src.modules.auth.services.registration.queue_email_notification",
+            _capture_registration_email,
+        )
+        request_resp = await client.post("/api/v1/auth/register/request", json=payload)
+
+    assert request_resp.status_code == 202
+    assert request_resp.json()["ok"] is True
+    assert captured["to_email"] == email
+    assert captured["kind"] == "registration_confirm"
+    assert captured["token"]
+
+    login_before_confirm = await client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": payload["password"]},
+    )
+    assert login_before_confirm.status_code == 401
+
+    confirm_resp = await client.post("/api/v1/auth/register/confirm", json={"token": captured["token"]})
+    assert confirm_resp.status_code == 201
+    assert confirm_resp.json()["ok"] is True
+    assert "access_token" in confirm_resp.json()["data"]
+    assert "refresh_token" in confirm_resp.json()["data"]
+
+    login_after_confirm = await client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": payload["password"]},
+    )
+    assert login_after_confirm.status_code == 200
+    assert login_after_confirm.json()["ok"] is True
+
+
+@pytest.mark.asyncio
+async def test_register_request_rate_limit_per_email(client: AsyncClient):
+    email = f"ratelimit-{uuid.uuid4().hex[:8]}@example.com"
+    payload = {
+        "email": email,
+        "password": "StrongPass123!",
+        "first_name": "Rate",
+        "last_name": "Limit",
+        "org_name": "Rate Limit Org",
+        "accepted_privacy_policy": True,
+    }
+
+    def _capture_registration_email(*, to_email: str, subject: str, body: str, kind: str = "generic"):
+        _ = subject, body
+        return NotificationEnqueueResult(queued=True, kind=kind, to_email=to_email, reason="queued")
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "src.modules.auth.services.registration.queue_email_notification",
+            _capture_registration_email,
+        )
+        monkeypatch.setattr(
+            "src.modules.auth.services.registration.settings.AUTH_REGISTRATION_REQUEST_RPM_PER_EMAIL",
+            1,
+        )
+        monkeypatch.setattr(
+            "src.modules.auth.services.registration.settings.AUTH_REGISTRATION_REQUEST_RPM_PER_IP",
+            1000,
+        )
+        first = await client.post("/api/v1/auth/register/request", json=payload)
+        second = await client.post("/api/v1/auth/register/request", json=payload)
+
+    assert first.status_code == 202
+    assert second.status_code == 429
+    assert second.json()["ok"] is False
+
+
+@pytest.mark.asyncio
+async def test_register_confirm_token_is_one_time(client: AsyncClient):
+    email = f"confirm-once-{uuid.uuid4().hex[:8]}@example.com"
+    payload = {
+        "email": email,
+        "password": "StrongPass123!",
+        "first_name": "One",
+        "last_name": "Time",
+        "org_name": "One Time Org",
+        "accepted_privacy_policy": True,
+    }
+    captured: dict[str, str] = {}
+
+    def _capture_registration_email(*, to_email: str, subject: str, body: str, kind: str = "generic"):
+        _ = to_email, subject, kind
+        match = search(r"confirm_token=([^\s]+)", body)
+        if match:
+            captured["token"] = match.group(1)
+        return NotificationEnqueueResult(queued=True, kind=kind, to_email=to_email, reason="queued")
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "src.modules.auth.services.registration.queue_email_notification",
+            _capture_registration_email,
+        )
+        requested = await client.post("/api/v1/auth/register/request", json=payload)
+
+    assert requested.status_code == 202
+    assert captured["token"]
+
+    first_confirm = await client.post("/api/v1/auth/register/confirm", json={"token": captured["token"]})
+    second_confirm = await client.post("/api/v1/auth/register/confirm", json={"token": captured["token"]})
+    assert first_confirm.status_code == 201
+    assert second_confirm.status_code == 400
 
 
 @pytest.mark.asyncio

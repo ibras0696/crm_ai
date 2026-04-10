@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { billingApi } from '@/lib/api'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
@@ -55,6 +56,7 @@ function subscriptionLabel(status: string | undefined): string {
 }
 
 export default function DashboardPage() {
+  const navigate = useNavigate()
   const { user, org, members } = useAuth()
   const [billingNote, setBillingNote] = useState('Тариф активен')
   const [subscription, setSubscription] = useState<SubscriptionInfo | null>(null)
@@ -146,6 +148,7 @@ export default function DashboardPage() {
       icon: Users,
       color: 'text-blue-400',
       bg: 'bg-blue-500/10',
+      to: '/members',
     },
     {
       title: 'Тариф',
@@ -154,6 +157,7 @@ export default function DashboardPage() {
       icon: Building2,
       color: 'text-purple-400',
       bg: 'bg-purple-500/10',
+      to: '/billing',
     },
     {
       title: 'Таблицы и записи',
@@ -162,6 +166,7 @@ export default function DashboardPage() {
       icon: Database,
       color: 'text-emerald-400',
       bg: 'bg-emerald-500/10',
+      to: '/tables',
     },
     {
       title: 'Файлы и хранилище',
@@ -170,6 +175,7 @@ export default function DashboardPage() {
       icon: HardDrive,
       color: 'text-amber-400',
       bg: 'bg-amber-500/10',
+      to: '/docs',
     },
   ]
 
@@ -188,7 +194,20 @@ export default function DashboardPage() {
       {/* Stats Grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {stats.map((stat) => (
-          <Card key={stat.title} className="gradient-card border-border/50 hover:border-border transition-colors">
+          <Card
+            key={stat.title}
+            role="button"
+            tabIndex={0}
+            aria-label={`Открыть раздел: ${stat.title}`}
+            className="gradient-card cursor-pointer border-border/50 transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            onClick={() => navigate(stat.to)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault()
+                navigate(stat.to)
+              }
+            }}
+          >
             <CardContent className="p-6">
               <div className="flex items-center justify-between">
                 <div className={`rounded-lg p-2.5 ${stat.bg}`}>

@@ -69,6 +69,22 @@ class DocsAIMixin:
             if folder is None:
                 raise DocsModuleError(code="FOLDER_NOT_FOUND", message="Папка не найдена", status_code=404)
 
+        await self.repo.lock_user_for_docs_ai(user_id=user_id)
+        active_job = await self.repo.get_active_ai_generation_job_for_user(org_id=org_id, user_id=user_id)
+        if active_job is not None:
+            raise DocsModuleError(
+                code="AI_GENERATION_ALREADY_RUNNING",
+                message="У вас уже запущена генерация документа. Дождитесь завершения или остановите текущую задачу.",
+                status_code=409,
+                details={
+                    "active_job_id": str(active_job.id),
+                    "status": str(active_job.status),
+                    "file_id": str(active_job.file_id) if active_job.file_id else None,
+                },
+            )
+
+        doc_title = await self._ensure_unique_doc_title(org_id=org_id, folder_id=folder_id, base_title=doc_title)
+
         duplicate = await self._find_recent_duplicate_ai_request(
             org_id=org_id,
             user_id=user_id,
@@ -187,6 +203,30 @@ class DocsAIMixin:
         )
         _inc_ai_generate_metric("queued", normalized_type.value)
         return AIGenerateRequestResult(job=job, file=file_obj, estimated_request_tokens=estimated_request_tokens)
+
+    async def _ensure_unique_doc_title(
+        self,
+        *,
+        org_id: uuid.UUID,
+        folder_id: uuid.UUID | None,
+        base_title: str,
+    ) -> str:
+        normalized_base = (str(base_title or "").strip() or "Документ")[:500]
+        if not await self.repo.exists_doc_title(org_id=org_id, folder_id=folder_id, title=normalized_base):
+            return normalized_base
+
+        for suffix_index in range(2, 10_000):
+            suffix = f" ({suffix_index})"
+            max_len = max(1, 500 - len(suffix))
+            candidate = f"{normalized_base[:max_len].rstrip()}{suffix}"
+            if not await self.repo.exists_doc_title(org_id=org_id, folder_id=folder_id, title=candidate):
+                return candidate
+
+        raise DocsModuleError(
+            code="TITLE_SPACE_EXHAUSTED",
+            message="Не удалось подобрать уникальное название документа в текущей папке.",
+            status_code=409,
+        )
 
     async def _find_recent_duplicate_ai_request(
         self,

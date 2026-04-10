@@ -107,6 +107,10 @@ export function isActiveAiJob(job: DocsAIGenerationJob): boolean {
   return job.status === 'queued' || job.status === 'running'
 }
 
+export function isInProgressAiJob(job: DocsAIGenerationJob): boolean {
+  return job.status === 'queued' || job.status === 'running' || job.status === 'scanning'
+}
+
 export function visualStatusLabel(status: DocsVisualStatus): string {
   if (status === 'ai_queued') return 'В очереди'
   if (status === 'ai_running') return 'Генерация'

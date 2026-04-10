@@ -18,6 +18,10 @@ class RegisterRequest(BaseModel):
     accepted_privacy_policy: Literal[True]
 
 
+class RegisterConfirmRequest(BaseModel):
+    token: str
+
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)

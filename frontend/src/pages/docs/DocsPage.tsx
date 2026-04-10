@@ -8,6 +8,7 @@ import {
   type DocsFolder,
   type DocsUsageInfo,
 } from '@/lib/api'
+import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -46,6 +47,7 @@ import {
   fileTypeLabel,
   formatBytes,
   isActiveAiJob,
+  isInProgressAiJob,
   isFolderInOwnBranch,
   isStoppedAiJob,
   resolveDraggedDocsPayload,
@@ -55,6 +57,7 @@ import {
 } from './docsPageHelpers'
 
 export default function DocsPage() {
+  const { user } = useAuth()
   const [folderDialog, setFolderDialog] = useState<{
     mode: 'create' | 'rename'
     folderId: string | null
@@ -104,8 +107,12 @@ export default function DocsPage() {
   const [dropTargetFolderId, setDropTargetFolderId] = useState<string | null>(null)
 
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const treeActionButtonClass =
+    'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-primary/12 hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-offset-0 active:bg-primary/18 disabled:cursor-not-allowed disabled:opacity-50'
+  const treeDangerActionButtonClass =
+    'inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/12 hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive/35 focus-visible:ring-offset-0 active:bg-destructive/18 disabled:cursor-not-allowed disabled:opacity-50'
   const structureActionClass =
-    'h-8 w-8 rounded-md p-0 text-muted-foreground shadow-none hover:bg-secondary/40 hover:text-foreground focus-visible:ring-0 focus-visible:ring-offset-0'
+    'h-8 w-8 rounded-md p-0 text-muted-foreground shadow-none transition-colors hover:bg-primary/15 hover:text-primary focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:ring-offset-0 active:bg-primary/20'
 
 
   const folderMap = useMemo(() => {
@@ -148,6 +155,13 @@ export default function DocsPage() {
     }
     return map
   }, [aiJobs])
+
+  const activeAiJobForCurrentUser = useMemo(() => {
+    if (!user?.id) return null
+    return aiJobs.find((job) => job.user_id === user.id && isInProgressAiJob(job)) ?? null
+  }, [aiJobs, user?.id])
+
+  const aiSubmitBlocked = aiGenerating || Boolean(activeAiJobForCurrentUser)
 
   const filesByFolder = useMemo(() => {
     const acc: Record<string, DocsFile[]> = {}
@@ -692,6 +706,10 @@ export default function DocsPage() {
 
   const createAIDocument = async () => {
     const normalizedPrompt = aiPrompt.trim()
+    if (activeAiJobForCurrentUser) {
+      setErrorText('У вас уже запущена генерация документа. Дождитесь завершения или остановите текущую задачу.')
+      return
+    }
     if (!normalizedPrompt) {
       setErrorText('Введите prompt для AI-генерации документа')
       return
@@ -730,6 +748,23 @@ export default function DocsPage() {
       setAiPrompt('')
       await pollAiJobStatus(jobId, fileId)
     } catch (error) {
+      if (isAxiosError(error)) {
+        const errorCode = error.response?.data?.error?.code
+        if (errorCode === 'AI_GENERATION_ALREADY_RUNNING') {
+          const details = error.response?.data?.error?.details as { active_job_id?: string } | undefined
+          const activeJobId = typeof details?.active_job_id === 'string' ? details.active_job_id : ''
+          if (activeJobId) {
+            try {
+              const activeJobResp = await docsApi.getAIGenerationJob(activeJobId)
+              if (activeJobResp.data.ok && activeJobResp.data.data) {
+                upsertAiJob(activeJobResp.data.data)
+              }
+            } catch {
+              // ignore sync failure and keep user-visible conflict message
+            }
+          }
+        }
+      }
       setErrorText(extractError(error, 'Не удалось создать документ через AI'))
     } finally {
       setAiGenerating(false)
@@ -824,7 +859,7 @@ export default function DocsPage() {
       <div
         key={file.id}
         className={`group flex cursor-grab select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
-          draggedFileId === file.id ? 'opacity-50' : 'hover:bg-secondary/60'
+          draggedFileId === file.id ? 'opacity-50' : 'hover:bg-primary/10'
         }`}
         style={{ paddingLeft: `${28 + depth * 16}px` }}
         draggable
@@ -878,7 +913,7 @@ export default function DocsPage() {
               ? 'bg-destructive/10 text-destructive ring-1 ring-destructive/30'
             : isSelected
               ? 'bg-primary/10 text-primary'
-              : 'hover:bg-secondary/60'
+              : 'hover:bg-primary/10'
             }`}
           style={{ paddingLeft: `${8 + depth * 16}px` }}
           draggable
@@ -937,7 +972,8 @@ export default function DocsPage() {
           </div>
           <div className="ml-auto flex items-center gap-1 md:hidden md:group-hover:flex">
             <button
-              className="text-muted-foreground hover:text-foreground"
+              type="button"
+              className={treeActionButtonClass}
               onClick={() => openCreateFileDialog(folder.id)}
               title="Создать файл"
               disabled={uploading || creatingEmpty || fileDialogSubmitting}
@@ -945,7 +981,8 @@ export default function DocsPage() {
               <FilePlus2 className="h-4 w-4" />
             </button>
             <button
-              className="text-muted-foreground hover:text-foreground"
+              type="button"
+              className={treeActionButtonClass}
               onClick={() => triggerUploadToFolder(folder.id)}
               title="Загрузить файл"
               disabled={uploading}
@@ -954,7 +991,8 @@ export default function DocsPage() {
             </button>
             {canCreateSubFolder && (
               <button
-                className="text-muted-foreground hover:text-foreground"
+                type="button"
+                className={treeActionButtonClass}
                 onClick={() => void createFolder(folder.id)}
                 title="Создать вложенную папку"
                 disabled={uploading || creatingEmpty || fileDialogSubmitting}
@@ -962,12 +1000,22 @@ export default function DocsPage() {
                 <FolderPlus className="h-4 w-4" />
               </button>
             )}
-            <button className="text-muted-foreground hover:text-foreground" onClick={() => void renameFolder(folder)} title="Переименовать">
+            <button
+              type="button"
+              className={treeActionButtonClass}
+              onClick={() => void renameFolder(folder)}
+              title="Переименовать"
+            >
               <Pencil className="h-4 w-4" />
             </button>
-              <button className="text-muted-foreground hover:text-destructive" onClick={() => requestDeleteFolder(folder)} title="Удалить">
-                <Trash2 className="h-4 w-4" />
-              </button>
+            <button
+              type="button"
+              className={treeDangerActionButtonClass}
+              onClick={() => requestDeleteFolder(folder)}
+              title="Удалить"
+            >
+              <Trash2 className="h-4 w-4" />
+            </button>
           </div>
         </div>
         {isOpen && children.map((child) => renderFolder(child, depth + 1))}
@@ -989,7 +1037,7 @@ export default function DocsPage() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-2xl font-bold">Документы</h1>
-          <p className="text-sm text-muted-foreground">DOCX с загрузкой в S3 и версионированием. PDF при загрузке автоматически конвертируется в DOCX.</p>
+          <p className="text-sm text-muted-foreground/90">DOCX с загрузкой в S3 и версионированием. PDF при загрузке автоматически конвертируется в DOCX.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button variant="outline" onClick={() => void reload()}>
@@ -1005,15 +1053,15 @@ export default function DocsPage() {
       />
 
       {usage && (
-        <Card>
+        <Card className="border-border/80 bg-card/95 shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <HardDrive className="h-4 w-4" /> Использование хранилища
+              <HardDrive className="h-4 w-4 text-primary" /> Использование хранилища
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             <Progress value={usage.percent_used} />
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-muted-foreground/90">
               Занято: <span className="font-medium text-foreground">{formatBytes(usage.used_bytes)}</span>
               {' · '}Резерв: <span className="font-medium text-foreground">{formatBytes(usage.reserved_bytes)}</span>
               {' · '}Лимит: <span className="font-medium text-foreground">{usage.limit_bytes > 0 ? formatBytes(usage.limit_bytes) : 'Без лимита'}</span>
@@ -1022,10 +1070,10 @@ export default function DocsPage() {
         </Card>
       )}
 
-      <Card>
+      <Card className="border-border/80 bg-card/95 shadow-sm">
         <CardHeader className="pb-2">
           <CardTitle className="text-base font-semibold flex items-center gap-2">
-            <Bot className="h-4 w-4" /> Создать документ через AI
+            <Bot className="h-4 w-4 text-primary" /> Создать документ через AI
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -1033,54 +1081,59 @@ export default function DocsPage() {
             <div className="space-y-3">
               <div className="grid grid-cols-1 gap-2 md:grid-cols-[120px_minmax(0,1fr)]">
                 <select
-                  className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  className="h-10 rounded-md border border-border/80 bg-background px-3 text-sm shadow-sm focus:border-primary focus:outline-none"
                   value={aiType}
                   onChange={(event) => setAiType(event.target.value as DocsFileType)}
-                  disabled={aiGenerating}
+                  disabled={aiSubmitBlocked}
                 >
                   <option value="docx">DOCX</option>
                 </select>
                 <input
-                  className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                  className="h-10 rounded-md border border-border/80 bg-background px-3 text-sm shadow-sm focus:border-primary focus:outline-none"
                   placeholder="Название документа"
                   value={aiTitle}
                   onChange={(event) => setAiTitle(event.target.value)}
-                  disabled={aiGenerating}
+                  disabled={aiSubmitBlocked}
                   maxLength={200}
                 />
               </div>
               <input
-                className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                className="h-10 w-full rounded-md border border-border/80 bg-background px-3 text-sm shadow-sm focus:border-primary focus:outline-none"
                 placeholder="Шаблон или стиль"
                 value={aiTemplate}
                 onChange={(event) => setAiTemplate(event.target.value)}
-                disabled={aiGenerating}
+                disabled={aiSubmitBlocked}
                 maxLength={120}
               />
               <textarea
-                className="min-h-[136px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="min-h-[136px] w-full rounded-md border border-border/80 bg-background px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none"
                 placeholder="Коротко опишите, какой документ нужен и что в нём должно быть."
                 value={aiPrompt}
                 onChange={(event) => setAiPrompt(event.target.value)}
-                disabled={aiGenerating}
+                disabled={aiSubmitBlocked}
                 maxLength={12000}
               />
               <div className="flex items-center justify-between gap-3">
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground/90">
                   Документ создаётся как новая версия и затем проходит проверку.
                 </p>
-                <Button onClick={() => void createAIDocument()} disabled={aiGenerating || !aiPrompt.trim()}>
+                <Button className="shadow-sm hover:shadow-md" onClick={() => void createAIDocument()} disabled={aiSubmitBlocked || !aiPrompt.trim()}>
                   {aiGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
                   Сгенерировать
                 </Button>
               </div>
+              {activeAiJobForCurrentUser && (
+                <p className="text-xs text-amber-700">
+                  Новая генерация недоступна: дождитесь завершения текущей задачи.
+                </p>
+              )}
             </div>
 
-            <div className="rounded-lg border border-border/80 bg-muted/20 p-3">
+            <div className="rounded-lg border border-border/80 bg-card/80 p-3 shadow-inner">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <div>
                   <p className="text-sm font-medium">Базовые шаблоны</p>
-                  <p className="text-xs text-muted-foreground">Можно взять за основу и быстро доработать под себя.</p>
+                  <p className="text-xs text-muted-foreground/90">Можно взять за основу и быстро доработать под себя.</p>
                 </div>
                 <Button
                   type="button"
@@ -1091,7 +1144,7 @@ export default function DocsPage() {
                     setAiTemplate('')
                     setAiPrompt('')
                   }}
-                  disabled={aiGenerating}
+                  disabled={aiSubmitBlocked}
                 >
                   Очистить
                 </Button>
@@ -1102,13 +1155,13 @@ export default function DocsPage() {
                     key={preset.id}
                     type="button"
                     onClick={() => applyAiPreset(preset.id)}
-                    disabled={aiGenerating}
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={aiSubmitBlocked}
+                    className="w-full rounded-lg border border-border/80 bg-background px-3 py-2 text-left shadow-sm transition-colors hover:border-primary/55 hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-sm font-medium">{preset.title}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{preset.summary}</p>
+                        <p className="mt-1 text-xs text-muted-foreground/90">{preset.summary}</p>
                       </div>
                       <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary/80" />
                     </div>
@@ -1118,16 +1171,16 @@ export default function DocsPage() {
             </div>
           </div>
           {aiJobs.length > 0 && (
-            <div className="space-y-2 rounded-md border border-border p-2">
-              <p className="text-xs font-medium text-muted-foreground">Последние AI-задачи</p>
+            <div className="space-y-2 rounded-md border border-border/80 bg-card/70 p-2">
+              <p className="text-xs font-medium text-muted-foreground/90">Последние AI-задачи</p>
               {aiJobs.slice(0, 5).map((job) => (
-                <div key={job.id} className="flex items-center justify-between gap-2 rounded-md border border-border/70 px-2 py-1.5 text-xs">
+                <div key={job.id} className="flex items-center justify-between gap-2 rounded-md border border-border/80 bg-background/70 px-2 py-1.5 text-xs">
                   <div className="min-w-0">
                     <div className="truncate">
                       {job.title || 'Документ'} · {job.file_type.toUpperCase()}
                     </div>
                     {job.error_message && (
-                      <div className="truncate text-[11px] text-muted-foreground">
+                      <div className="truncate text-[11px] text-muted-foreground/90">
                         {job.error_message}
                       </div>
                     )}
@@ -1169,7 +1222,7 @@ export default function DocsPage() {
       {errorText && <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{errorText}</div>}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-1 min-w-0">
+        <Card className="lg:col-span-1 min-w-0 border-border/80 bg-card/95 shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-base flex items-center justify-between">
               <span>Структура</span>
@@ -1193,7 +1246,7 @@ export default function DocsPage() {
                   ? 'bg-primary/10 text-primary ring-1 ring-primary/40'
                   : selectedFolderId === null
                     ? 'bg-primary/10 text-primary'
-                    : 'hover:bg-secondary/60'
+                    : 'hover:bg-primary/10'
                   }`}
                 onClick={() => onSelectFolder(null)}
                 onDragEnter={(event) => {
@@ -1225,7 +1278,7 @@ export default function DocsPage() {
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-2 min-w-0">
+        <Card className="lg:col-span-2 min-w-0 border-border/80 bg-card/95 shadow-sm">
           <CardHeader className="pb-2">
             <CardTitle className="text-base">
               Файлы {selectedFolderId ? `в папке «${folderMap.get(selectedFolderId)?.name ?? ''}»` : 'в корне'}
@@ -1245,7 +1298,7 @@ export default function DocsPage() {
                   return (
                     <div
                       key={file.id}
-                      className={`flex flex-col items-start gap-3 rounded-lg border border-border px-3 py-2 sm:flex-row sm:items-center ${draggedFileId === file.id ? 'opacity-50' : ''}`}
+                      className={`flex flex-col items-start gap-3 rounded-lg border border-border/80 bg-background/70 px-3 py-2 sm:flex-row sm:items-center ${draggedFileId === file.id ? 'opacity-50' : ''}`}
                       draggable
                       onDragStart={(event) => {
                         event.dataTransfer.effectAllowed = 'move'
@@ -1255,12 +1308,12 @@ export default function DocsPage() {
                       }}
                       onDragEnd={handleDragEndFile}
                     >
-                      <div className="rounded-md bg-secondary p-2">
+                      <div className="rounded-md bg-primary/10 p-2 text-primary">
                         <FileText className="h-4 w-4" />
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-medium">{file.title || file.original_name}</p>
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-xs text-muted-foreground/90">
                           {fileTypeLabel(file)} · {formatBytes(file.size)} · статус: {visualStatusLabel(visualState.status).toLowerCase()}
                         </p>
                         {visualState.helperText && (

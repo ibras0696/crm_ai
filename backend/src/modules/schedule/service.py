@@ -5,8 +5,9 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.common.enums import NotificationStatus, NotificationType
+from src.common.enums import NotificationStatus, NotificationType, UserRole
 from src.modules.notifications.models import Notification
+from src.modules.notifications.public_api import queue_email_notification
 from src.modules.schedule.errors import ScheduleModuleError
 from src.modules.schedule.models import Event
 from src.modules.schedule.reminders import (
@@ -85,9 +86,18 @@ class ScheduleService:
         org_id: uuid.UUID,
         start: datetime | None = None,
         end: datetime | None = None,
+        viewer_user_id: uuid.UUID | None = None,
+        viewer_role: str | None = None,
     ) -> list[Event]:
         """List events with optional date range."""
-        return await self.repo.list_events(org_id=org_id, start=start, end=end)
+        events = await self.repo.list_events(org_id=org_id, start=start, end=end)
+        if viewer_user_id is None:
+            return events
+        return [
+            event
+            for event in events
+            if self.can_user_access_event(event, user_id=viewer_user_id, role=viewer_role)
+        ]
 
     async def get_event_by_id(self, *, event_id: uuid.UUID, org_id: uuid.UUID) -> Event | None:
         """Get event by id in organization scope."""
@@ -161,11 +171,16 @@ class ScheduleService:
             participants = event.participant_ids
             if not participants:
                 continue
+            participant_contacts = await self.repo.list_org_user_contacts(
+                org_id=event.org_id,
+                user_ids=participants,
+            )
 
             recurrence = normalize_simple_recurrence(event.recurrence)
             if recurrence:
                 recurring_markers = set(event.recurring_reminder_markers)
                 max_offset = max(int(x) for x in offsets)
+                base_duration = (event.end_at - event.start_at) if event.end_at else None
                 occurrences = iter_occurrences_within_window(
                     base_start=event.start_at,
                     recurrence=recurrence,
@@ -180,6 +195,7 @@ class ScheduleService:
                             continue
                         reminder_at = occurrence_start - timedelta(minutes=offset)
                         if reminder_at <= target_now <= occurrence_start:
+                            occurrence_end = (occurrence_start + base_duration) if base_duration else None
                             for user_id in participants:
                                 self.session.add(
                                     Notification(
@@ -198,6 +214,13 @@ class ScheduleService:
                                     )
                                 )
                                 created_notifications += 1
+                                self._queue_schedule_reminder_email(
+                                    to_email=(participant_contacts.get(user_id) or ("", "", ""))[0],
+                                    event=event,
+                                    occurrence_start=occurrence_start,
+                                    occurrence_end=occurrence_end,
+                                    offset_minutes=offset,
+                                )
                             recurring_markers.add(marker)
                 event.set_meta_fields(
                     recurring_reminder_markers=prune_recurrence_markers(recurring_markers, now=target_now)
@@ -232,6 +255,13 @@ class ScheduleService:
                             )
                         )
                         created_notifications += 1
+                        self._queue_schedule_reminder_email(
+                            to_email=(participant_contacts.get(user_id) or ("", "", ""))[0],
+                            event=event,
+                            occurrence_start=event.start_at,
+                            occurrence_end=event.end_at,
+                            offset_minutes=offset,
+                        )
                     sent_offsets.add(offset)
                     event.set_meta_fields(reminder_sent_offsets_minutes=sorted(sent_offsets))
 
@@ -334,3 +364,49 @@ class ScheduleService:
         if offset == 120:
             return "Событие начнется через 2 часа"
         return "Событие начнется через 1 день"
+
+    @staticmethod
+    def can_user_access_event(event: Event, *, user_id: uuid.UUID, role: str | None) -> bool:
+        if role in (UserRole.OWNER.value, UserRole.ADMIN.value):
+            return True
+        if event.created_by == user_id or event.assigned_to == user_id:
+            return True
+        participants = event.participant_ids
+        if not participants:
+            return False
+        return user_id in participants
+
+    def _queue_schedule_reminder_email(
+        self,
+        *,
+        to_email: str,
+        event: Event,
+        occurrence_start: datetime,
+        occurrence_end: datetime | None,
+        offset_minutes: int,
+    ) -> None:
+        if not to_email:
+            return
+        if occurrence_start.tzinfo is None:
+            occurrence_start = occurrence_start.replace(tzinfo=UTC)
+
+        if occurrence_end and occurrence_end.tzinfo is None:
+            occurrence_end = occurrence_end.replace(tzinfo=UTC)
+
+        when_text = occurrence_start.astimezone(UTC).strftime("%d.%m.%Y %H:%M UTC")
+        end_text = occurrence_end.astimezone(UTC).strftime("%d.%m.%Y %H:%M UTC") if occurrence_end else "не указано"
+        description = (event.description or "").strip() or "не указано"
+        reminder_text = self._build_reminder_text(offset_minutes)
+        body = (
+            f"{reminder_text}\n\n"
+            f"Событие: {event.title}\n"
+            f"Начало: {when_text}\n"
+            f"Окончание: {end_text}\n"
+            f"Описание: {description}\n"
+        )
+        queue_email_notification(
+            to_email=to_email,
+            subject=f"Напоминание о событии: {event.title}",
+            body=body,
+            kind="schedule_reminder",
+        )

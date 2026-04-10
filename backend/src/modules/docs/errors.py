@@ -8,8 +8,16 @@ from src.common.exceptions import AppError
 class DocsModuleError(AppError):
     """Базовая ошибка модуля Docs."""
 
-    def __init__(self, *, code: str, message: str, status_code: int = 422):
-        super().__init__(code=code, message=message, status_code=status_code)
+    def __init__(
+        self,
+        *,
+        code: str,
+        message: str,
+        status_code: int = 422,
+        field: str | None = None,
+        details: object | None = None,
+    ):
+        super().__init__(code=code, message=message, status_code=status_code, field=field, details=details)
 
 
 class QuotaExceededError(DocsModuleError):

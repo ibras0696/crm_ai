@@ -1,6 +1,6 @@
 import { useLocation } from 'react-router-dom'
 import { Card, CardContent } from '@/components/ui/card'
-import { FileText, BookOpen, Calendar, BarChart3, Brain, Construction } from 'lucide-react'
+import { FileText, BookOpen, Calendar, Brain, Construction } from 'lucide-react'
 
 const modules: Record<string, { icon: typeof FileText; title: string; desc: string; features: string[] }> = {
   '/tables': {
@@ -37,18 +37,6 @@ const modules: Record<string, { icon: typeof FileText; title: string; desc: stri
       'Назначение исполнителей',
       'Напоминания и уведомления',
       'Синхронизация с Google Calendar',
-    ],
-  },
-  '/reports': {
-    icon: BarChart3,
-    title: 'Аналитика',
-    desc: 'Дашборды и визуализация данных по таблицам. Следите за ключевыми показателями в одном месте.',
-    features: [
-      'Графики: линейные, столбчатые, круговые',
-      'Автоматическая сводка по данным таблиц',
-      'Экспорт в PDF и Excel',
-      'Шаблоны аналитики',
-      'Расписание автоотправки по email',
     ],
   },
   '/ai': {

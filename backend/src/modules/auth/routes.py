@@ -10,6 +10,7 @@ from src.modules.auth.schemas import (
     ForgotPasswordRequest,
     LoginRequest,
     RefreshRequest,
+    RegisterConfirmRequest,
     RegisterRequest,
     ResetPasswordRequest,
     TokenResponse,
@@ -62,6 +63,21 @@ def _clear_auth_cookies(response: Response) -> None:
 async def register(body: RegisterRequest, request: Request, response: Response):
     ip = request.client.host if request.client else None
     _, _, tokens = await _auth_service.register(body, ip_address=ip)
+    _set_auth_cookies(response, tokens)
+    return ApiResponse(data=tokens)
+
+
+@router.post("/register/request", response_model=ApiResponse, status_code=202)
+async def request_registration_confirmation(body: RegisterRequest, request: Request):
+    ip = request.client.host if request.client else None
+    await _auth_service.request_registration_confirmation(body, ip_address=ip)
+    return ApiResponse(data=None)
+
+
+@router.post("/register/confirm", response_model=ApiResponse[TokenResponse], status_code=201)
+async def confirm_registration(body: RegisterConfirmRequest, request: Request, response: Response):
+    ip = request.client.host if request.client else None
+    _, _, tokens = await _auth_service.confirm_registration(token=body.token, ip_address=ip)
     _set_auth_cookies(response, tokens)
     return ApiResponse(data=tokens)
 

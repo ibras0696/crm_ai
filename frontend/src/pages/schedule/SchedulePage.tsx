@@ -52,6 +52,69 @@ function isSameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 }
 
+function formatDateKeyLocal(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function extractIsoDateKey(value: string): string {
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(value || '')
+  return match?.[1] || ''
+}
+
+function parseLocalDateTimeInput(value: string): Date | null {
+  const [datePart, timePart] = value.split('T')
+  if (!datePart || !timePart) return null
+  const [yearRaw, monthRaw, dayRaw] = datePart.split('-')
+  const [hourRaw, minuteRaw] = timePart.slice(0, 5).split(':')
+  const year = Number(yearRaw)
+  const month = Number(monthRaw)
+  const day = Number(dayRaw)
+  const hour = Number(hourRaw)
+  const minute = Number(minuteRaw)
+  if ([year, month, day, hour, minute].some((n) => Number.isNaN(n))) return null
+  return new Date(year, month - 1, day, hour, minute, 0, 0)
+}
+
+function localInputToApiIso(value: string): string {
+  const dt = parseLocalDateTimeInput(value)
+  return dt ? dt.toISOString() : value
+}
+
+function apiIsoToLocalInput(value: string): string {
+  const dt = new Date(value)
+  if (Number.isNaN(dt.getTime())) return value.slice(0, 16)
+  const y = dt.getFullYear()
+  const m = String(dt.getMonth() + 1).padStart(2, '0')
+  const d = String(dt.getDate()).padStart(2, '0')
+  const hh = String(dt.getHours()).padStart(2, '0')
+  const mm = String(dt.getMinutes()).padStart(2, '0')
+  return `${y}-${m}-${d}T${hh}:${mm}`
+}
+
+function allDayDateToApiIso(value: string): string {
+  const datePart = extractIsoDateKey(value)
+  return datePart ? `${datePart}T00:00:00Z` : value
+}
+
+function eventDayKey(event: Pick<Event, 'start_at' | 'all_day'>): string {
+  if (event.all_day) return extractIsoDateKey(event.start_at)
+  const dt = new Date(event.start_at)
+  return Number.isNaN(dt.getTime()) ? '' : formatDateKeyLocal(dt)
+}
+
+function formatDateRuFromKey(dateKey: string): string {
+  const parts = (dateKey || '').split('-')
+  if (parts.length !== 3) return dateKey
+  const y = Number(parts[0])
+  const m = Number(parts[1])
+  const d = Number(parts[2])
+  if ([y, m, d].some((n) => Number.isNaN(n))) return dateKey
+  return new Date(y, m - 1, d).toLocaleDateString('ru', { day: 'numeric', month: 'long', year: 'numeric' })
+}
+
 function splitDateTime(value: string) {
   if (!value) return { date: '', time: '09:00' }
   const [datePart, timePart] = value.split('T')
@@ -202,11 +265,11 @@ export default function SchedulePage() {
 
   useEffect(() => { load() }, [load])
 
-  const todayIso = () => new Date().toISOString().slice(0, 10)
+  const todayIso = () => formatDateKeyLocal(new Date())
 
   const openForm = (day?: Date) => {
     const d = day || new Date()
-    const iso = d.toISOString().slice(0, 10)
+    const iso = formatDateKeyLocal(d)
     setForm(f => ({
       ...f,
       start_at: iso + 'T09:00',
@@ -222,17 +285,25 @@ export default function SchedulePage() {
 
   const handleSave = async () => {
     if (!form.title.trim()) return
-    const eventDate = new Date(form.start_at)
-    const eventEndDate = form.end_at ? new Date(form.end_at) : null
-    const now = new Date()
-    now.setSeconds(0, 0)
-    if (eventDate < now) {
-      setFormError('Нельзя создать событие задним числом. Выберите дату и время не раньше текущего момента.')
-      return
-    }
-    if (eventEndDate && eventEndDate < eventDate) {
-      setFormError('Время окончания не может быть раньше времени начала.')
-      return
+    if (form.all_day) {
+      const selectedDate = splitDateTime(form.start_at).date
+      if (selectedDate < todayIso()) {
+        setFormError('Нельзя создать событие задним числом. Выберите сегодняшнюю или будущую дату.')
+        return
+      }
+    } else {
+      const eventDate = new Date(form.start_at)
+      const eventEndDate = form.end_at ? new Date(form.end_at) : null
+      const now = new Date()
+      now.setSeconds(0, 0)
+      if (eventDate < now) {
+        setFormError('Нельзя создать событие задним числом. Выберите дату и время не раньше текущего момента.')
+        return
+      }
+      if (eventEndDate && eventEndDate < eventDate) {
+        setFormError('Время окончания не может быть раньше времени начала.')
+        return
+      }
     }
     setFormError('')
     setSaving(true)
@@ -240,6 +311,8 @@ export default function SchedulePage() {
       const assignedTo = form.participant_ids.find(id => id !== user?.id)
       const r = await scheduleApi.create({
         ...form,
+        start_at: form.all_day ? allDayDateToApiIso(form.start_at) : localInputToApiIso(form.start_at),
+        end_at: form.all_day ? undefined : (form.end_at ? localInputToApiIso(form.end_at) : undefined),
         all_day: form.all_day,
         recurrence: form.recurrence || undefined,
         assigned_to: assignedTo,
@@ -271,8 +344,8 @@ export default function SchedulePage() {
     setEditForm({
       title: ev.title,
       description: ev.description || '',
-      start_at: ev.start_at.slice(0, 16),
-      end_at: ev.end_at ? ev.end_at.slice(0, 16) : '',
+      start_at: ev.all_day ? `${extractIsoDateKey(ev.start_at)}T00:00` : apiIsoToLocalInput(ev.start_at),
+      end_at: ev.end_at ? (ev.all_day ? `${extractIsoDateKey(ev.end_at)}T00:00` : apiIsoToLocalInput(ev.end_at)) : '',
       all_day: ev.all_day,
       color: ev.color || COLORS[0],
       recurrence: ev.recurrence || '',
@@ -284,17 +357,25 @@ export default function SchedulePage() {
 
   const handleUpdate = async () => {
     if (!editEvent || !editForm.title.trim()) return
-    const eventDate = new Date(editForm.start_at)
-    const eventEndDate = editForm.end_at ? new Date(editForm.end_at) : null
-    const now = new Date()
-    now.setSeconds(0, 0)
-    if (eventDate < now) {
-      setEditError('Нельзя перенести событие в прошлое. Выберите дату и время не раньше текущего момента.')
-      return
-    }
-    if (eventEndDate && eventEndDate < eventDate) {
-      setEditError('Время окончания не может быть раньше времени начала.')
-      return
+    if (editForm.all_day) {
+      const selectedDate = splitDateTime(editForm.start_at).date
+      if (selectedDate < todayIso()) {
+        setEditError('Нельзя перенести событие в прошлое. Выберите сегодняшнюю или будущую дату.')
+        return
+      }
+    } else {
+      const eventDate = new Date(editForm.start_at)
+      const eventEndDate = editForm.end_at ? new Date(editForm.end_at) : null
+      const now = new Date()
+      now.setSeconds(0, 0)
+      if (eventDate < now) {
+        setEditError('Нельзя перенести событие в прошлое. Выберите дату и время не раньше текущего момента.')
+        return
+      }
+      if (eventEndDate && eventEndDate < eventDate) {
+        setEditError('Время окончания не может быть раньше времени начала.')
+        return
+      }
     }
     setEditError('')
     setSaving(true)
@@ -303,8 +384,8 @@ export default function SchedulePage() {
       const r = await scheduleApi.update(editEvent.id, {
         title: editForm.title,
         description: editForm.description || undefined,
-        start_at: editForm.start_at,
-        end_at: editForm.end_at || undefined,
+        start_at: editForm.all_day ? allDayDateToApiIso(editForm.start_at) : localInputToApiIso(editForm.start_at),
+        end_at: editForm.all_day ? undefined : (editForm.end_at ? localInputToApiIso(editForm.end_at) : undefined),
         all_day: editForm.all_day,
         color: editForm.color,
         assigned_to: assignedTo,
@@ -372,9 +453,10 @@ export default function SchedulePage() {
     return expandRecurringEvents(events, now, future)
   }, [events])
 
-  const eventsOnDay = (d: Date) => expandedEvents.filter(e => {
-    try { return isSameDay(new Date(e.start_at), d) } catch { return false }
-  })
+  const eventsOnDay = (d: Date) => {
+    const dayKey = formatDateKeyLocal(d)
+    return expandedEvents.filter((e) => eventDayKey(e) === dayKey)
+  }
 
   // --- Navigation ---
   const nav = (dir: number) => {
@@ -410,7 +492,12 @@ export default function SchedulePage() {
     const yearEnd = new Date(current.getFullYear(), 11, 31)
     const yearExpanded = expandRecurringEvents(events, yearStart, yearEnd)
     return Array.from({ length: 12 }, (_, m) => {
-      const cnt = yearExpanded.filter(e => { try { const ed = new Date(e.start_at); return ed.getFullYear() === current.getFullYear() && ed.getMonth() === m } catch { return false } }).length
+      const cnt = yearExpanded.filter((e) => {
+        const key = eventDayKey(e)
+        if (!key) return false
+        const [y, month] = key.split('-').map((part) => Number(part))
+        return y === current.getFullYear() && month === m + 1
+      }).length
       return { month: m, label: MONTHS_RU[m], count: cnt }
     })
   }
@@ -569,9 +656,26 @@ export default function SchedulePage() {
             <h2 className="font-semibold">Предстоящие события</h2>
           </div>
           {(() => {
+            const todayKey = formatDateKeyLocal(new Date())
+            const now = new Date()
             const upcoming = upcomingExpanded
-              .filter(e => !e.is_done && new Date(e.start_at) >= new Date())
-              .sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime())
+              .filter((e) => {
+                if (e.is_done) return false
+                if (e.all_day) {
+                  const key = eventDayKey(e)
+                  return !!key && key >= todayKey
+                }
+                const start = new Date(e.start_at)
+                if (Number.isNaN(start.getTime())) return false
+                return start >= now
+              })
+              .sort((a, b) => {
+                const leftKey = eventDayKey(a)
+                const rightKey = eventDayKey(b)
+                const left = a.all_day ? Date.parse(`${leftKey || '1970-01-01'}T00:00:00`) : new Date(a.start_at).getTime()
+                const right = b.all_day ? Date.parse(`${rightKey || '1970-01-01'}T00:00:00`) : new Date(b.start_at).getTime()
+                return left - right
+              })
               .slice(0, 10)
             if (upcoming.length === 0) {
               return <p className="px-4 py-6 text-sm text-muted-foreground">Нет предстоящих событий</p>
@@ -585,7 +689,11 @@ export default function SchedulePage() {
                       <div className="h-2.5 w-2.5 rounded-full shrink-0" style={{ background: ev.color }} />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate">{ev.title}</p>
-                        <p className="text-xs text-muted-foreground">{new Date(ev.start_at).toLocaleDateString('ru', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {ev.all_day
+                            ? formatDateRuFromKey(eventDayKey(ev))
+                            : new Date(ev.start_at).toLocaleDateString('ru', { day: 'numeric', month: 'long', year: 'numeric' })}
+                        </p>
                       </div>
                       {ev.recurrence && <Repeat className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
                       {!ev._isVirtual && (

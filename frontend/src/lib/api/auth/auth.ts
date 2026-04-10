@@ -10,6 +10,10 @@ export interface RegisterPayload {
   accepted_privacy_policy: true
 }
 
+export interface RegisterConfirmPayload {
+  token: string
+}
+
 export interface LoginPayload {
   email: string
   password: string
@@ -34,6 +38,8 @@ export interface UserInfo {
 
 export const authApi = {
   register: (data: RegisterPayload) => api.post<ApiResponse<TokenResponse>>('/auth/register', data),
+  requestRegistration: (data: RegisterPayload) => api.post<ApiResponse<null>>('/auth/register/request', data),
+  confirmRegistration: (data: RegisterConfirmPayload) => api.post<ApiResponse<TokenResponse>>('/auth/register/confirm', data),
   login: (data: LoginPayload) => api.post<ApiResponse<TokenResponse>>('/auth/login', data),
   refresh: () => api.post<ApiResponse<TokenResponse>>('/auth/refresh', {}),
   me: () => api.get<ApiResponse<UserInfo>>('/auth/me'),

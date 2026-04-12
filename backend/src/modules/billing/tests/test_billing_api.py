@@ -1,3 +1,4 @@
+import calendar
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -112,6 +113,9 @@ async def test_billing_rejects_yearly_period(client: AsyncClient):
 @pytest.mark.asyncio
 async def test_billing_payment_status_uses_runtime_yookassa_config(client: AsyncClient):
     token = await _register_owner(client)
+    current_org = await client.get("/api/v1/orgs/current", headers=_headers(token))
+    assert current_org.status_code == 200
+    org_id = current_org.json()["data"]["id"]
 
     async with UnitOfWork() as uow:
         runtime_settings = BillingRuntimeSettings(
@@ -164,7 +168,7 @@ async def test_billing_payment_status_uses_runtime_yookassa_config(client: Async
                     "paid": True,
                     "amount": {"value": "990.00", "currency": "RUB"},
                     "description": "Пакет AI токенов",
-                    "metadata": {"purchase_kind": "token_package"},
+                    "metadata": {"org_id": org_id, "purchase_kind": "token_package"},
                 },
             )
 
@@ -953,3 +957,151 @@ async def test_subscription_lifecycle_notifications_are_idempotent(client: Async
         kinds = [(n.meta or {}).get("kind") for n in notifications]
         assert kinds.count("subscription_pre_expiry") >= 1
         assert kinds.count("subscription_post_expiry") >= 1
+
+
+@pytest.mark.asyncio
+async def test_payment_status_reconciles_subscription_when_webhook_missed(client: AsyncClient):
+    token = await _register_owner(client)
+    await _seed_runtime_yookassa_config()
+
+    current_org = await client.get("/api/v1/orgs/current", headers=_headers(token))
+    assert current_org.status_code == 200
+    org_id = current_org.json()["data"]["id"]
+    payment_id = f"pay-status-{uuid.uuid4().hex[:8]}"
+
+    import httpx
+
+    class _MockResponse:
+        def __init__(self, status_code: int, payload: dict):
+            self.status_code = status_code
+            self._payload = payload
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                req = httpx.Request("GET", f"https://api.yookassa.ru/v3/payments/{payment_id}")
+                resp = httpx.Response(self.status_code, request=req)
+                raise httpx.HTTPStatusError("mock error", request=req, response=resp)
+
+        def json(self):
+            return self._payload
+
+    class _MockAsyncClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url: str, auth=None, headers=None):
+            _ = headers
+            assert url == f"https://api.yookassa.ru/v3/payments/{payment_id}"
+            assert auth == ("runtime-shop-webhook", "runtime-secret-webhook")
+            return _MockResponse(
+                200,
+                {
+                    "id": payment_id,
+                    "status": "succeeded",
+                    "paid": True,
+                    "metadata": {"org_id": org_id, "plan_name": "team", "period": "monthly"},
+                },
+            )
+
+    from src.modules.billing import service as billing_service_module
+
+    old_async_client = billing_service_module.httpx.AsyncClient
+    billing_service_module.httpx.AsyncClient = _MockAsyncClient
+    try:
+        status_resp = await client.get(f"/api/v1/billing/payments/{payment_id}", headers=_headers(token))
+    finally:
+        billing_service_module.httpx.AsyncClient = old_async_client
+
+    assert status_resp.status_code == 200
+    assert status_resp.json()["ok"] is True
+    assert status_resp.json()["data"]["status"] == "succeeded"
+
+    subscription_resp = await client.get("/api/v1/billing/subscription", headers=_headers(token))
+    assert subscription_resp.status_code == 200
+    sub_data = subscription_resp.json()["data"]
+    assert sub_data["plan"] == "team"
+    assert sub_data["status"] == "active"
+    assert sub_data["external_id"] == payment_id
+    assert sub_data["current_period_start"] is not None
+    assert sub_data["current_period_end"] is not None
+
+    period_start = datetime.fromisoformat(sub_data["current_period_start"])
+    period_end = datetime.fromisoformat(sub_data["current_period_end"])
+    expected_year = period_start.year + (1 if period_start.month == 12 else 0)
+    expected_month = 1 if period_start.month == 12 else period_start.month + 1
+    expected_day = min(period_start.day, calendar.monthrange(expected_year, expected_month)[1])
+    assert period_end.year == expected_year
+    assert period_end.month == expected_month
+    assert period_end.day == expected_day
+    assert period_end > period_start
+
+
+@pytest.mark.asyncio
+async def test_payment_status_hides_payment_from_other_org(client: AsyncClient):
+    token_org_1 = await _register_owner(client)
+    token_org_2 = await _register_owner(client)
+    await _seed_runtime_yookassa_config()
+
+    current_org_2 = await client.get("/api/v1/orgs/current", headers=_headers(token_org_2))
+    assert current_org_2.status_code == 200
+    org_2_id = current_org_2.json()["data"]["id"]
+    payment_id = f"pay-foreign-{uuid.uuid4().hex[:8]}"
+
+    import httpx
+
+    class _MockResponse:
+        def __init__(self, status_code: int, payload: dict):
+            self.status_code = status_code
+            self._payload = payload
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                req = httpx.Request("GET", f"https://api.yookassa.ru/v3/payments/{payment_id}")
+                resp = httpx.Response(self.status_code, request=req)
+                raise httpx.HTTPStatusError("mock error", request=req, response=resp)
+
+        def json(self):
+            return self._payload
+
+    class _MockAsyncClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url: str, auth=None, headers=None):
+            _ = headers
+            assert url == f"https://api.yookassa.ru/v3/payments/{payment_id}"
+            assert auth == ("runtime-shop-webhook", "runtime-secret-webhook")
+            return _MockResponse(
+                200,
+                {
+                    "id": payment_id,
+                    "status": "succeeded",
+                    "paid": True,
+                    "metadata": {"org_id": org_2_id, "plan_name": "business", "period": "monthly"},
+                },
+            )
+
+    from src.modules.billing import service as billing_service_module
+
+    old_async_client = billing_service_module.httpx.AsyncClient
+    billing_service_module.httpx.AsyncClient = _MockAsyncClient
+    try:
+        status_resp = await client.get(f"/api/v1/billing/payments/{payment_id}", headers=_headers(token_org_1))
+    finally:
+        billing_service_module.httpx.AsyncClient = old_async_client
+
+    assert status_resp.status_code == 200
+    assert status_resp.json()["ok"] is False
+    assert status_resp.json()["error"]["code"] == "PAYMENT_NOT_FOUND"

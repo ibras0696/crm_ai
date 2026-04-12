@@ -73,10 +73,10 @@ async def get_subscription(
 @router.get("/payments/{payment_id}", response_model=ApiResponse[PaymentStatusOut])
 async def get_payment_status(
     payment_id: str,
-    _current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN)),
 ):
     try:
-        data = await _billing_service.get_payment_status(payment_id=payment_id)
+        data = await _billing_service.get_payment_status(payment_id=payment_id, org_id=current_user.org_id)
         return ApiResponse(data=PaymentStatusOut(**data))
     except BillingOperationError as exc:
         return ApiResponse(ok=False, data=None, error={"code": exc.code, "message": exc.message})

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import calendar
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -43,6 +44,8 @@ class BillingOperationError(BillingModuleError):
             status = 400
         elif code in {"WEBHOOK_PAYMENT_NOT_CONFIRMED"}:
             status = 403
+        elif code in {"PAYMENT_NOT_FOUND"}:
+            status = 404
         elif code in {"BILLING_NOT_CONFIGURED", "PAYMENT_ERROR"}:
             status = 503
         super().__init__(code=code, message=message, status_code=status)
@@ -144,6 +147,119 @@ class BillingService:
                 "Webhook не подтвержден статусом succeeded в YooKassa",
             )
         return confirmed_payment
+
+    @staticmethod
+    def _extract_metadata(payment: dict) -> dict:
+        metadata = payment.get("metadata")
+        return metadata if isinstance(metadata, dict) else {}
+
+    @staticmethod
+    def _parse_org_id(value: object, *, error_code: str, error_message: str) -> uuid.UUID:
+        try:
+            return uuid.UUID(str(value))
+        except (TypeError, ValueError) as exc:
+            raise BillingOperationError(error_code, error_message) from exc
+
+    @staticmethod
+    def _add_months_utc(base: datetime, months: int = 1) -> datetime:
+        if months <= 0:
+            return base.astimezone(UTC)
+        dt = base.astimezone(UTC)
+        month_index = (dt.month - 1) + months
+        year = dt.year + month_index // 12
+        month = (month_index % 12) + 1
+        day = min(dt.day, calendar.monthrange(year, month)[1])
+        return dt.replace(year=year, month=month, day=day)
+
+    async def _resolve_payment_user_id(self, *, repo: BillingRepository, org_id: uuid.UUID) -> uuid.UUID | None:
+        owners_admins = await repo.list_org_owner_admin_user_ids(org_id=org_id)
+        if owners_admins:
+            return owners_admins[0]
+        members = await repo.list_org_member_user_ids(org_id=org_id)
+        return members[0] if members else None
+
+    async def _apply_confirmed_payment(self, *, payment: dict) -> None:
+        metadata = self._extract_metadata(payment)
+        org_id_raw = str(metadata.get("org_id") or "").strip()
+        if not org_id_raw:
+            return
+        org_uuid = self._parse_org_id(
+            org_id_raw,
+            error_code="WEBHOOK_INVALID_PAYLOAD",
+            error_message="Webhook содержит некорректный org_id",
+        )
+
+        payment_id = str(payment.get("id") or "").strip()
+        purchase_kind = str(metadata.get("purchase_kind") or "").strip()
+        package_code = str(metadata.get("package_code") or "").strip()
+        if purchase_kind == "token_package" and package_code:
+            user_id_raw = str(metadata.get("user_id") or "").strip()
+            user_uuid: uuid.UUID | None = None
+            if user_id_raw:
+                try:
+                    user_uuid = uuid.UUID(user_id_raw)
+                except ValueError:
+                    user_uuid = None
+
+            async with UnitOfWork() as uow:
+                wallet_repo = TokenWalletRepository(uow.session)
+                if payment_id:
+                    existing = await wallet_repo.get_purchase_by_payment_id(payment_id=payment_id)
+                    if existing is not None:
+                        return
+                billing_repo = BillingRepository(uow.session)
+                if user_uuid is None:
+                    user_uuid = await self._resolve_payment_user_id(repo=billing_repo, org_id=org_uuid)
+                await purchase_addon_tokens(
+                    uow.session,
+                    org_id=org_uuid,
+                    user_id=user_uuid,
+                    package_code=package_code,
+                    months_valid=12,
+                    payment_id=payment_id or None,
+                    purchase_meta={
+                        "purchase_kind": "token_package",
+                        "payment_status": "succeeded",
+                        "status": str(payment.get("status") or "succeeded"),
+                    },
+                )
+                await uow.commit()
+            return
+
+        plan_name = str(metadata.get("plan_name") or "").strip().lower()
+        if not plan_name:
+            return
+
+        plan_map = {"free": PlanTier.FREE, "team": PlanTier.TEAM, "business": PlanTier.BUSINESS}
+        plan_tier = plan_map.get(plan_name)
+        if plan_tier is None:
+            raise BillingOperationError("WEBHOOK_INVALID_PAYLOAD", "Webhook содержит неизвестный тариф")
+
+        now = datetime.now(UTC)
+        period_end = self._add_months_utc(now, months=1)
+        async with UnitOfWork() as uow:
+            repo = BillingRepository(uow.session)
+            await repo.activate_subscription(
+                org_id=org_uuid,
+                plan=plan_tier,
+                current_period_start=now,
+                current_period_end=period_end,
+                external_id=payment_id or None,
+            )
+            await uow.commit()
+
+    def _assert_payment_access(self, *, payment: dict, org_id: uuid.UUID) -> None:
+        metadata = self._extract_metadata(payment)
+        org_id_raw = str(metadata.get("org_id") or "").strip()
+        if not org_id_raw:
+            raise BillingOperationError("PAYMENT_NOT_FOUND", "Платеж не найден")
+        payment_org_id = self._parse_org_id(
+            org_id_raw,
+            error_code="PAYMENT_NOT_FOUND",
+            error_message="Платеж не найден",
+        )
+        if payment_org_id != org_id:
+            raise BillingOperationError("PAYMENT_NOT_FOUND", "Платеж не найден")
 
     async def list_plans(self):
         async with UnitOfWork() as uow:
@@ -318,6 +434,7 @@ class BillingService:
         self,
         *,
         payment_id: str,
+        org_id: uuid.UUID,
     ) -> dict:
         async with UnitOfWork() as uow:
             yk = await resolve_yookassa_runtime_config(uow.session)
@@ -332,6 +449,9 @@ class BillingService:
             secret_key=yk.secret_key,
             payment_id=payment_id,
         )
+        self._assert_payment_access(payment=data, org_id=org_id)
+        if str(data.get("status") or "").strip() == "succeeded" and bool(data.get("paid")):
+            await self._apply_confirmed_payment(payment=data)
         amount = data.get("amount") or {}
         return {
             "payment_id": str(data.get("id") or payment_id),
@@ -374,77 +494,7 @@ class BillingService:
             return
 
         obj = await self._confirm_yookassa_webhook_payment(payload)
-        metadata = obj.get("metadata", {})
-        org_id = metadata.get("org_id")
-        plan_name = metadata.get("plan_name")
-        purchase_kind = str(metadata.get("purchase_kind") or "").strip()
-        package_code = str(metadata.get("package_code") or "").strip()
-        payment_id = obj.get("id")
-        if not org_id:
-            return
-        try:
-            org_uuid = uuid.UUID(str(org_id))
-        except ValueError as exc:
-            raise BillingOperationError("WEBHOOK_INVALID_PAYLOAD", "Webhook содержит некорректный org_id") from exc
-
-        if purchase_kind == "token_package" and package_code:
-            user_id_raw = str(metadata.get("user_id") or "").strip()
-            user_uuid: uuid.UUID | None = None
-            if user_id_raw:
-                try:
-                    user_uuid = uuid.UUID(user_id_raw)
-                except ValueError:
-                    user_uuid = None
-            async with UnitOfWork() as uow:
-                wallet_repo = TokenWalletRepository(uow.session)
-                if payment_id:
-                    existing = await wallet_repo.get_purchase_by_payment_id(payment_id=str(payment_id))
-                    if existing is not None:
-                        return
-                billing_repo = BillingRepository(uow.session)
-                if user_uuid is None:
-                    owners_admins = await billing_repo.list_org_owner_admin_user_ids(org_id=org_uuid)
-                    if owners_admins:
-                        user_uuid = owners_admins[0]
-                    else:
-                        members = await billing_repo.list_org_member_user_ids(org_id=org_uuid)
-                        user_uuid = members[0] if members else None
-                await purchase_addon_tokens(
-                    uow.session,
-                    org_id=org_uuid,
-                    user_id=user_uuid,
-                    package_code=package_code,
-                    months_valid=12,
-                    payment_id=str(payment_id or ""),
-                    purchase_meta={
-                        "purchase_kind": "token_package",
-                        "payment_status": "succeeded",
-                        "status": str(obj.get("status") or "succeeded"),
-                    },
-                )
-                await uow.commit()
-            return
-
-        if not plan_name:
-            return
-
-        plan_map = {"free": PlanTier.FREE, "team": PlanTier.TEAM, "business": PlanTier.BUSINESS}
-        plan_tier = plan_map.get(str(plan_name).strip())
-        if plan_tier is None:
-            raise BillingOperationError("WEBHOOK_INVALID_PAYLOAD", "Webhook содержит неизвестный тариф")
-        now = datetime.now(UTC)
-        period_end = now + timedelta(days=30)
-
-        async with UnitOfWork() as uow:
-            repo = BillingRepository(uow.session)
-            await repo.activate_subscription(
-                org_id=org_uuid,
-                plan=plan_tier,
-                current_period_start=now,
-                current_period_end=period_end,
-                external_id=payment_id,
-            )
-            await uow.commit()
+        await self._apply_confirmed_payment(payment=obj)
 
     async def cancel_subscription(self, *, org_id: uuid.UUID) -> dict:
         async with UnitOfWork() as uow:

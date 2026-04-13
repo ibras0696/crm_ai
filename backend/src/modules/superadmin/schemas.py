@@ -89,6 +89,24 @@ class SuperadminAIUsageResetResponse(BaseModel):
     removed_tokens: int
 
 
+class SuperadminOrgDeletionJobResponse(BaseModel):
+    id: str
+    org_id: str
+    org_name: str
+    requested_by: str
+    status: str
+    task_id: str | None = None
+    progress_total: int
+    progress_processed: int
+    storage_objects_deleted: int
+    error_message: str | None = None
+    meta_json: dict | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
 class SuperadminDashboardTotals(BaseModel):
     orgs: int
     users: int

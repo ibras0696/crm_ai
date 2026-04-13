@@ -305,7 +305,7 @@ export default function AIPage() {
   })()
 
   return (
-    <div className="flex flex-col min-h-[calc(100dvh-8rem)] md:h-[calc(100vh-8rem)] gap-0">
+    <div className="flex h-[calc(100dvh-8rem)] flex-col gap-0 overflow-hidden md:h-[calc(100vh-8rem)]">
       <div className="flex items-center gap-3 pb-4 flex-wrap">
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-bold flex items-center gap-2"><Bot className="h-6 w-6 text-primary" /> AI Агент</h1>
@@ -350,7 +350,7 @@ export default function AIPage() {
       {tab === 'chat' && (
         <>
           {/* Chat layout: chat + history drawer */}
-          <div className="flex flex-col flex-1 min-h-0">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <div className="flex-1 overflow-y-auto rounded-xl border border-border bg-card flex flex-col min-h-0">
               <div className="px-3 py-2 border-b border-border/60 flex items-center justify-between">
                 <div className="flex items-center gap-2">

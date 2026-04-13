@@ -82,6 +82,7 @@ celery.autodiscover_tasks(
         "src.modules.billing",
         "src.modules.chat",
         "src.modules.docs",
+        "src.modules.superadmin",
         "src.modules.tables",
     ]
 )

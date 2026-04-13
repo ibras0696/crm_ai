@@ -92,6 +92,24 @@ export interface SuperadminOrgDetail {
   ai_usage_today: { tokens_used: number }
 }
 
+export interface SuperadminOrgDeletionJob {
+  id: string
+  org_id: string
+  org_name: string
+  requested_by: string
+  status: 'queued' | 'running' | 'completed' | 'failed' | string
+  task_id?: string | null
+  progress_total: number
+  progress_processed: number
+  storage_objects_deleted: number
+  error_message?: string | null
+  meta_json?: Record<string, unknown> | null
+  started_at?: string | null
+  finished_at?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+}
+
 export interface SuperadminOrgMemberItem {
   user: {
     id: string
@@ -263,6 +281,8 @@ export const superadminApi = {
     superadminHttp.post<ApiResponse<{ org_id: string; scope: string; removed_requests: number; removed_tokens: number }>>(
       `/orgs/${orgId}/ai/reset-usage`
     ),
+  deleteOrg: (orgId: string) => superadminHttp.post<ApiResponse<SuperadminOrgDeletionJob>>(`/orgs/${orgId}/delete`, {}),
+  orgDeletionJob: (jobId: string) => superadminHttp.get<ApiResponse<SuperadminOrgDeletionJob>>(`/org-deletion-jobs/${jobId}`),
   users: (params: { q?: string; org_id?: string; is_active?: boolean; limit?: number; offset?: number }) => {
     const q = new URLSearchParams()
     if (params.q) q.set('q', params.q)

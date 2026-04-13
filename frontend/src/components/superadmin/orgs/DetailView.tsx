@@ -1,16 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Bot, Crown, Loader2, RefreshCw, Users } from 'lucide-react'
+import { AlertTriangle, Bot, Crown, Loader2, RefreshCw, Trash2, Users } from 'lucide-react'
 
-import type { SuperadminOrgDetail, SuperadminOrgMemberItem, SuperadminOrgMembersPage } from '@/lib/api'
+import type { SuperadminOrgDeletionJob, SuperadminOrgDetail, SuperadminOrgMemberItem, SuperadminOrgMembersPage } from '@/lib/api'
 import { superadminApi } from '@/lib/api'
 import { PLAN_LABELS, formatBytes } from '../shared/constants'
 import { SuperadminEmptyState } from '../shared/EmptyState'
 
 type Props = {
   orgId: string
+  onOrgDeleted?: (orgId: string) => void
 }
 
-export function OrgDetailView({ orgId }: Props) {
+export function OrgDetailView({ orgId, onOrgDeleted }: Props) {
   const [detail, setDetail] = useState<SuperadminOrgDetail | null>(null)
   const [members, setMembers] = useState<SuperadminOrgMembersPage | null>(null)
   const [loading, setLoading] = useState(true)
@@ -18,8 +19,10 @@ export function OrgDetailView({ orgId }: Props) {
   const [changingPlan, setChangingPlan] = useState(false)
   const [changingAiFlag, setChangingAiFlag] = useState(false)
   const [resettingAiUsage, setResettingAiUsage] = useState(false)
+  const [deletingOrg, setDeletingOrg] = useState(false)
   const [actionError, setActionError] = useState('')
   const [actionSuccess, setActionSuccess] = useState('')
+  const [deletionJob, setDeletionJob] = useState<SuperadminOrgDeletionJob | null>(null)
 
   const load = async () => {
     if (!orgId) return
@@ -39,9 +42,35 @@ export function OrgDetailView({ orgId }: Props) {
   }
 
   useEffect(() => {
+    setDeletionJob(null)
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgId])
+
+  useEffect(() => {
+    if (!deletionJob?.id) return
+    if (!['queued', 'running'].includes(deletionJob.status)) return
+    const intervalId = window.setInterval(async () => {
+      try {
+        const resp = await superadminApi.orgDeletionJob(deletionJob.id)
+        if (!resp.data.ok || !resp.data.data) return
+        const next = resp.data.data
+        setDeletionJob(next)
+        if (next.status === 'completed') {
+          setActionSuccess(`Организация удалена. Объектов в хранилище удалено: ${next.storage_objects_deleted}.`)
+          setDeletingOrg(false)
+          onOrgDeleted?.(next.org_id)
+        }
+        if (next.status === 'failed') {
+          setActionError(next.error_message || 'Удаление завершилось с ошибкой')
+          setDeletingOrg(false)
+        }
+      } catch {
+        // keep polling on temporary network errors
+      }
+    }, 2500)
+    return () => window.clearInterval(intervalId)
+  }, [deletionJob?.id, deletionJob?.status, onOrgDeleted])
 
   const org = detail?.org
   const planLimits = detail?.plan_limits
@@ -101,6 +130,35 @@ export function OrgDetailView({ orgId }: Props) {
       setActionError(e?.response?.data?.error?.message || e?.message || 'Не удалось сбросить usage')
     } finally {
       setResettingAiUsage(false)
+    }
+  }
+
+  const deleteOrg = async () => {
+    if (!orgId || !detail?.org) return
+    setActionError('')
+    setActionSuccess('')
+    const expected = detail.org.slug
+    const confirmed = window.prompt(`Для удаления введите slug организации: ${expected}`)
+    if (confirmed !== expected) {
+      setActionError('Удаление отменено: подтверждение не совпадает.')
+      return
+    }
+
+    setDeletingOrg(true)
+    try {
+      const r = await superadminApi.deleteOrg(orgId)
+      if (!r.data.ok || !r.data.data) throw new Error(r.data.error?.message || 'Не удалось запустить удаление')
+      setDeletionJob(r.data.data)
+      if (r.data.data.status === 'completed') {
+        setActionSuccess(`Организация удалена. Объектов в хранилище удалено: ${r.data.data.storage_objects_deleted}.`)
+        onOrgDeleted?.(orgId)
+      } else {
+        setActionSuccess('Удаление запущено в фоне. Статус будет обновляться автоматически.')
+      }
+    } catch (e: any) {
+      setActionError(e?.response?.data?.error?.message || e?.message || 'Не удалось удалить организацию')
+    } finally {
+      setDeletingOrg(false)
     }
   }
 
@@ -251,6 +309,36 @@ export function OrgDetailView({ orgId }: Props) {
             </tbody>
           </table>
         </div>
+      </div>
+
+      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 space-y-3">
+        <div className="text-sm font-semibold flex items-center gap-2 text-destructive">
+          <AlertTriangle className="h-4 w-4" /> Опасная зона
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Полное удаление организации: пользователи, таблицы, файлы, знания, расписание и прочие связанные данные. Операция необратима.
+        </p>
+        <button
+          onClick={() => void deleteOrg()}
+          disabled={deletingOrg || (deletionJob?.status === 'queued' || deletionJob?.status === 'running')}
+          className="h-9 px-3 rounded-xl border border-destructive/40 bg-destructive/10 hover:bg-destructive/20 text-sm text-destructive disabled:opacity-50 inline-flex items-center gap-2"
+        >
+          <Trash2 className="h-4 w-4" />
+          {deletionJob?.status === 'queued' || deletionJob?.status === 'running' ? 'Удаление выполняется...' : 'Удалить организацию'}
+        </button>
+        {deletionJob && (
+          <div className="rounded-lg border border-sidebar-border bg-sidebar-background/50 p-3 text-xs space-y-1">
+            <div>
+              Статус: <span className="font-semibold">{deletionJob.status}</span>
+            </div>
+            <div>
+              Прогресс: {Number(deletionJob.progress_processed || 0).toLocaleString('ru-RU')} /{' '}
+              {Number(deletionJob.progress_total || 0).toLocaleString('ru-RU')}
+            </div>
+            <div>Удалено объектов из хранилища: {Number(deletionJob.storage_objects_deleted || 0).toLocaleString('ru-RU')}</div>
+            {deletionJob.error_message && <div className="text-destructive">{deletionJob.error_message}</div>}
+          </div>
+        )}
       </div>
     </section>
   )

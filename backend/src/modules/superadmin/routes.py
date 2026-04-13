@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import StreamingResponse
+from kombu.exceptions import OperationalError
 
 from src.common.http_headers import content_disposition_attachment
 from src.common.schemas import ApiResponse
@@ -18,6 +19,7 @@ from src.modules.superadmin.schemas import (
     SuperadminDashboardResponse,
     SuperadminLoginRequest,
     SuperadminOrgAIEnabledResponse,
+    SuperadminOrgDeletionJobResponse,
     SuperadminOrgDetail,
     SuperadminOrgListPage,
     SuperadminOrgMembersPage,
@@ -38,6 +40,7 @@ from src.modules.superadmin.schemas import (
 )
 from src.modules.superadmin.service import SuperadminService
 from src.modules.superadmin.services.auth import SuperadminRateLimitedError
+from src.modules.superadmin.tasks import superadmin_delete_org_background
 
 router = APIRouter(prefix="/superadmin", tags=["superadmin"])
 protected = APIRouter(dependencies=[Depends(require_superadmin)])
@@ -282,6 +285,50 @@ async def superadmin_reset_org_ai_usage(org_id: str):
         data = await _service.orgs.reset_org_ai_usage_today(org_id=org_id)
     except LookupError:
         return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": NOT_FOUND_ORG})
+    return ApiResponse(data=data)
+
+
+@protected.post("/orgs/{org_id}/delete", response_model=ApiResponse[SuperadminOrgDeletionJobResponse])
+async def superadmin_delete_org(
+    org_id: str,
+    superadmin_payload: dict = Depends(require_superadmin),
+):
+    try:
+        data = await _service.orgs.create_or_get_org_deletion_job(
+            org_id=org_id,
+            requested_by=str(superadmin_payload.get("email") or settings.SUPERADMIN_EMAIL or "superadmin"),
+        )
+    except ValueError:
+        return ApiResponse(ok=False, data=None, error={"code": "INVALID_ID", "message": INVALID_ID})
+    except LookupError:
+        return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": NOT_FOUND_ORG})
+
+    should_enqueue = data["status"] == "queued" and not data.get("task_id")
+    if not should_enqueue:
+        return ApiResponse(data=data)
+
+    try:
+        task = superadmin_delete_org_background.delay(str(data["id"]))
+        task_id = str(task.id)
+        data = await _service.orgs.set_org_deletion_job_task_id(job_id=str(data["id"]), task_id=task_id)
+    except (OperationalError, OSError, RuntimeError):
+        if bool(getattr(settings, "TESTING", False)):
+            return ApiResponse(data=data)
+        # Dev fallback: execute synchronously if broker is unavailable.
+        superadmin_delete_org_background.run(str(data["id"]))
+        data = await _service.orgs.get_org_deletion_job(job_id=str(data["id"]))
+
+    return ApiResponse(data=data)
+
+
+@protected.get("/org-deletion-jobs/{job_id}", response_model=ApiResponse[SuperadminOrgDeletionJobResponse])
+async def superadmin_org_deletion_job(job_id: str):
+    try:
+        data = await _service.orgs.get_org_deletion_job(job_id=job_id)
+    except ValueError:
+        return ApiResponse(ok=False, data=None, error={"code": "INVALID_ID", "message": INVALID_ID})
+    except LookupError:
+        return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": "Задача удаления не найдена"})
     return ApiResponse(data=data)
 
 

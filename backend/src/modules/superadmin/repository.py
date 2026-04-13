@@ -18,6 +18,7 @@ from src.modules.auth.models import User
 from src.modules.billing.models import Plan
 from src.modules.files.models import File
 from src.modules.org.models import Membership, Organization, Subscription
+from src.modules.superadmin.models import SuperadminOrgDeletionJob
 from src.modules.tables.models import Column, Table
 from src.modules.tables.records import Record
 
@@ -87,6 +88,43 @@ class SuperadminRepository:
         return (
             await self.session.execute(select(Subscription).where(Subscription.org_id == org_id))
         ).scalar_one_or_none()
+
+    async def get_org_deletion_job(self, *, job_id: uuid.UUID) -> SuperadminOrgDeletionJob | None:
+        return (
+            await self.session.execute(
+                select(SuperadminOrgDeletionJob).where(SuperadminOrgDeletionJob.id == job_id)
+            )
+        ).scalar_one_or_none()
+
+    async def get_active_org_deletion_job(self, *, org_id: uuid.UUID) -> SuperadminOrgDeletionJob | None:
+        return (
+            await self.session.execute(
+                select(SuperadminOrgDeletionJob)
+                .where(
+                    SuperadminOrgDeletionJob.org_id == org_id,
+                    SuperadminOrgDeletionJob.status.in_(("queued", "running")),
+                )
+                .order_by(SuperadminOrgDeletionJob.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+    async def create_org_deletion_job(
+        self,
+        *,
+        org_id: uuid.UUID,
+        org_name: str,
+        requested_by: str,
+    ) -> SuperadminOrgDeletionJob:
+        job = SuperadminOrgDeletionJob(
+            org_id=org_id,
+            org_name=org_name,
+            requested_by=requested_by,
+            status="queued",
+        )
+        self.session.add(job)
+        await self.session.flush()
+        return job
 
     async def reset_ai_usage_today(self, *, org_id: uuid.UUID, day_start: datetime) -> tuple[int, int]:
         """Сбросить usage AI за текущий день для организации.

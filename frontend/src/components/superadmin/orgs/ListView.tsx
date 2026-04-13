@@ -9,9 +9,10 @@ import { SuperadminEmptyState } from '../shared/EmptyState'
 type Props = {
   selectedOrgId: string
   onSelectOrg: (orgId: string) => void
+  reloadKey?: number
 }
 
-export function OrgListView({ selectedOrgId, onSelectOrg }: Props) {
+export function OrgListView({ selectedOrgId, onSelectOrg, reloadKey = 0 }: Props) {
   const [q, setQ] = useState('')
   const [plan, setPlan] = useState<string>('')
   const [subStatus, setSubStatus] = useState<string>('')
@@ -52,7 +53,7 @@ export function OrgListView({ selectedOrgId, onSelectOrg }: Props) {
     setOffset(0)
     void load(0)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedQ, plan, subStatus, limit])
+  }, [debouncedQ, plan, subStatus, limit, reloadKey])
 
   const items = useMemo(() => page?.items ?? [], [page?.items])
   const total = page?.total || 0

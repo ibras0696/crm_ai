@@ -62,7 +62,7 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed = false, 
         {!isCollapsed && (
           <div className="flex flex-col overflow-hidden flex-1">
             <span className="truncate text-sm font-semibold text-sidebar-foreground">CRM Платформа</span>
-            {org && <span className="truncate text-xs text-muted-foreground">{orgName}</span>}
+            {org && <span className="truncate text-xs text-sidebar-foreground/70">{orgName}</span>}
           </div>
         )}
         {isMobile && (
@@ -75,7 +75,7 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed = false, 
       <Separator className="bg-sidebar-border" />
 
       <nav className="flex-1 space-y-1 overflow-y-auto px-3 py-4 scrollbar-thin">
-        <div className={cn('mb-2 px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground', isCollapsed && 'sr-only')}>
+        <div className={cn('mb-2 px-2 text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/70', isCollapsed && 'sr-only')}>
           Основное
         </div>
         {mainNav.map((item) => (
@@ -86,7 +86,7 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed = false, 
             className={({ isActive }) =>
               cn(
                 'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
-                isActive ? 'bg-sidebar-accent text-sidebar-primary' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground',
+                isActive ? 'bg-sidebar-accent text-sidebar-primary' : 'text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground',
                 isCollapsed && 'justify-center px-2'
               )
             }
@@ -98,7 +98,7 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed = false, 
 
         <Separator className="!my-4 bg-sidebar-border" />
 
-        <div className={cn('mb-2 px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground', isCollapsed && 'sr-only')}>
+        <div className={cn('mb-2 px-2 text-xs font-semibold uppercase tracking-wider text-sidebar-foreground/70', isCollapsed && 'sr-only')}>
           Модули
         </div>
         {moduleNav.map((item) => (
@@ -109,7 +109,7 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed = false, 
             className={({ isActive }) =>
               cn(
                 'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
-                isActive ? 'bg-sidebar-accent text-sidebar-primary' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground',
+                isActive ? 'bg-sidebar-accent text-sidebar-primary' : 'text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground',
                 isCollapsed && 'justify-center px-2'
               )
             }
@@ -127,7 +127,7 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed = false, 
           className={({ isActive }) =>
             cn(
               'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
-              isActive ? 'bg-sidebar-accent text-sidebar-primary' : 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground',
+              isActive ? 'bg-sidebar-accent text-sidebar-primary' : 'text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground',
               isCollapsed && 'justify-center px-2'
             )
           }
@@ -139,7 +139,7 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed = false, 
         {!isMobile && (
           <button
             onClick={onToggleCollapse}
-            className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground transition-all"
+            className="mt-2 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-all"
             style={isCollapsed ? { justifyContent: 'center', paddingLeft: '0.5rem', paddingRight: '0.5rem' } : {}}
           >
             {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}

@@ -3,6 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from httpx import AsyncClient
+from kombu.exceptions import OperationalError
 from sqlalchemy import select
 
 from src.infrastructure.uow import UnitOfWork
@@ -50,7 +51,7 @@ async def test_superadmin_orgs_pagination_and_filters(client: AsyncClient):
 
     # Create 3 orgs
     _, org1 = await _register_owner(client, org_name="Alpha Org")
-    tok2, org2 = await _register_owner(client, org_name="Beta Org")
+    _tok2, org2 = await _register_owner(client, org_name="Beta Org")
     tok3, org3 = await _register_owner(client, org_name="Gamma Org")
 
     # Ensure plans exist (test DB uses metadata-only schema).
@@ -449,3 +450,41 @@ async def test_superadmin_can_update_ai_runtime_config(client: AsyncClient):
     assert runtime["strict_actions"] is True
     assert patch.json()["data"]["audit"]
     assert "ai_bearer_token" in (patch.json()["data"]["audit"][0]["changed_fields"] or [])
+
+
+@pytest.mark.asyncio
+async def test_superadmin_delete_org_creates_background_job_when_broker_unavailable(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    sa = await _login_sa(client)
+    _, org_id = await _register_owner(client, org_name="Delete Me Org")
+
+    from src.modules.superadmin import routes as superadmin_routes
+
+    class _TaskFallback:
+        @staticmethod
+        def delay(_job_id: str):
+            raise OperationalError("broker unavailable")
+
+        @staticmethod
+        def run(_job_id: str):
+            return {"status": "queued"}
+    monkeypatch.setattr(superadmin_routes, "superadmin_delete_org_background", _TaskFallback())
+
+    delete_resp = await client.post(f"/api/v1/superadmin/orgs/{org_id}/delete", headers=_h(sa))
+    assert delete_resp.status_code == 200
+    payload = delete_resp.json()
+    assert payload["ok"] is True
+    job = payload["data"]
+    assert job["status"] == "queued"
+    assert job["org_id"] == org_id
+
+    detail_after = await client.get(f"/api/v1/superadmin/orgs/{org_id}", headers=_h(sa))
+    assert detail_after.status_code == 200
+    assert detail_after.json()["ok"] is True
+
+    job_status = await client.get(f"/api/v1/superadmin/org-deletion-jobs/{job['id']}", headers=_h(sa))
+    assert job_status.status_code == 200
+    assert job_status.json()["ok"] is True
+    assert job_status.json()["data"]["status"] == "queued"

@@ -33,6 +33,7 @@ export default function SuperAdminPage() {
   const [isAuthed, setIsAuthed] = useState(true)
   const [tab, setTab] = useState<TabKey>('dashboard')
   const [selectedOrgId, setSelectedOrgId] = useState(() => localStorage.getItem(SA_SELECTED_ORG_KEY) || '')
+  const [orgsReloadKey, setOrgsReloadKey] = useState(0)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem(SA_SIDEBAR_COLLAPSED_KEY) === '1')
 
@@ -82,10 +83,21 @@ export default function SuperAdminPage() {
     void loadOverview()
   }
 
-  const setSelectedOrg = (id: string) => {
+  const setSelectedOrg = useCallback((id: string) => {
     setSelectedOrgId(id)
     localStorage.setItem(SA_SELECTED_ORG_KEY, id)
-  }
+  }, [])
+
+  const handleOrgDeleted = useCallback(
+    (deletedOrgId: string) => {
+      if (selectedOrgId === deletedOrgId) {
+        setSelectedOrg('')
+      }
+      setOrgsReloadKey((prev) => prev + 1)
+      void loadOverview()
+    },
+    [loadOverview, selectedOrgId, setSelectedOrg]
+  )
 
   const toggleSidebarCollapsed = () => {
     setSidebarCollapsed((prev) => {
@@ -149,10 +161,10 @@ export default function SuperAdminPage() {
         {tab === 'orgs' && (
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 items-start">
             <div className="xl:col-span-2 space-y-4">
-              <OrgListView selectedOrgId={selectedOrgId} onSelectOrg={setSelectedOrg} />
+              <OrgListView selectedOrgId={selectedOrgId} onSelectOrg={setSelectedOrg} reloadKey={orgsReloadKey} />
             </div>
             <div className="xl:col-span-1">
-              <OrgDetailView orgId={effectiveSelectedOrgId} />
+              <OrgDetailView orgId={effectiveSelectedOrgId} onOrgDeleted={handleOrgDeleted} />
             </div>
           </div>
         )}

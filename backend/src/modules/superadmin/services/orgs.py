@@ -39,6 +39,49 @@ class SuperadminOrgsService:
                 raise LookupError("NOT_FOUND")
         return data
 
+    async def create_or_get_org_deletion_job(self, *, org_id: str, requested_by: str) -> dict:
+        org_uuid = uuid.UUID(org_id)
+        requested_by_email = (requested_by or "").strip() or "superadmin"
+
+        async with UnitOfWork() as uow:
+            repo = SuperadminRepository(uow.session)
+            org = await repo.get_org_model(org_id=org_uuid)
+            if not org:
+                raise LookupError("NOT_FOUND")
+
+            existing = await repo.get_active_org_deletion_job(org_id=org_uuid)
+            if existing:
+                return self._serialize_org_deletion_job(existing)
+
+            job = await repo.create_org_deletion_job(
+                org_id=org_uuid,
+                org_name=str(org.name or "").strip() or "Организация",
+                requested_by=requested_by_email,
+            )
+            await uow.commit()
+            return self._serialize_org_deletion_job(job)
+
+    async def set_org_deletion_job_task_id(self, *, job_id: str, task_id: str) -> dict:
+        job_uuid = uuid.UUID(job_id)
+        safe_task_id = (task_id or "").strip()
+
+        async with UnitOfWork() as uow:
+            repo = SuperadminRepository(uow.session)
+            job = await repo.get_org_deletion_job(job_id=job_uuid)
+            if not job:
+                raise LookupError("NOT_FOUND")
+            job.task_id = safe_task_id or None
+            await uow.commit()
+            return self._serialize_org_deletion_job(job)
+
+    async def get_org_deletion_job(self, *, job_id: str) -> dict:
+        async with UnitOfWork() as uow:
+            repo = SuperadminRepository(uow.session)
+            job = await repo.get_org_deletion_job(job_id=uuid.UUID(job_id))
+            if not job:
+                raise LookupError("NOT_FOUND")
+            return self._serialize_org_deletion_job(job)
+
     async def org_members_page(self, org_id: str, *, limit: int, offset: int) -> dict:
         async with UnitOfWork() as uow:
             repo = SuperadminRepository(uow.session)
@@ -271,3 +314,23 @@ class SuperadminOrgsService:
                 offset=offset,
             )
         return {"items": items, "total": total, "limit": int(limit), "offset": int(offset)}
+
+    @staticmethod
+    def _serialize_org_deletion_job(job) -> dict:
+        return {
+            "id": str(job.id),
+            "org_id": str(job.org_id),
+            "org_name": job.org_name,
+            "requested_by": job.requested_by,
+            "status": str(job.status),
+            "task_id": job.task_id,
+            "progress_total": int(job.progress_total or 0),
+            "progress_processed": int(job.progress_processed or 0),
+            "storage_objects_deleted": int(job.storage_objects_deleted or 0),
+            "error_message": job.error_message,
+            "meta_json": job.meta_json,
+            "started_at": job.started_at.isoformat() if job.started_at else None,
+            "finished_at": job.finished_at.isoformat() if job.finished_at else None,
+            "created_at": job.created_at.isoformat() if job.created_at else None,
+            "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+        }

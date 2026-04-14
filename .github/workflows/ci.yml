@@ -267,13 +267,13 @@ jobs:
 
             # Save current state for rollback
             docker compose -f docker-compose.prod.yml ps --format json > /tmp/pre_deploy_state.json || true
-            git stash || true
             PREV_COMMIT=$(git rev-parse HEAD)
 
-            # Pull latest code
+            # Sync repo to origin/main deterministically (avoid stash/merge conflicts on dirty tree)
             git fetch origin main
-            git checkout main
-            git pull origin main
+            git checkout -B main origin/main
+            git reset --hard origin/main
+            git clean -fd
 
             # Build all images used in production deploy flow
             docker compose -f docker-compose.prod.yml build api migrate celery_worker celery_beat frontend

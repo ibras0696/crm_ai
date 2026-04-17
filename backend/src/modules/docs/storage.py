@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import uuid
-from urllib.parse import quote
 
+from src.common.http_headers import content_disposition_attachment
 from src.config import settings
 from src.modules.files.storage import ensure_bucket, get_s3_client, get_s3_presign_client
 
@@ -43,8 +43,7 @@ class StorageProvider:
         s3 = get_s3_presign_client()
         params = {"Bucket": bucket, "Key": key}
         if filename:
-            safe_filename = quote(filename.encode("utf-8"))
-            params["ResponseContentDisposition"] = f"attachment; filename*=UTF-8''{safe_filename}"
+            params["ResponseContentDisposition"] = content_disposition_attachment(filename)
 
         return s3.generate_presigned_url(
             "get_object",

@@ -32,14 +32,23 @@ def _ascii_filename_fallback(filename: str) -> str:
     return f"{base_ascii}{ext_ascii}"
 
 
-def content_disposition_attachment(filename: str) -> str:
+def content_disposition(filename: str, *, disposition: str = "attachment") -> str:
     """
     Build a safe Content-Disposition header value.
     Uses:
     - filename="<ascii-fallback>"
     - filename*=UTF-8''<urlencoded>
     """
+    safe_disposition = "inline" if disposition == "inline" else "attachment"
     original = (filename or "download").strip() or "download"
     fallback = _ascii_filename_fallback(original)
     encoded = quote(original, safe="")
-    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
+    return f"{safe_disposition}; filename=\"{fallback}\"; filename*=UTF-8''{encoded}"
+
+
+def content_disposition_attachment(filename: str) -> str:
+    return content_disposition(filename, disposition="attachment")
+
+
+def content_disposition_inline(filename: str) -> str:
+    return content_disposition(filename, disposition="inline")

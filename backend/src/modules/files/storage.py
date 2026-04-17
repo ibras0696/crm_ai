@@ -3,12 +3,12 @@
 import uuid
 from contextlib import suppress
 from typing import BinaryIO
-from urllib.parse import quote
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
+from src.common.http_headers import content_disposition_attachment, content_disposition_inline
 from src.config import settings
 
 
@@ -142,9 +142,9 @@ def generate_presigned_get_url(
     s3 = get_s3_presign_client()
     params = {"Bucket": bucket, "Key": s3_key}
     if filename:
-        safe_filename = quote(filename.encode("utf-8"))
-        disposition = "inline" if inline else "attachment"
-        params["ResponseContentDisposition"] = f"{disposition}; filename*=UTF-8''{safe_filename}"
+        params["ResponseContentDisposition"] = (
+            content_disposition_inline(filename) if inline else content_disposition_attachment(filename)
+        )
     return s3.generate_presigned_url(
         "get_object",
         Params=params,

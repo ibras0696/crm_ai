@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, Response
 from kombu.exceptions import OperationalError
 
 from src.common.enums import UserRole
+from src.common.http_headers import content_disposition_attachment
 from src.common.schemas import ApiResponse
 from src.config import settings
 from src.infrastructure.uow import UnitOfWork
@@ -479,7 +480,7 @@ async def internal_download(version_id: uuid.UUID, token: str):
             content=payload,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             headers={
-                "Content-Disposition": "attachment; filename*=UTF-8''document.docx",
+                "Content-Disposition": content_disposition_attachment("document.docx"),
                 "Cache-Control": "no-store",
             },
         )
@@ -535,7 +536,7 @@ async def internal_source_download(version_id: uuid.UUID, token: str):
             content=payload,
             media_type=media_type,
             headers={
-                "Content-Disposition": f"attachment; filename*=UTF-8''source.{extension}",
+                "Content-Disposition": content_disposition_attachment(f"source.{extension}"),
                 "Cache-Control": "no-store",
             },
         )

@@ -21,6 +21,14 @@ _KIND_CTA_LABEL = {
     "registration_confirm": "Подтвердить регистрацию",
 }
 
+_KIND_LABEL = {
+    "schedule_reminder": "Напоминание",
+    "invite": "Приглашение",
+    "password_reset": "Безопасность",
+    "registration_confirm": "Регистрация",
+    "billing_lifecycle": "Биллинг",
+}
+
 
 def _extract_first_url(text: str) -> str | None:
     match = _URL_RE.search(text or "")
@@ -81,6 +89,7 @@ def render_notification_email_html(*, subject: str, body_text: str, kind: str = 
     preheader = (body_text or "").strip().replace("\n", " ")
     preheader = preheader[:140] if preheader else "Уведомление CRM Platform"
     app_name = settings.APP_NAME or "CRM Platform"
+    kind_label = _KIND_LABEL.get(kind, "Уведомление")
 
     first_url = _extract_first_url(body_text)
     cta_label = _KIND_CTA_LABEL.get(kind, "Открыть CRM Platform")
@@ -90,11 +99,17 @@ def render_notification_email_html(*, subject: str, body_text: str, kind: str = 
     if cta_url:
         safe_url = escape(cta_url, quote=True)
         cta_html = (
-            '<tr><td style="padding:0 32px 8px;">'
+            '<tr><td style="padding:10px 32px 6px;">'
             f'<a href="{safe_url}" '
-            f'style="display:inline-block;background:{accent};color:#ffffff;text-decoration:none;'
-            'font-weight:600;font-size:14px;padding:12px 18px;border-radius:10px;">'
+            'style="display:inline-block;background:#2563EB;'
+            "background-image:linear-gradient(135deg,#2563EB 0%,#9B5DE5 100%);"
+            "color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:12px 20px;border-radius:12px;"
+            'box-shadow:0 10px 24px rgba(37,99,235,0.30);">'
             f"{escape(cta_label)}</a></td></tr>"
+            '<tr><td style="padding:0 32px 8px;color:#64748B;font-size:12px;line-height:1.5;">'
+            f'Если кнопка не работает, откройте ссылку: <a href="{safe_url}" '
+            'style="color:#2563EB;text-decoration:none;word-break:break-all;">'
+            f"{safe_url}</a></td></tr>"
         )
 
     body_blocks_html = _render_body_blocks(body_text)
@@ -104,20 +119,52 @@ def render_notification_email_html(*, subject: str, body_text: str, kind: str = 
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />"
         "<title>CRM Platform</title>"
         "</head>"
-        '<body style="margin:0;padding:0;background:#F1F5F9;font-family:Inter,Segoe UI,Roboto,Arial,sans-serif;">'
+        '<body style="margin:0;padding:0;background:#EEF2FF;font-family:Inter,Segoe UI,Roboto,Arial,sans-serif;">'
         f'<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">{escape(preheader)}</div>'
         '<table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="padding:28px 12px;">'
         "<tr><td align=\"center\">"
         '<table role="presentation" cellpadding="0" cellspacing="0" width="100%" '
-        'style="max-width:640px;background:#ffffff;border:1px solid #E2E8F0;border-radius:18px;overflow:hidden;">'
-        f'<tr><td style="padding:18px 24px;background:{accent};color:#ffffff;font-size:13px;'
-        f'font-weight:700;letter-spacing:.08em;text-transform:uppercase;">{escape(app_name)}</td></tr>'
-        "<tr><td "
-        'style="padding:28px 32px 4px;color:#0F172A;font-size:24px;line-height:1.3;font-weight:700;">'
+        'style="max-width:640px;background:#ffffff;border:1px solid #D6DEFF;border-radius:20px;overflow:hidden;'
+        'box-shadow:0 18px 50px rgba(15,23,42,0.10);">'
+        '<tr><td style="padding:22px 24px;background:#0F172A;'
+        'background-image:linear-gradient(135deg,#0F172A 0%,#1E3A8A 50%,#7C3AED 100%);">'
+        '<table role="presentation" cellpadding="0" cellspacing="0" width="100%"><tr>'
+        '<td style="vertical-align:middle;">'
+        '<table role="presentation" cellpadding="0" cellspacing="0"><tr>'
+        '<td style="height:34px;width:34px;border-radius:10px;'
+        'background:#2563EB;background-image:linear-gradient(135deg,#2563EB 0%,#9B5DE5 100%);'
+        'text-align:center;color:#ffffff;font-size:20px;font-weight:800;line-height:34px;">C</td>'
+        '<td style="padding-left:10px;color:#E2E8F0;font-size:14px;font-weight:700;letter-spacing:.02em;">'
+        f"{escape(app_name)}"
+        "</td>"
+        "</tr></table>"
+        "</td>"
+        '<td align="right" style="vertical-align:middle;">'
+        '<span style="display:inline-block;padding:6px 10px;border-radius:999px;'
+        "background:rgba(255,255,255,0.14);border:1px solid rgba(255,255,255,0.26);"
+        'color:#DBEAFE;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;">'
+        f"{escape(kind_label)}"
+        "</span>"
+        "</td>"
+        "</tr></table>"
+        "</td></tr>"
+        '<tr><td style="padding:24px 32px 8px;color:#0F172A;font-size:26px;line-height:1.28;font-weight:800;">'
         f"{escape(subject)}</td></tr>"
-        f'<tr><td style="padding:8px 32px 10px;">{body_blocks_html}</td></tr>'
+        f'<tr><td style="padding:8px 32px 2px;color:{accent};font-size:13px;font-weight:700;">'
+        f"{escape(kind_label)} CRM Platform"
+        "</td></tr>"
+        '<tr><td style="padding:10px 24px 0;">'
+        '<table role="presentation" cellpadding="0" cellspacing="0" width="100%" '
+        'style="border:1px solid #E2E8F0;border-radius:14px;background:#F8FAFF;">'
+        '<tr><td style="padding:18px 18px 6px;">'
+        f"{body_blocks_html}"
+        "</td></tr></table>"
+        "</td></tr>"
         f"{cta_html}"
-        '<tr><td style="padding:18px 32px 26px;color:#64748B;font-size:12px;line-height:1.6;">'
+        '<tr><td style="padding:16px 32px 8px;color:#64748B;font-size:12px;line-height:1.6;">'
+        "Если вы не выполняли это действие, проверьте активные сессии и смените пароль."
+        "</td></tr>"
+        '<tr><td style="padding:0 32px 26px;color:#94A3B8;font-size:11px;line-height:1.6;">'
         "Это автоматическое уведомление CRM Platform. Пожалуйста, не отвечайте на это письмо."
         "</td></tr>"
         "</table>"

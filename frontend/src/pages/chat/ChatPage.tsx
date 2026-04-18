@@ -15,6 +15,7 @@ import {
   extractApiError,
   getInitials,
   getVoiceFileExtension,
+  inferContentTypeFromName,
   isMediaAttachment,
   isVoiceAttachment,
   resolveVoiceRecorderMimeType,
@@ -350,7 +351,7 @@ export default function ChatPage() {
       return
     }
 
-    const contentType = file.type || 'application/octet-stream'
+    const contentType = file.type || inferContentTypeFromName(file.name)
     if (source === 'media' || source === 'paste') {
       if (!isMediaAttachment(contentType)) {
         setErrorText('Кнопка "Фото/Видео" принимает только фото и видео')

@@ -113,6 +113,13 @@ export function parseAttachmentSize(item: Record<string, unknown>): number {
 export function inferContentTypeFromName(filename: string): string {
   const ext = filename.toLowerCase().split('.').pop() || ''
   if (!ext) return 'application/octet-stream'
+  if (['md', 'markdown'].includes(ext)) return 'text/markdown'
+  if (['txt', 'log'].includes(ext)) return 'text/plain'
+  if (['csv'].includes(ext)) return 'text/csv'
+  if (['json'].includes(ext)) return 'application/json'
+  if (['xml'].includes(ext)) return 'application/xml'
+  if (['yml', 'yaml'].includes(ext)) return 'application/yaml'
+  if (['html', 'htm'].includes(ext)) return 'text/html'
   if (['png'].includes(ext)) return 'image/png'
   if (['jpg', 'jpeg'].includes(ext)) return 'image/jpeg'
   if (['gif'].includes(ext)) return 'image/gif'
@@ -259,6 +266,29 @@ export function normalizeAttachmentMimeForPlayback(contentType: string): string 
   return (base || normalized).trim()
 }
 
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename || 'download'
+  link.rel = 'noreferrer'
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
+async function forceDownloadAttachment(url: string, filename: string, contentType: string) {
+  const response = await fetch(url, { method: 'GET' })
+  if (!response.ok) {
+    throw new Error(`Не удалось скачать вложение (${response.status})`)
+  }
+  const blob = await response.blob()
+  const normalizedType = normalizeAttachmentMimeForPlayback(contentType) || blob.type || 'application/octet-stream'
+  const finalBlob = blob.type === normalizedType ? blob : new Blob([blob], { type: normalizedType })
+  downloadBlob(finalBlob, filename)
+}
+
 export function isMediaAttachment(contentType: string): boolean {
   const normalized = contentType.toLowerCase()
   return normalized.startsWith('image/') || normalized.startsWith('video/')
@@ -380,6 +410,7 @@ export function AttachmentPreview({
   const [isAudioPlaying, setIsAudioPlaying] = useState(false)
   const [audioCurrentTime, setAudioCurrentTime] = useState(0)
   const [audioDuration, setAudioDuration] = useState(0)
+  const [isDownloadingFile, setIsDownloadingFile] = useState(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
   useEffect(() => {
@@ -505,6 +536,19 @@ export function AttachmentPreview({
     handleAudioSeek(ratio * duration)
   }
 
+  const handleFileDownload = async () => {
+    if (!downloadUrl || isDownloadingFile) return
+    setIsDownloadingFile(true)
+    setErrorText('')
+    try {
+      await forceDownloadAttachment(downloadUrl, attachment.original_name, attachment.content_type)
+    } catch (error: unknown) {
+      setErrorText(extractApiError(error, 'Не удалось скачать вложение'))
+    } finally {
+      setIsDownloadingFile(false)
+    }
+  }
+
   if (mediaKind === 'image') {
     return (
       <button
@@ -602,15 +646,14 @@ export function AttachmentPreview({
         ) : (
           <div className="flex min-w-0 items-center justify-between gap-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5">
             <span className="truncate text-xs text-muted-foreground">Не удалось воспроизвести</span>
-            <a
-              href={downloadUrl}
-              target="_blank"
-              rel="noreferrer"
-              download={attachment.original_name}
+            <button
+              type="button"
+              onClick={() => void handleFileDownload()}
+              disabled={isDownloadingFile}
               className="shrink-0 text-xs text-primary hover:underline"
             >
-              Скачать
-            </a>
+              {isDownloadingFile ? 'Скачивание...' : 'Скачать'}
+            </button>
           </div>
         )}
       </div>
@@ -618,15 +661,16 @@ export function AttachmentPreview({
   }
 
   return (
-    <a
-      href={downloadUrl}
-      target="_blank"
-      rel="noreferrer"
-      download={attachment.original_name}
+    <button
+      type="button"
+      onClick={() => void handleFileDownload()}
+      disabled={isDownloadingFile}
       className="flex w-full min-w-0 max-w-full items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-xs text-primary hover:bg-primary/5"
     >
       <span className="min-w-0 flex-1 truncate">{attachment.original_name}</span>
-      <span className="shrink-0 text-muted-foreground">{formatFileSize(attachment.size)}</span>
-    </a>
+      <span className="shrink-0 text-muted-foreground">
+        {isDownloadingFile ? 'Скачивание...' : formatFileSize(attachment.size)}
+      </span>
+    </button>
   )
 }

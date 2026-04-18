@@ -376,6 +376,7 @@ class ChatService:
             bucket=db_file.s3_bucket,
             expires_in=int(max(60, expires_in)),
             filename=db_file.original_name,
+            content_type=db_file.content_type,
             inline=True,
         )
 

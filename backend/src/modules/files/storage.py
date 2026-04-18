@@ -11,6 +11,25 @@ from botocore.exceptions import ClientError
 from src.common.http_headers import content_disposition_attachment, content_disposition_inline
 from src.config import settings
 
+_TEXT_RESPONSE_MIME_BY_EXT: dict[str, str] = {
+    "csv": "text/csv",
+    "htm": "text/html",
+    "html": "text/html",
+    "json": "application/json",
+    "md": "text/markdown",
+    "markdown": "text/markdown",
+    "txt": "text/plain",
+    "xml": "application/xml",
+    "yaml": "application/yaml",
+    "yml": "application/yaml",
+}
+_TEXT_RESPONSE_MIME_TYPES = set(_TEXT_RESPONSE_MIME_BY_EXT.values()) | {
+    "application/javascript",
+    "text/javascript",
+    "text/plain",
+    "text/xml",
+}
+
 
 def _build_s3_client(*, endpoint_url: str):
     addressing_style = "path" if settings.S3_FORCE_PATH_STYLE else "auto"
@@ -33,6 +52,28 @@ def get_s3_client():
 def get_s3_presign_client():
     public_endpoint = str(settings.S3_PUBLIC_ENDPOINT or "").strip()
     return _build_s3_client(endpoint_url=public_endpoint or settings.S3_ENDPOINT)
+
+
+def _normalize_content_type(content_type: str | None) -> str:
+    raw = str(content_type or "").strip().lower()
+    if not raw:
+        return ""
+    return raw.split(";", 1)[0].strip()
+
+
+def _guess_text_response_content_type(*, content_type: str | None, filename: str | None) -> str | None:
+    normalized = _normalize_content_type(content_type)
+    if normalized in _TEXT_RESPONSE_MIME_TYPES:
+        return f"{normalized}; charset=utf-8"
+
+    name = str(filename or "").strip().lower()
+    if "." not in name or name.endswith("."):
+        return None
+    ext = name.rsplit(".", 1)[-1]
+    guessed = _TEXT_RESPONSE_MIME_BY_EXT.get(ext)
+    if guessed:
+        return f"{guessed}; charset=utf-8"
+    return None
 
 
 def _build_bucket_cors_rules() -> list[dict]:
@@ -136,6 +177,7 @@ def generate_presigned_get_url(
     bucket: str,
     expires_in: int = 3600,
     filename: str | None = None,
+    content_type: str | None = None,
     inline: bool = False,
 ) -> str:
     ensure_bucket()
@@ -145,6 +187,9 @@ def generate_presigned_get_url(
         params["ResponseContentDisposition"] = (
             content_disposition_inline(filename) if inline else content_disposition_attachment(filename)
         )
+    response_content_type = _guess_text_response_content_type(content_type=content_type, filename=filename)
+    if response_content_type:
+        params["ResponseContentType"] = response_content_type
     return s3.generate_presigned_url(
         "get_object",
         Params=params,

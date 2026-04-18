@@ -2,10 +2,12 @@
 
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 
 from src.common.enums import NotificationStatus, NotificationType
+from src.config import settings
 from src.infrastructure.celery_app import celery
 from src.infrastructure.celery_base import BaseTaskWithRetry
 from src.infrastructure.database_sync import sync_session_factory
@@ -20,6 +22,14 @@ from src.modules.schedule.reminders import (
     normalize_simple_recurrence,
     prune_recurrence_markers,
 )
+
+
+def _display_timezone() -> ZoneInfo:
+    tz_name = (settings.APP_TIMEZONE or "").strip() or "Europe/Moscow"
+    try:
+        return ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("Europe/Moscow")
 
 
 @celery.task(name="dispatch_schedule_reminders", bind=True, base=BaseTaskWithRetry)
@@ -185,8 +195,9 @@ def _queue_schedule_reminder_email(
     if occurrence_end and occurrence_end.tzinfo is None:
         occurrence_end = occurrence_end.replace(tzinfo=UTC)
 
-    when_text = occurrence_start.astimezone(UTC).strftime("%d.%m.%Y %H:%M UTC")
-    end_text = occurrence_end.astimezone(UTC).strftime("%d.%m.%Y %H:%M UTC") if occurrence_end else "не указано"
+    display_tz = _display_timezone()
+    when_text = occurrence_start.astimezone(display_tz).strftime("%d.%m.%Y %H:%M %Z")
+    end_text = occurrence_end.astimezone(display_tz).strftime("%d.%m.%Y %H:%M %Z") if occurrence_end else "не указано"
     description = (event.description or "").strip() or "не указано"
     reminder_text = _build_reminder_text(offset_minutes)
     body = (

@@ -2,10 +2,12 @@
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.enums import NotificationStatus, NotificationType, UserRole
+from src.config import settings
 from src.modules.notifications.models import Notification
 from src.modules.notifications.public_api import queue_email_notification
 from src.modules.schedule.errors import ScheduleModuleError
@@ -18,6 +20,14 @@ from src.modules.schedule.reminders import (
 )
 from src.modules.schedule.repository import ScheduleRepository
 from src.modules.schedule.schemas import CreateEventRequest, UpdateEventRequest
+
+
+def _display_timezone() -> ZoneInfo:
+    tz_name = (settings.APP_TIMEZONE or "").strip() or "Europe/Moscow"
+    try:
+        return ZoneInfo(tz_name)
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("Europe/Moscow")
 
 
 class ScheduleServiceError(ScheduleModuleError):
@@ -393,8 +403,13 @@ class ScheduleService:
         if occurrence_end and occurrence_end.tzinfo is None:
             occurrence_end = occurrence_end.replace(tzinfo=UTC)
 
-        when_text = occurrence_start.astimezone(UTC).strftime("%d.%m.%Y %H:%M UTC")
-        end_text = occurrence_end.astimezone(UTC).strftime("%d.%m.%Y %H:%M UTC") if occurrence_end else "не указано"
+        display_tz = _display_timezone()
+        when_text = occurrence_start.astimezone(display_tz).strftime("%d.%m.%Y %H:%M %Z")
+        end_text = (
+            occurrence_end.astimezone(display_tz).strftime("%d.%m.%Y %H:%M %Z")
+            if occurrence_end
+            else "не указано"
+        )
         description = (event.description or "").strip() or "не указано"
         reminder_text = self._build_reminder_text(offset_minutes)
         body = (

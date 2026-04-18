@@ -20,6 +20,7 @@ def send_smtp_email(
     to_email: str,
     subject: str,
     body_text: str,
+    body_html: str | None = None,
     use_tls: bool = True,
     timeout_s: float = 10.0,
 ) -> None:
@@ -40,6 +41,8 @@ def send_smtp_email(
     msg["From"] = f"{from_name} <{from_email}>" if from_name else from_email
     msg["To"] = to_email
     msg.set_content(body_text or "")
+    if body_html:
+        msg.add_alternative(body_html, subtype="html")
 
     try:
         with smtplib.SMTP(host=host, port=int(port), timeout=float(timeout_s)) as smtp:

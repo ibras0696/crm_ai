@@ -87,6 +87,36 @@ def test_send_email_notification_retries_on_transport_error(monkeypatch):
     assert calls["retry"] == 1
 
 
+def test_send_email_notification_renders_html_body(monkeypatch):
+    captured: dict[str, str] = {}
+
+    class _Task:
+        class MaxRetriesExceededError(Exception):
+            pass
+
+        def retry(self, exc=None):
+            _ = exc
+            return
+
+    def _mock_send_smtp_email(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(tasks, "send_smtp_email", _mock_send_smtp_email)
+
+    result = tasks._send_email_notification_impl(
+        _Task(),
+        to_email="user@example.com",
+        subject="Hello",
+        body="Line 1\nLine 2",
+        kind="generic",
+    )
+
+    assert result["status"] == "sent"
+    assert "body_html" in captured
+    assert "<html" in str(captured["body_html"]).lower()
+    assert "Line 1" in str(captured["body_html"])
+
+
 def test_send_email_notification_does_not_retry_on_permanent_config_error(monkeypatch):
     calls = {"retry": 0}
 

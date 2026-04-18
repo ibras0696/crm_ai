@@ -2,6 +2,7 @@ import { ArrowDown, Camera, ChevronLeft, ChevronRight, Image, Loader2, MessageSq
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { linkifyTextToNodes } from '@/lib/linkify'
 import {
   AttachmentPreview,
   CHAT_ATTACHMENT_MAX_MB,
@@ -348,7 +349,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                                       own ? 'text-right' : 'text-left'
                                     }`}
                                   >
-                                    {message.body}
+                                    {linkifyTextToNodes(message.body)}
                                   </div>
                                 )}
                                 {expandable && (

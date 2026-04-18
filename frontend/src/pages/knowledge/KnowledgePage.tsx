@@ -2,6 +2,7 @@
 import { isAxiosError } from 'axios'
 import EmojiPicker, { Theme } from 'emoji-picker-react'
 import { knowledgeApi, type KBPageInfo } from '@/lib/api'
+import { linkifyHtmlContent } from '@/lib/linkify'
 import { cn } from '@/lib/utils'
 import { Plus, Trash2, ChevronRight, ChevronDown, FileText, FolderOpen, X, Save, Edit3, Search, Bold, Italic, Code, Heading1, Heading2, Heading3, List, ListOrdered, Link, Quote, Minus, Eye, EyeOff, PanelLeftClose, PanelLeftOpen, Smile } from 'lucide-react'
 
@@ -661,7 +662,8 @@ function renderMarkdown(md: string): string {
     .replace(/\n\n/g, '</p><p class="my-2">')
     // single newline → br
     .replace(/\n/g, '<br />')
-  return '<p class="my-2">' + html + '</p>'
+  const baseHtml = '<p class="my-2">' + html + '</p>'
+  return linkifyHtmlContent(baseHtml)
 }
 
 /* ─── KBEditor component ─── */

@@ -12,6 +12,7 @@ from src.infrastructure.database_sync import sync_session_factory
 from src.infrastructure.email import EmailSendError, send_smtp_email
 from src.infrastructure.metrics_custom import INVITE_EMAIL_VALIDATION_TOTAL, NOTIFICATION_EMAIL_SEND_TOTAL
 from src.modules.auth.models import User
+from src.modules.notifications.email_templates import render_notification_email_html
 from src.modules.org.models import Invite, Membership
 
 
@@ -78,6 +79,7 @@ def _send_email_notification_impl(
         return {"status": "disabled", "to": to_email}
 
     try:
+        html_body = render_notification_email_html(subject=subject, body_text=body, kind=kind)
         send_smtp_email(
             host=settings.SMTP_HOST,
             port=int(settings.SMTP_PORT),
@@ -88,6 +90,7 @@ def _send_email_notification_impl(
             to_email=to_email,
             subject=subject,
             body_text=body,
+            body_html=html_body,
             use_tls=bool(settings.SMTP_TLS),
             timeout_s=float(settings.SMTP_TIMEOUT_S),
         )

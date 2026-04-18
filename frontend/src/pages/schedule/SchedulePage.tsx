@@ -1,5 +1,6 @@
 ﻿import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { scheduleApi } from '@/lib/api'
+import { linkifyTextToNodes } from '@/lib/linkify'
 import { useAuth } from '@/contexts/AuthContext'
 import { isAxiosError } from 'axios'
 import { Plus, ChevronLeft, ChevronRight, Check, Trash2, X, Repeat, Clock, Edit3 } from 'lucide-react'
@@ -614,7 +615,11 @@ export default function SchedulePage() {
                   <div className="h-3 w-3 rounded-full mt-1.5 shrink-0" style={{ background: ev.color }} />
                   <div className="flex-1 min-w-0">
                     <p className={`font-medium ${ev.is_done ? 'line-through text-muted-foreground' : ''}`}>{ev.title}</p>
-                    {ev.description && <p className="text-sm text-muted-foreground mt-0.5">{ev.description}</p>}
+                    {ev.description && (
+                      <p className="mt-0.5 text-sm text-muted-foreground">
+                        {linkifyTextToNodes(ev.description)}
+                      </p>
+                    )}
                     <div className="flex items-center gap-3 mt-1">
                       {!ev.all_day && <span className="text-xs text-muted-foreground">{new Date(ev.start_at).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}{ev.end_at ? ` — ${new Date(ev.end_at).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}` : ''}</span>}
                       {ev.recurrence && <span className="text-xs text-muted-foreground flex items-center gap-0.5"><Repeat className="h-3 w-3" /> {RECURRENCE.find(r => r.value === ev.recurrence)?.label}</span>}

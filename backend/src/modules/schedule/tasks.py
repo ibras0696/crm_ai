@@ -12,6 +12,7 @@ from src.infrastructure.celery_app import celery
 from src.infrastructure.celery_base import BaseTaskWithRetry
 from src.infrastructure.database_sync import sync_session_factory
 from src.modules.auth.models import User
+from src.modules.notifications.email_content import compose_schedule_reminder_email
 from src.modules.notifications.models import Notification
 from src.modules.notifications.public_api import queue_email_notification
 from src.modules.org.models import Membership
@@ -57,7 +58,7 @@ def dispatch_schedule_reminders(self) -> dict:
             participants = event.participant_ids
             if not participants:
                 continue
-            participant_contacts = _list_participant_emails(
+            participant_contacts = _list_participant_contacts(
                 session=session,
                 org_id=event.org_id,
                 participant_ids=participants,
@@ -102,11 +103,12 @@ def dispatch_schedule_reminders(self) -> dict:
                                 )
                                 created_notifications += 1
                                 _queue_schedule_reminder_email(
-                                    to_email=participant_contacts.get(UUID(str(user_id))) or "",
+                                    to_email=(participant_contacts.get(UUID(str(user_id))) or ("", "ru"))[0],
                                     event=event,
                                     occurrence_start=occurrence_start,
                                     occurrence_end=occurrence_end,
                                     offset_minutes=minutes,
+                                    locale=(participant_contacts.get(UUID(str(user_id))) or ("", "ru"))[1],
                                 )
                             recurring_markers.add(marker)
                 event.set_meta_fields(recurring_reminder_markers=prune_recurrence_markers(recurring_markers, now=now))
@@ -140,11 +142,12 @@ def dispatch_schedule_reminders(self) -> dict:
                         )
                         created_notifications += 1
                         _queue_schedule_reminder_email(
-                            to_email=participant_contacts.get(UUID(str(user_id))) or "",
+                            to_email=(participant_contacts.get(UUID(str(user_id))) or ("", "ru"))[0],
                             event=event,
                             occurrence_start=event.start_at,
                             occurrence_end=event.end_at,
                             offset_minutes=minutes,
+                            locale=(participant_contacts.get(UUID(str(user_id))) or ("", "ru"))[1],
                         )
                     sent_offsets.add(minutes)
                     event.set_meta_fields(reminder_sent_offsets_minutes=sorted(sent_offsets))
@@ -164,11 +167,11 @@ def _build_reminder_text(offset_minutes: int) -> str:
     return f"Напоминание: событие начнется через {offset_minutes} мин."
 
 
-def _list_participant_emails(*, session, org_id: UUID, participant_ids: list[UUID]) -> dict[UUID, str]:
+def _list_participant_contacts(*, session, org_id: UUID, participant_ids: list[UUID]) -> dict[UUID, tuple[str, str]]:
     if not participant_ids:
         return {}
     stmt = (
-        select(User.id, User.email)
+        select(User.id, User.email, User.locale)
         .join(Membership, Membership.user_id == User.id)
         .where(
             Membership.org_id == org_id,
@@ -177,7 +180,7 @@ def _list_participant_emails(*, session, org_id: UUID, participant_ids: list[UUI
         )
     )
     rows = session.execute(stmt).all()
-    return dict(rows)
+    return {user_id: (str(email or "").strip(), str(locale or "ru")) for user_id, email, locale in rows}
 
 
 def _queue_schedule_reminder_email(
@@ -187,6 +190,7 @@ def _queue_schedule_reminder_email(
     occurrence_start: datetime,
     occurrence_end: datetime | None,
     offset_minutes: int,
+    locale: str | None,
 ) -> None:
     if not to_email:
         return
@@ -196,20 +200,19 @@ def _queue_schedule_reminder_email(
         occurrence_end = occurrence_end.replace(tzinfo=UTC)
 
     display_tz = _display_timezone()
-    when_text = occurrence_start.astimezone(display_tz).strftime("%d.%m.%Y %H:%M %Z")
-    end_text = occurrence_end.astimezone(display_tz).strftime("%d.%m.%Y %H:%M %Z") if occurrence_end else "не указано"
-    description = (event.description or "").strip() or "не указано"
-    reminder_text = _build_reminder_text(offset_minutes)
-    body = (
-        f"{reminder_text}\n\n"
-        f"Событие: {event.title}\n"
-        f"Начало: {when_text}\n"
-        f"Окончание: {end_text}\n"
-        f"Описание: {description}\n"
+    subject, body = compose_schedule_reminder_email(
+        event_title=event.title,
+        event_description=event.description,
+        occurrence_start=occurrence_start,
+        occurrence_end=occurrence_end,
+        offset_minutes=offset_minutes,
+        display_tz=display_tz,
+        locale=locale,
     )
     queue_email_notification(
         to_email=to_email,
-        subject=f"Напоминание о событии: {event.title}",
+        subject=subject,
         body=body,
         kind="schedule_reminder",
+        locale=locale,
     )

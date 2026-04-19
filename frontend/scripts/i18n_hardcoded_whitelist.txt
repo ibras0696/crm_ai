@@ -1,0 +1,14 @@
+# Temporary i18n debt whitelist for Sprint 5 rollout.
+# Keep this list shrinking: move strings to i18n resources and remove entries.
+src/components/editors/docx/SimpleWordEditor.tsx
+src/components/superadmin/tables/View.tsx
+src/pages/ai/AIPage.tsx
+src/pages/chat/ChatPage.tsx
+src/pages/chat/chatHelpers.tsx
+src/pages/docs/DocsPage.tsx
+src/pages/docs/DocxEditorPanel.tsx
+src/pages/knowledge/KnowledgePage.tsx
+src/pages/reports-v2/ReportsV2Page.tsx
+src/pages/schedule/SchedulePage.tsx
+src/pages/tables/TableDetailPage.tsx
+src/pages/tables/TablesPage.tsx

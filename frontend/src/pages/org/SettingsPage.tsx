@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from 'react'
+﻿import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
@@ -8,15 +8,22 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Building2, User, CreditCard, Globe, Lock, Loader2, Check } from 'lucide-react'
-import api, { orgApi } from '@/lib/api'
+import api, { orgApi, profileApi } from '@/lib/api'
+import { useTranslation } from 'react-i18next'
+import i18n from '@/i18n'
+import type { AppLocale } from '@/lib/i18n'
+import { isI18nEnabled } from '@/lib/featureFlags'
 
 export default function SettingsPage() {
   const { user, org, members, refresh, logout } = useAuth()
+  const { t } = useTranslation(['common', 'settings'])
+  const localeEnabled = isI18nEnabled()
   const navigate = useNavigate()
   const [profileForm, setProfileForm] = useState({
     first_name: user?.first_name ?? '',
     last_name: user?.last_name ?? '',
     timezone: user?.timezone ?? 'UTC',
+    locale: user?.locale ?? 'ru',
   })
   const [orgName, setOrgName] = useState(org?.name ?? '')
   const [profileLoading, setProfileLoading] = useState(false)
@@ -24,6 +31,16 @@ export default function SettingsPage() {
   const [orgLoading, setOrgLoading] = useState(false)
   const [orgSaved, setOrgSaved] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
+
+  useEffect(() => {
+    setProfileForm({
+      first_name: user?.first_name ?? '',
+      last_name: user?.last_name ?? '',
+      timezone: user?.timezone ?? 'UTC',
+      locale: user?.locale ?? 'ru',
+    })
+  }, [user?.first_name, user?.last_name, user?.timezone, user?.locale])
+
   const isOrgOwner = useMemo(() => {
     if (!user) return false
     return members.find((m) => m.user_id === user.id)?.role === 'owner'
@@ -31,26 +48,29 @@ export default function SettingsPage() {
 
   const timezoneOptions = useMemo(() => {
     const base = [
-      { value: 'Europe/Moscow', label: 'Москва (MSK, UTC+3)' },
-      { value: 'Europe/Berlin', label: 'Европа: Берлин (CET/CEST)' },
-      { value: 'Europe/London', label: 'Европа: Лондон (GMT/BST)' },
-      { value: 'Asia/Yekaterinburg', label: 'Екатеринбург (UTC+5)' },
-      { value: 'Asia/Novosibirsk', label: 'Новосибирск (UTC+7)' },
-      { value: 'Asia/Vladivostok', label: 'Владивосток (UTC+10)' },
-      { value: 'Asia/Almaty', label: 'Алматы (UTC+5)' },
-      { value: 'UTC', label: 'UTC (универсальное время)' },
+      { value: 'Europe/Moscow', label: t('settings:timezoneOptions.moscow') },
+      { value: 'Europe/Berlin', label: t('settings:timezoneOptions.berlin') },
+      { value: 'Europe/London', label: t('settings:timezoneOptions.london') },
+      { value: 'Asia/Yekaterinburg', label: t('settings:timezoneOptions.yekaterinburg') },
+      { value: 'Asia/Novosibirsk', label: t('settings:timezoneOptions.novosibirsk') },
+      { value: 'Asia/Vladivostok', label: t('settings:timezoneOptions.vladivostok') },
+      { value: 'Asia/Almaty', label: t('settings:timezoneOptions.almaty') },
+      { value: 'UTC', label: t('settings:timezoneOptions.utc') },
     ]
     const current = (profileForm.timezone || '').trim()
     if (current && !base.some((tz) => tz.value === current)) {
-      return [{ value: current, label: `Текущий: ${current}` }, ...base]
+      return [{ value: current, label: t('settings:timezoneOptions.current', { value: current }) }, ...base]
     }
     return base
-  }, [profileForm.timezone])
+  }, [profileForm.timezone, t])
 
   const saveProfile = async () => {
     setProfileLoading(true)
     try {
-      await api.patch('/auth/me', profileForm)
+      await profileApi.update(profileForm)
+      if (localeEnabled) {
+        await i18n.changeLanguage(profileForm.locale as AppLocale)
+      }
       await refresh()
       setProfileSaved(true)
       setTimeout(() => setProfileSaved(false), 2000)
@@ -77,11 +97,11 @@ export default function SettingsPage() {
 
   const deleteOrg = async () => {
     if (!isOrgOwner) {
-      window.alert('Удалить организацию может только владелец.')
+      window.alert(t('settings:dialogs.deleteOrgOwnerOnly'))
       return
     }
     if (!org) return
-    const confirmed = window.confirm(`Удалить организацию "${org.name}"? Это действие необратимо.`)
+    const confirmed = window.confirm(t('settings:dialogs.deleteOrgConfirm', { name: org.name }))
     if (!confirmed) return
 
     setDeleteLoading(true)
@@ -90,7 +110,7 @@ export default function SettingsPage() {
       logout()
       navigate('/login')
     } catch {
-      window.alert('Не удалось удалить организацию. Проверьте права и попробуйте снова.')
+      window.alert(t('settings:dialogs.deleteOrgFailed'))
     } finally {
       setDeleteLoading(false)
     }
@@ -99,8 +119,8 @@ export default function SettingsPage() {
   return (
     <div className="space-y-8 max-w-3xl">
       <div>
-        <h1 className="text-2xl font-bold tracking-tight">Настройки</h1>
-        <p className="text-muted-foreground mt-1">Управление аккаунтом и организацией</p>
+        <h1 className="text-2xl font-bold tracking-tight">{t('settings:title')}</h1>
+        <p className="text-muted-foreground mt-1">{t('settings:subtitle')}</p>
       </div>
 
       <Card className="border-border/50">
@@ -110,15 +130,15 @@ export default function SettingsPage() {
               <User className="h-5 w-5 text-blue-400" />
             </div>
             <div>
-              <CardTitle className="text-lg">Профиль</CardTitle>
-              <CardDescription>Ваши личные данные</CardDescription>
+              <CardTitle className="text-lg">{t('settings:profile.title')}</CardTitle>
+              <CardDescription>{t('settings:profile.description')}</CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Имя</Label>
+              <Label>{t('settings:fields.firstName')}</Label>
               <Input
                 value={profileForm.first_name}
                 onChange={(e) => setProfileForm((p) => ({ ...p, first_name: e.target.value }))}
@@ -126,7 +146,7 @@ export default function SettingsPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Фамилия</Label>
+              <Label>{t('settings:fields.lastName')}</Label>
               <Input
                 value={profileForm.last_name}
                 onChange={(e) => setProfileForm((p) => ({ ...p, last_name: e.target.value }))}
@@ -135,12 +155,12 @@ export default function SettingsPage() {
             </div>
           </div>
           <div className="space-y-2">
-            <Label>Эл. почта</Label>
+            <Label>{t('settings:fields.email')}</Label>
             <Input defaultValue={user?.email} disabled className="bg-secondary/30 opacity-60" />
-            <p className="text-xs text-muted-foreground">Эл. почту нельзя изменить</p>
+            <p className="text-xs text-muted-foreground">{t('settings:hints.emailReadonly')}</p>
           </div>
           <div className="space-y-2">
-            <Label>Часовой пояс</Label>
+            <Label>{t('settings:fields.timezone')}</Label>
             <select
               value={profileForm.timezone}
               onChange={(e) => setProfileForm((p) => ({ ...p, timezone: e.target.value }))}
@@ -152,11 +172,24 @@ export default function SettingsPage() {
                 </option>
               ))}
             </select>
-            <p className="text-xs text-muted-foreground">Рекомендуем для России: Москва (MSK, UTC+3)</p>
+            <p className="text-xs text-muted-foreground">{t('settings:hints.timezone')}</p>
           </div>
+          {localeEnabled && (
+            <div className="space-y-2">
+              <Label>{t('settings:fields.locale')}</Label>
+              <select
+                value={profileForm.locale}
+                onChange={(e) => setProfileForm((p) => ({ ...p, locale: e.target.value as 'ru' | 'en' }))}
+                className="flex h-10 w-full rounded-md border border-input bg-secondary/50 px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="ru">{t('common:language.russian')}</option>
+                <option value="en">{t('common:language.english')}</option>
+              </select>
+            </div>
+          )}
           <Button className="gradient-primary border-0 text-white" onClick={saveProfile} disabled={profileLoading}>
             {profileLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : profileSaved ? <Check className="h-4 w-4 mr-2" /> : null}
-            {profileSaved ? 'Сохранено' : 'Сохранить'}
+            {profileSaved ? t('settings:actions.saved') : t('settings:actions.save')}
           </Button>
         </CardContent>
       </Card>
@@ -168,23 +201,23 @@ export default function SettingsPage() {
               <Building2 className="h-5 w-5 text-purple-400" />
             </div>
             <div>
-              <CardTitle className="text-lg">Организация</CardTitle>
-              <CardDescription>Настройки организации</CardDescription>
+              <CardTitle className="text-lg">{t('settings:organization.title')}</CardTitle>
+              <CardDescription>{t('settings:organization.description')}</CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label>Название организации</Label>
+            <Label>{t('settings:organization.name')}</Label>
             <Input value={orgName} onChange={(e) => setOrgName(e.target.value)} className="bg-secondary/50" />
           </div>
           <div className="space-y-2">
-            <Label>Слаг</Label>
+            <Label>{t('settings:organization.slug')}</Label>
             <Input defaultValue={org?.slug} disabled className="bg-secondary/30 opacity-60 font-mono text-sm" />
           </div>
           <Button className="gradient-primary border-0 text-white" onClick={saveOrg} disabled={orgLoading}>
             {orgLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : orgSaved ? <Check className="h-4 w-4 mr-2" /> : null}
-            {orgSaved ? 'Сохранено' : 'Обновить'}
+            {orgSaved ? t('settings:actions.saved') : t('settings:organization.update')}
           </Button>
         </CardContent>
       </Card>
@@ -197,8 +230,8 @@ export default function SettingsPage() {
                 <CreditCard className="h-5 w-5 text-emerald-400" />
               </div>
               <div>
-                <CardTitle className="text-lg">Биллинг и план</CardTitle>
-                <CardDescription>Управление подпиской</CardDescription>
+                <CardTitle className="text-lg">{t('settings:billing.title')}</CardTitle>
+                <CardDescription>{t('settings:billing.description')}</CardDescription>
               </div>
             </div>
             <Badge variant={org?.plan === 'free' ? 'secondary' : 'default'} className="uppercase text-xs">
@@ -210,20 +243,23 @@ export default function SettingsPage() {
           <div className="rounded-xl border border-border/50 bg-secondary/20 p-6 space-y-4">
             <div className="flex items-center justify-between">
               <div>
-                <p className="font-semibold">Бесплатный план</p>
-                <p className="text-sm text-muted-foreground">Базовые функции для небольших команд</p>
+                <p className="font-semibold">{t('settings:billing.freePlan')}</p>
+                <p className="text-sm text-muted-foreground">{t('settings:billing.freePlanDetails')}</p>
               </div>
-              <p className="text-2xl font-bold">0 ₽<span className="text-sm font-normal text-muted-foreground">/мес</span></p>
+              <p className="text-2xl font-bold">
+                0 ₽
+                <span className="text-sm font-normal text-muted-foreground">{t('settings:billing.perMonth')}</span>
+              </p>
             </div>
             <Separator className="bg-border/50" />
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Globe className="h-4 w-4" />
-                <span>До 10 участников</span>
+                <span>{t('settings:billing.usersLimit')}</span>
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Lock className="h-4 w-4" />
-                <span>Базовый RBAC</span>
+                <span>{t('settings:billing.rbacBasic')}</span>
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -231,10 +267,10 @@ export default function SettingsPage() {
                 className="gradient-primary border-0 text-white flex-1"
                 onClick={() => navigate('/billing')}
               >
-                Открыть биллинг
+                {t('settings:billing.openBilling')}
               </Button>
               <Badge variant="secondary" className="text-xs">
-                Team скоро
+                {t('settings:billing.teamSoon')}
               </Badge>
             </div>
           </div>
@@ -243,21 +279,21 @@ export default function SettingsPage() {
 
       <Card className="border-destructive/20">
         <CardHeader>
-          <CardTitle className="text-lg text-destructive">Опасная зона</CardTitle>
-          <CardDescription>Необратимые действия</CardDescription>
+          <CardTitle className="text-lg text-destructive">{t('settings:dangerZone.title')}</CardTitle>
+          <CardDescription>{t('settings:dangerZone.description')}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center justify-between rounded-lg border border-destructive/20 p-4">
             <div>
-              <p className="text-sm font-medium">Удалить организацию</p>
-              <p className="text-xs text-muted-foreground">Безвозвратно удалить организацию и все ее данные</p>
+              <p className="text-sm font-medium">{t('settings:dangerZone.deleteOrgTitle')}</p>
+              <p className="text-xs text-muted-foreground">{t('settings:dangerZone.deleteOrgDescription')}</p>
             </div>
             {isOrgOwner ? (
               <Button variant="destructive" size="sm" onClick={deleteOrg} disabled={deleteLoading}>
-                {deleteLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Удалить'}
+                {deleteLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : t('settings:dangerZone.delete')}
               </Button>
             ) : (
-              <Badge variant="secondary" className="text-xs">Только владелец</Badge>
+              <Badge variant="secondary" className="text-xs">{t('settings:dangerZone.ownerOnly')}</Badge>
             )}
           </div>
         </CardContent>

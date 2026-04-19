@@ -12,6 +12,7 @@ from src.infrastructure.database_sync import sync_session_factory
 from src.infrastructure.email import EmailSendError, send_smtp_email
 from src.infrastructure.metrics_custom import INVITE_EMAIL_VALIDATION_TOTAL, NOTIFICATION_EMAIL_SEND_TOTAL
 from src.modules.auth.models import User
+from src.modules.notifications.email_content import compose_invite_email, compose_password_reset_email
 from src.modules.notifications.email_templates import render_notification_email_html
 from src.modules.org.models import Invite, Membership
 
@@ -71,6 +72,7 @@ def _send_email_notification_impl(
     subject: str,
     body: str,
     kind: str,
+    locale: str | None = None,
 ) -> dict:
     logger = logging.getLogger("notifications")
     if not settings.ENABLE_EMAIL:
@@ -79,7 +81,7 @@ def _send_email_notification_impl(
         return {"status": "disabled", "to": to_email}
 
     try:
-        html_body = render_notification_email_html(subject=subject, body_text=body, kind=kind)
+        html_body = render_notification_email_html(subject=subject, body_text=body, kind=kind, locale=locale)
         send_smtp_email(
             host=settings.SMTP_HOST,
             port=int(settings.SMTP_PORT),
@@ -124,7 +126,14 @@ def _send_email_notification_impl(
     retry_backoff=True,
     retry_jitter=True,
 )
-def send_email_notification(self, to_email: str, subject: str, body: str, kind: str = "generic") -> dict:
+def send_email_notification(
+    self,
+    to_email: str,
+    subject: str,
+    body: str,
+    kind: str = "generic",
+    locale: str | None = None,
+) -> dict:
     """Send email notification via SMTP."""
     return _send_email_notification_impl(
         self,
@@ -132,6 +141,7 @@ def send_email_notification(self, to_email: str, subject: str, body: str, kind: 
         subject=subject,
         body=body,
         kind=kind,
+        locale=locale,
     )
 
 
@@ -143,7 +153,14 @@ def send_email_notification(self, to_email: str, subject: str, body: str, kind: 
     retry_backoff=True,
     retry_jitter=True,
 )
-def send_invite_email(self, to_email: str, org_name: str, invite_token: str, invite_url: str | None = None) -> dict:
+def send_invite_email(
+    self,
+    to_email: str,
+    org_name: str,
+    invite_token: str,
+    invite_url: str | None = None,
+    locale: str | None = None,
+) -> dict:
     """Send invite email via SMTP."""
     logger = logging.getLogger("notifications")
     can_send, reason = _can_send_invite_email(to_email=to_email, invite_token=invite_token)
@@ -153,18 +170,14 @@ def send_invite_email(self, to_email: str, org_name: str, invite_token: str, inv
         return {"status": "skipped", "to": to_email, "reason": reason}
 
     url = invite_url or f"{settings.FRONTEND_URL.rstrip('/')}/auth/accept-invite?token={invite_token}"
-    subject = f"Приглашение в организацию: {org_name}"
-    body = (
-        f'Вас пригласили в организацию "{org_name}".\n\n'
-        f"Ссылка для принятия приглашения:\n{url}\n\n"
-        "Если вы не ожидали это письмо, просто проигнорируйте его.\n"
-    )
+    subject, body = compose_invite_email(org_name=org_name, invite_url=url, locale=locale)
     return _send_email_notification_impl(
         self,
         to_email=to_email,
         subject=subject,
         body=body,
         kind="invite",
+        locale=locale,
     )
 
 
@@ -176,19 +189,21 @@ def send_invite_email(self, to_email: str, org_name: str, invite_token: str, inv
     retry_backoff=True,
     retry_jitter=True,
 )
-def send_password_reset_email(self, to_email: str, reset_token: str, reset_url: str | None = None) -> dict:
+def send_password_reset_email(
+    self,
+    to_email: str,
+    reset_token: str,
+    reset_url: str | None = None,
+    locale: str | None = None,
+) -> dict:
     """Send password reset email via SMTP."""
     url = reset_url or f"{settings.FRONTEND_URL.rstrip('/')}/auth/reset-password?token={reset_token}"
-    subject = "Сброс пароля в CRM Платформе"
-    body = (
-        "Вы запросили сброс пароля.\n\n"
-        f"Перейдите по ссылке для создания нового пароля:\n{url}\n\n"
-        "Если вы этого не делали, просто проигнорируйте письмо.\n"
-    )
+    subject, body = compose_password_reset_email(reset_url=url, locale=locale)
     return _send_email_notification_impl(
         self,
         to_email=to_email,
         subject=subject,
         body=body,
         kind="password_reset",
+        locale=locale,
     )

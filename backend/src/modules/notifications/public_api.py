@@ -24,6 +24,7 @@ def queue_email_notification(
     subject: str,
     body: str,
     kind: str = "generic",
+    locale: str | None = None,
 ) -> NotificationEnqueueResult:
     try:
         notification_tasks_module.send_email_notification.delay(
@@ -31,6 +32,7 @@ def queue_email_notification(
             subject=subject,
             body=body,
             kind=kind,
+            locale=locale,
         )
         return NotificationEnqueueResult(queued=True, kind=kind, to_email=to_email, reason="queued")
     except (KombuError, OperationalError, OSError):
@@ -44,10 +46,17 @@ def queue_invite_email(
     org_name: str,
     invite_token: str,
     invite_url: str | None = None,
+    locale: str | None = None,
 ) -> NotificationEnqueueResult:
     kind = "invite"
     try:
-        notification_tasks_module.send_invite_email.delay(to_email, org_name, invite_token, invite_url)
+        notification_tasks_module.send_invite_email.delay(
+            to_email=to_email,
+            org_name=org_name,
+            invite_token=invite_token,
+            invite_url=invite_url,
+            locale=locale,
+        )
         return NotificationEnqueueResult(queued=True, kind=kind, to_email=to_email, reason="queued")
     except (KombuError, OperationalError, OSError):
         logger.exception("notification_enqueue_failed", extra={"kind": kind, "to_email": to_email})
@@ -59,6 +68,7 @@ def queue_password_reset_email(
     to_email: str,
     reset_token: str,
     reset_url: str | None = None,
+    locale: str | None = None,
 ) -> NotificationEnqueueResult:
     kind = "password_reset"
     try:
@@ -66,6 +76,7 @@ def queue_password_reset_email(
             to_email=to_email,
             reset_token=reset_token,
             reset_url=reset_url,
+            locale=locale,
         )
         return NotificationEnqueueResult(queued=True, kind=kind, to_email=to_email, reason="queued")
     except (KombuError, OperationalError, OSError):

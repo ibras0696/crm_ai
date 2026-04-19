@@ -24,6 +24,7 @@ from src.modules.billing.token_wallet import (
 )
 from src.modules.billing.token_wallet_repository import TokenWalletRepository
 from src.modules.files import storage
+from src.modules.notifications.email_content import compose_billing_lifecycle_email
 from src.modules.notifications.public_api import queue_email_notification
 
 logger = logging.getLogger(__name__)
@@ -635,17 +636,26 @@ class BillingService:
         recipients = await repo.get_notification_recipients_with_email(org_id=org_id)
         created = await repo.create_in_app_notifications(
             org_id=org_id,
-            user_ids=[user_id for user_id, _email in recipients],
+            user_ids=[user_id for user_id, _email, _locale in recipients],
             title=title,
             body=body,
             meta=meta,
         )
-        for _user_id, email in recipients:
+        for _user_id, email, locale in recipients:
+            email_subject, email_body = compose_billing_lifecycle_email(
+                notice_kind=str(meta.get("kind") or ""),
+                grace_days=int(settings.BILLING_GRACE_DAYS),
+                days_left=(int(meta["days_left"]) if "days_left" in meta and meta["days_left"] is not None else None),
+                locale=locale,
+                fallback_title=title,
+                fallback_body=body,
+            )
             queue_email_notification(
                 to_email=email,
-                subject=title,
-                body=body,
-                kind="billing_lifecycle",
+                subject=email_subject,
+                body=email_body,
+                kind="billing",
+                locale=locale,
             )
         return created
 

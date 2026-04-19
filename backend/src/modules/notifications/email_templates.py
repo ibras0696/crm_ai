@@ -4,6 +4,7 @@ import re
 from html import escape
 
 from src.config import settings
+from src.modules.auth.services.locale import normalize_locale
 
 _URL_RE = re.compile(r"(https?://[^\s<]+)", re.IGNORECASE)
 
@@ -12,21 +13,59 @@ _KIND_ACCENT = {
     "invite": "#7C3AED",
     "password_reset": "#DC2626",
     "registration_confirm": "#0EA5E9",
+    "billing": "#0D9488",
     "billing_lifecycle": "#0D9488",
 }
 
-_KIND_CTA_LABEL = {
-    "invite": "Принять приглашение",
-    "password_reset": "Сбросить пароль",
-    "registration_confirm": "Подтвердить регистрацию",
+_KIND_ALIASES = {
+    "billing_lifecycle": "billing",
 }
 
-_KIND_LABEL = {
-    "schedule_reminder": "Напоминание",
-    "invite": "Приглашение",
-    "password_reset": "Безопасность",
-    "registration_confirm": "Регистрация",
-    "billing_lifecycle": "Биллинг",
+_I18N = {
+    "ru": {
+        "lang": "ru",
+        "preheader": "Уведомление CRM Platform",
+        "kind_label": {
+            "schedule_reminder": "Напоминание",
+            "invite": "Приглашение",
+            "password_reset": "Безопасность",
+            "registration_confirm": "Регистрация",
+            "billing": "Биллинг",
+            "generic": "Уведомление",
+        },
+        "cta_label": {
+            "invite": "Принять приглашение",
+            "password_reset": "Сбросить пароль",
+            "registration_confirm": "Подтвердить регистрацию",
+            "billing": "Открыть биллинг",
+            "generic": "Открыть CRM Platform",
+        },
+        "fallback_link": "Если кнопка не работает, откройте ссылку:",
+        "security_note": "Если вы не выполняли это действие, проверьте активные сессии и смените пароль.",
+        "auto_note": "Это автоматическое уведомление CRM Platform. Пожалуйста, не отвечайте на это письмо.",
+    },
+    "en": {
+        "lang": "en",
+        "preheader": "CRM Platform notification",
+        "kind_label": {
+            "schedule_reminder": "Reminder",
+            "invite": "Invitation",
+            "password_reset": "Security",
+            "registration_confirm": "Registration",
+            "billing": "Billing",
+            "generic": "Notification",
+        },
+        "cta_label": {
+            "invite": "Accept invitation",
+            "password_reset": "Reset password",
+            "registration_confirm": "Confirm registration",
+            "billing": "Open billing",
+            "generic": "Open CRM Platform",
+        },
+        "fallback_link": "If the button does not work, open this link:",
+        "security_note": "If you did not perform this action, review active sessions and change your password.",
+        "auto_note": "This is an automated CRM Platform email. Please do not reply.",
+    },
 }
 
 
@@ -84,15 +123,24 @@ def _render_body_blocks(body_text: str) -> str:
     return "".join(rendered)
 
 
-def render_notification_email_html(*, subject: str, body_text: str, kind: str = "generic") -> str:
-    accent = _KIND_ACCENT.get(kind, "#2563EB")
+def render_notification_email_html(
+    *,
+    subject: str,
+    body_text: str,
+    kind: str = "generic",
+    locale: str | None = None,
+) -> str:
+    normalized_locale = normalize_locale(locale)
+    i18n = _I18N["en"] if normalized_locale == "en" else _I18N["ru"]
+    kind_key = _KIND_ALIASES.get(kind, kind)
+    accent = _KIND_ACCENT.get(kind_key, "#2563EB")
     preheader = (body_text or "").strip().replace("\n", " ")
-    preheader = preheader[:140] if preheader else "Уведомление CRM Platform"
+    preheader = preheader[:140] if preheader else i18n["preheader"]
     app_name = settings.APP_NAME or "CRM Platform"
-    kind_label = _KIND_LABEL.get(kind, "Уведомление")
+    kind_label = i18n["kind_label"].get(kind_key, i18n["kind_label"]["generic"])
 
     first_url = _extract_first_url(body_text)
-    cta_label = _KIND_CTA_LABEL.get(kind, "Открыть CRM Platform")
+    cta_label = i18n["cta_label"].get(kind_key, i18n["cta_label"]["generic"])
     cta_url = first_url or settings.FRONTEND_URL
 
     cta_html = ""
@@ -107,7 +155,7 @@ def render_notification_email_html(*, subject: str, body_text: str, kind: str = 
             'box-shadow:0 10px 24px rgba(37,99,235,0.30);">'
             f"{escape(cta_label)}</a></td></tr>"
             '<tr><td style="padding:0 32px 8px;color:#64748B;font-size:12px;line-height:1.5;">'
-            f'Если кнопка не работает, откройте ссылку: <a href="{safe_url}" '
+            f'{escape(i18n["fallback_link"])} <a href="{safe_url}" '
             'style="color:#2563EB;text-decoration:none;word-break:break-all;">'
             f"{safe_url}</a></td></tr>"
         )
@@ -115,7 +163,7 @@ def render_notification_email_html(*, subject: str, body_text: str, kind: str = 
     body_blocks_html = _render_body_blocks(body_text)
 
     return (
-        "<!doctype html><html lang=\"ru\"><head><meta charset=\"UTF-8\" />"
+        f'<!doctype html><html lang="{escape(i18n["lang"])}"><head><meta charset="UTF-8" />'
         "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\" />"
         "<title>CRM Platform</title>"
         "</head>"
@@ -162,10 +210,10 @@ def render_notification_email_html(*, subject: str, body_text: str, kind: str = 
         "</td></tr>"
         f"{cta_html}"
         '<tr><td style="padding:16px 32px 8px;color:#64748B;font-size:12px;line-height:1.6;">'
-        "Если вы не выполняли это действие, проверьте активные сессии и смените пароль."
+        f'{escape(i18n["security_note"])}'
         "</td></tr>"
         '<tr><td style="padding:0 32px 26px;color:#94A3B8;font-size:11px;line-height:1.6;">'
-        "Это автоматическое уведомление CRM Platform. Пожалуйста, не отвечайте на это письмо."
+        f'{escape(i18n["auto_note"])}'
         "</td></tr>"
         "</table>"
         "</td></tr>"

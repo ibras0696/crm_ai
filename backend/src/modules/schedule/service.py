@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.enums import NotificationStatus, NotificationType, UserRole
 from src.config import settings
+from src.modules.notifications.email_content import compose_schedule_reminder_email
 from src.modules.notifications.models import Notification
 from src.modules.notifications.public_api import queue_email_notification
 from src.modules.schedule.errors import ScheduleModuleError
@@ -230,6 +231,7 @@ class ScheduleService:
                                     occurrence_start=occurrence_start,
                                     occurrence_end=occurrence_end,
                                     offset_minutes=offset,
+                                    locale=(participant_contacts.get(user_id) or ("", "", "", "ru"))[3],
                                 )
                             recurring_markers.add(marker)
                 event.set_meta_fields(
@@ -271,6 +273,7 @@ class ScheduleService:
                             occurrence_start=event.start_at,
                             occurrence_end=event.end_at,
                             offset_minutes=offset,
+                            locale=(participant_contacts.get(user_id) or ("", "", "", "ru"))[3],
                         )
                     sent_offsets.add(offset)
                     event.set_meta_fields(reminder_sent_offsets_minutes=sorted(sent_offsets))
@@ -394,6 +397,7 @@ class ScheduleService:
         occurrence_start: datetime,
         occurrence_end: datetime | None,
         offset_minutes: int,
+        locale: str | None,
     ) -> None:
         if not to_email:
             return
@@ -404,24 +408,19 @@ class ScheduleService:
             occurrence_end = occurrence_end.replace(tzinfo=UTC)
 
         display_tz = _display_timezone()
-        when_text = occurrence_start.astimezone(display_tz).strftime("%d.%m.%Y %H:%M %Z")
-        end_text = (
-            occurrence_end.astimezone(display_tz).strftime("%d.%m.%Y %H:%M %Z")
-            if occurrence_end
-            else "не указано"
-        )
-        description = (event.description or "").strip() or "не указано"
-        reminder_text = self._build_reminder_text(offset_minutes)
-        body = (
-            f"{reminder_text}\n\n"
-            f"Событие: {event.title}\n"
-            f"Начало: {when_text}\n"
-            f"Окончание: {end_text}\n"
-            f"Описание: {description}\n"
+        subject, body = compose_schedule_reminder_email(
+            event_title=event.title,
+            event_description=event.description,
+            occurrence_start=occurrence_start,
+            occurrence_end=occurrence_end,
+            offset_minutes=offset_minutes,
+            display_tz=display_tz,
+            locale=locale,
         )
         queue_email_notification(
             to_email=to_email,
-            subject=f"Напоминание о событии: {event.title}",
+            subject=subject,
             body=body,
             kind="schedule_reminder",
+            locale=locale,
         )

@@ -28,6 +28,7 @@ import ChatPage from './pages/chat/ChatPage'
 import AppLayout from './components/layout/AppLayout'
 import { useAuth } from './contexts/AuthContext'
 import { ErrorBoundary } from './components/common/ErrorBoundary'
+import { useTranslation } from 'react-i18next'
 
 function RootRedirect() {
   const { isAuthenticated } = useAuth()
@@ -35,6 +36,8 @@ function RootRedirect() {
 }
 
 export default function App() {
+  const { t } = useTranslation('common')
+
   return (
     <Routes>
       <Route path="/landing" element={<LandingPage />} />
@@ -63,7 +66,7 @@ export default function App() {
         <Route
           path="/reports-v2"
           element={
-            <ErrorBoundary title="Аналитика">
+            <ErrorBoundary title={t('sidebar.modules.analytics')}>
               <ReportsV2Page />
             </ErrorBoundary>
           }
@@ -77,7 +80,7 @@ export default function App() {
       <Route
         path="/superadmin"
         element={
-          <ErrorBoundary title="Суперадмин">
+          <ErrorBoundary title={t('sidebar.modules.admin')}>
             <SuperAdminPage />
           </ErrorBoundary>
         }

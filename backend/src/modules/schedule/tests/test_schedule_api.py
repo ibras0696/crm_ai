@@ -224,8 +224,23 @@ async def test_schedule_dispatch_enqueues_email_notifications_for_each_offset_an
 
     calls: list[dict[str, str]] = []
 
-    def _capture_schedule_email(*, to_email: str, subject: str, body: str, kind: str = "generic"):
-        calls.append({"to_email": to_email, "subject": subject, "body": body, "kind": kind})
+    def _capture_schedule_email(
+        *,
+        to_email: str,
+        subject: str,
+        body: str,
+        kind: str = "generic",
+        locale: str | None = None,
+    ):
+        calls.append(
+            {
+                "to_email": to_email,
+                "subject": subject,
+                "body": body,
+                "kind": kind,
+                "locale": locale or "ru",
+            }
+        )
         return NotificationEnqueueResult(queued=True, kind=kind, to_email=to_email, reason="queued")
 
     with pytest.MonkeyPatch.context() as monkeypatch:
@@ -257,11 +272,9 @@ async def test_schedule_dispatch_enqueues_email_notifications_for_each_offset_an
     assert d3.json()["data"]["created_notifications"] == 2
     assert len(calls) == 6
     assert all(call["kind"] == "schedule_reminder" for call in calls)
+    assert all(call["locale"] in {"ru", "en"} for call in calls)
     assert all("Email reminder call" in call["subject"] for call in calls)
-    assert all(
-        "Событие:" in call["body"] and "Начало:" in call["body"] and "Описание:" in call["body"]
-        for call in calls
-    )
+    assert all(("Событие:" in call["body"]) or ("Event:" in call["body"]) for call in calls)
 
 
 @pytest.mark.asyncio

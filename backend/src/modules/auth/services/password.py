@@ -43,7 +43,7 @@ class AuthPasswordService:
                 logger.exception("Failed to set password reset token in Redis")
                 return
 
-            queue_password_reset_email(to_email=user.email, reset_token=token)
+            queue_password_reset_email(to_email=user.email, reset_token=token, locale=getattr(user, "locale", None))
 
     async def reset_password(self, token: str, new_password: str) -> bool:
         redis = await redis_client.get()

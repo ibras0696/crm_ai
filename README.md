@@ -34,6 +34,20 @@
 - `secrets.yml` нужен только для локального dev
 - production secrets должны идти через env или `*_FILE`
 
+## i18n rollout (frontend)
+
+Для безопасного выката RU/EN есть frontend feature-flags:
+
+- `VITE_I18N_ENABLED` - глобальный переключатель (`true/false`, по умолчанию `true`)
+- `VITE_I18N_ROLLOUT_PERCENT` - процент пользователей с включенным i18n (`0..100`, по умолчанию `100`)
+
+Пример:
+
+```bash
+VITE_I18N_ENABLED=true
+VITE_I18N_ROLLOUT_PERCENT=25
+```
+
 Подробности:
 - [docs/README.md](docs/README.md)
 - [docs/config/CONFIG_CONTRACT.md](docs/config/CONFIG_CONTRACT.md)

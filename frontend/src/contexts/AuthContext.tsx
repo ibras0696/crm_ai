@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
 import { authApi, orgApi, type UserInfo, type OrgInfo, type MemberInfo } from '@/lib/api'
 import { isAxiosError } from 'axios'
+import i18n from '@/i18n'
+import { normalizeLocale, persistLocale } from '@/lib/i18n'
 
 export class AuthError extends Error {
   code: string | null
@@ -74,7 +76,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         orgApi.getCurrent(),
         orgApi.getMembers(),
       ])
-      if (u.data.ok) setUser(u.data.data)
+      if (u.data.ok && u.data.data) {
+        setUser(u.data.data)
+        const nextLocale = normalizeLocale(u.data.data.locale)
+        persistLocale(nextLocale)
+        if (i18n.resolvedLanguage !== nextLocale) {
+          void i18n.changeLanguage(nextLocale)
+        }
+      }
       if (o.data.ok) setOrg(o.data.data)
       if (m.data.ok) setMembers(m.data.data ?? [])
     } catch {

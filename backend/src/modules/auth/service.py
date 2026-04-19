@@ -34,20 +34,30 @@ class AuthService:
         self._password = password_service or AuthPasswordService()
 
     async def register(
-        self, data: RegisterRequest, ip_address: str | None = None
+        self,
+        data: RegisterRequest,
+        ip_address: str | None = None,
+        accept_language: str | None = None,
     ) -> tuple[User, Organization, TokenResponse]:
-        return await self._registration.register(data, ip_address=ip_address)
+        return await self._registration.register(data, ip_address=ip_address, accept_language=accept_language)
 
-    async def request_registration_confirmation(self, data: RegisterRequest, ip_address: str | None = None) -> None:
-        await self._registration.request_registration_confirmation(data, ip_address=ip_address)
+    async def request_registration_confirmation(
+        self, data: RegisterRequest, ip_address: str | None = None, accept_language: str | None = None
+    ) -> None:
+        await self._registration.request_registration_confirmation(
+            data, ip_address=ip_address, accept_language=accept_language
+        )
 
     async def confirm_registration(
         self,
         *,
         token: str,
         ip_address: str | None = None,
+        accept_language: str | None = None,
     ) -> tuple[User, Organization, TokenResponse]:
-        return await self._registration.confirm_registration(token=token, ip_address=ip_address)
+        return await self._registration.confirm_registration(
+            token=token, ip_address=ip_address, accept_language=accept_language
+        )
 
     async def login(
         self,

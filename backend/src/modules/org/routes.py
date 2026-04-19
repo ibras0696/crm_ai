@@ -97,12 +97,14 @@ async def create_invite(
 @router.post("/invites/accept", response_model=ApiResponse[dict])
 async def accept_invite(body: AcceptInviteRequest, request: Request):
     ip = request.client.host if request.client else None
-    user, tokens = await _org_service.accept_invite(
+    accept_language = request.headers.get("accept-language")
+    _user, tokens = await _org_service.accept_invite(
         token=body.token,
         password=body.password,
         first_name=body.first_name,
         last_name=body.last_name,
         ip_address=ip,
+        accept_language=accept_language,
     )
     return ApiResponse(data=tokens)
 

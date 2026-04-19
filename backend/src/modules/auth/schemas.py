@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, EmailStr, Field
 
+LocaleCode = Literal["ru", "en"]
+
 
 class RegisterRequest(BaseModel):
     email: EmailStr
@@ -44,6 +46,7 @@ class UpdateMeRequest(BaseModel):
     first_name: str | None = Field(default=None, min_length=1, max_length=100)
     last_name: str | None = Field(default=None, min_length=1, max_length=100)
     timezone: str | None = Field(default=None, min_length=1, max_length=50)
+    locale: LocaleCode | None = None
 
 
 class TokenResponse(BaseModel):
@@ -60,6 +63,7 @@ class UserResponse(BaseModel):
     last_name: str
     is_active: bool
     timezone: str
+    locale: LocaleCode
     created_at: datetime
 
     model_config = {"from_attributes": True}

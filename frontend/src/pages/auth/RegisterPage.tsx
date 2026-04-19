@@ -4,18 +4,19 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useAuth } from '@/contexts/AuthContext'
-import { AuthError } from '@/contexts/AuthContext'
 import { authApi } from '@/lib/api/auth/auth'
 import PasswordInput from '@/components/auth/PasswordInput'
+import AuthLanguageSwitcher from '@/components/auth/AuthLanguageSwitcher'
 import { isAxiosError } from 'axios'
 import { Loader2, ArrowRight, Building2 } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
-const AUTH_ERRORS_RU: Record<string, string> = {
-  CONFLICT: 'Аккаунт с таким email уже существует',
-  VALIDATION_ERROR: 'Ошибка валидации данных',
-  RATE_LIMITED: 'Слишком много попыток. Подождите минуту и попробуйте снова.',
-  NETWORK_ERROR: 'Нет соединения с сервером. Проверьте сеть.',
-  SERVER_ERROR: 'Сервис временно недоступен. Попробуйте позже.',
+const REGISTER_ERROR_KEYS: Record<string, string> = {
+  CONFLICT: 'errors.conflict',
+  VALIDATION_ERROR: 'errors.validation',
+  RATE_LIMITED: 'errors.rateLimited',
+  NETWORK_ERROR: 'errors.network',
+  SERVER_ERROR: 'errors.server',
 }
 
 type FormFields = { email: string; password: string; first_name: string; last_name: string; org_name: string }
@@ -26,6 +27,8 @@ export default function RegisterPage() {
   const [searchParams] = useSearchParams()
   const confirmToken = searchParams.get('confirm_token')
   const { refresh, isAuthenticated } = useAuth()
+  const { t } = useTranslation(['auth', 'common'])
+
   const [form, setForm] = useState<FormFields>({ email: '', password: '', first_name: '', last_name: '', org_name: '' })
   const [error, setError] = useState('')
   const [successEmail, setSuccessEmail] = useState('')
@@ -52,10 +55,10 @@ export default function RegisterPage() {
         if (cancelled) return
         if (isAxiosError(err)) {
           const msg = err.response?.data?.error?.message
-          setConfirmError(typeof msg === 'string' && msg.trim() ? msg : 'Ссылка подтверждения недействительна или истекла.')
+          setConfirmError(typeof msg === 'string' && msg.trim() ? msg : t('auth:register.confirmInvalid'))
           return
         }
-        setConfirmError('Ссылка подтверждения недействительна или истекла.')
+        setConfirmError(t('auth:register.confirmInvalid'))
       })
       .finally(() => {
         if (!cancelled) setConfirming(false)
@@ -64,7 +67,7 @@ export default function RegisterPage() {
     return () => {
       cancelled = true
     }
-  }, [confirmToken, navigate, refresh])
+  }, [confirmToken, navigate, refresh, t])
 
   if (isAuthenticated) return <Navigate to="/dashboard" replace />
 
@@ -76,25 +79,30 @@ export default function RegisterPage() {
 
   const validate = (): boolean => {
     const errs: FieldErrors = {}
-    if (!form.first_name.trim()) errs.first_name = 'Введите имя'
-    if (!form.last_name.trim()) errs.last_name = 'Введите фамилию'
-    if (!form.org_name.trim()) errs.org_name = 'Введите название организации'
+    if (!form.first_name.trim()) errs.first_name = t('auth:validation.firstNameRequired')
+    if (!form.last_name.trim()) errs.last_name = t('auth:validation.lastNameRequired')
+    if (!form.org_name.trim()) errs.org_name = t('auth:validation.orgNameRequired')
     if (!form.email.trim()) {
-      errs.email = 'Введите email'
+      errs.email = t('auth:validation.emailRequired')
     } else if (!form.email.includes('@')) {
-      errs.email = 'Введите корректный email'
+      errs.email = t('auth:validation.emailInvalid')
     }
     if (!form.password) {
-      errs.password = 'Введите пароль'
+      errs.password = t('auth:validation.passwordRequired')
     } else if (form.password.length < 8) {
-      errs.password = 'Пароль должен быть не менее 8 символов'
+      errs.password = t('auth:validation.passwordMin')
     }
     if (!acceptedPolicy) {
-      setError('Нужно принять политику конфиденциальности и согласие на обработку данных')
+      setError(t('auth:errors.acceptPolicy'))
       return false
     }
     setFieldErrors(errs)
     return Object.keys(errs).length === 0
+  }
+
+  const applyApiError = (code: string | null | undefined, fallback: string) => {
+    const key = code ? REGISTER_ERROR_KEYS[code] : ''
+    return key ? t(`auth:${key}`) : fallback
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -106,18 +114,17 @@ export default function RegisterPage() {
       await authApi.requestRegistration({ ...form, accepted_privacy_policy: true })
       setSuccessEmail(form.email.trim())
     } catch (err: unknown) {
-      if (err instanceof AuthError) {
-        const ruMessage = AUTH_ERRORS_RU[err.code ?? ''] || err.message || 'Ошибка регистрации'
-        if (err.field) {
-          setFieldErrors((prev) => ({ ...prev, [err.field as keyof FormFields]: ruMessage }))
+      if (isAxiosError(err)) {
+        const code = err.response?.data?.error?.code as string | undefined
+        const field = err.response?.data?.error?.field as keyof FormFields | undefined
+        const message = applyApiError(code, t('auth:errors.registerFailed'))
+        if (field) {
+          setFieldErrors((prev) => ({ ...prev, [field]: message }))
         } else {
-          setError(ruMessage)
+          setError(message)
         }
-      } else if (isAxiosError(err)) {
-        const apiMessage = err.response?.data?.error?.message
-        setError(typeof apiMessage === 'string' && apiMessage.trim() ? apiMessage : 'Ошибка регистрации. Попробуйте позже.')
       } else {
-        setError('Ошибка регистрации. Попробуйте позже.')
+        setError(t('auth:errors.registerFailed'))
       }
     } finally {
       setLoading(false)
@@ -131,21 +138,24 @@ export default function RegisterPage() {
     return (
       <div className="flex min-h-screen items-center justify-center p-8">
         <div className="w-full max-w-sm space-y-6">
+          <div className="flex justify-end">
+            <AuthLanguageSwitcher />
+          </div>
           <div>
-            <h2 className="text-2xl font-bold">Подтверждение регистрации</h2>
-            <p className="text-muted-foreground mt-1">Завершаем создание аккаунта по ссылке из письма.</p>
+            <h2 className="text-2xl font-bold">{t('auth:register.confirmTitle')}</h2>
+            <p className="text-muted-foreground mt-1">{t('auth:register.confirmSubtitle')}</p>
           </div>
           {confirming && (
             <div className="rounded-lg bg-secondary/50 border border-border p-4 text-sm flex items-center gap-2">
               <Loader2 className="h-4 w-4 animate-spin" />
-              Проверяем ссылку...
+              {t('auth:register.confirmChecking')}
             </div>
           )}
           {!confirming && confirmError && (
             <div className="space-y-4">
               <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-sm text-red-400">{confirmError}</div>
               <Link to="/register" className="text-primary hover:underline font-medium">
-                Запросить новую ссылку
+                {t('auth:links.requestNewLink')}
               </Link>
             </div>
           )}
@@ -156,56 +166,57 @@ export default function RegisterPage() {
 
   return (
     <div className="flex min-h-screen">
-      {/* Left Panel */}
       <div className="hidden lg:flex lg:w-1/2 flex-col justify-between p-12 relative overflow-hidden">
         <div className="absolute inset-0 gradient-primary opacity-10" />
         <div className="absolute -bottom-32 -left-32 h-96 w-96 rounded-full bg-primary/20 blur-3xl" />
         <div className="absolute -top-32 -right-32 h-96 w-96 rounded-full bg-purple-500/20 blur-3xl" />
 
-        <div className="relative">
+        <div className="relative flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl gradient-primary">
               <span className="text-lg font-bold text-white">C</span>
             </div>
-            <span className="text-xl font-bold">CRM Platform</span>
+            <span className="text-xl font-bold">{t('common:appName')}</span>
           </div>
+          <AuthLanguageSwitcher />
         </div>
 
         <div className="relative space-y-6">
           <h1 className="text-4xl font-bold leading-tight">
-            Создайте<br />
+            {t('auth:hero.registerTitleTop')}
+            <br />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">
-              своё рабочее пространство
+              {t('auth:hero.registerTitleAccent')}
             </span>
           </h1>
-          <p className="text-lg text-muted-foreground max-w-md">
-            Создайте организацию и пригласите команду. Старт за секунды.
-          </p>
+          <p className="text-lg text-muted-foreground max-w-md">{t('auth:hero.registerDescription')}</p>
           <div className="flex items-center gap-3 rounded-xl bg-white/5 border border-white/10 p-4 max-w-sm">
             <Building2 className="h-8 w-8 text-primary shrink-0" />
             <div>
-              <p className="text-sm font-medium">Мультитенантная архитектура</p>
-              <p className="text-xs text-muted-foreground">Каждая организация — изолированные данные, роли и биллинг</p>
+              <p className="text-sm font-medium">{t('auth:hero.registerCardTitle')}</p>
+              <p className="text-xs text-muted-foreground">{t('auth:hero.registerCardDescription')}</p>
             </div>
           </div>
         </div>
 
-        <p className="relative text-xs text-muted-foreground">&copy; 2026 CRM Платформа</p>
+        <p className="relative text-xs text-muted-foreground">&copy; 2026 {t('common:appName')}</p>
       </div>
 
-      {/* Right Panel */}
       <div className="flex w-full lg:w-1/2 items-center justify-center p-8">
         <div className="w-full max-w-sm space-y-8">
-          <div className="lg:hidden flex items-center gap-3 mb-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl gradient-primary">
-              <span className="text-lg font-bold text-white">C</span>
+          <div className="lg:hidden flex items-center justify-between gap-3 mb-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl gradient-primary">
+                <span className="text-lg font-bold text-white">C</span>
+              </div>
+              <span className="text-xl font-bold">{t('common:appName')}</span>
             </div>
-            <span className="text-xl font-bold">CRM Platform</span>
+            <AuthLanguageSwitcher />
           </div>
 
           <div>
-            <h2 className="text-2xl font-bold">Создайте аккаунт</h2>
-            <p className="text-muted-foreground mt-1">Настройте организацию за секунды</p>
+            <h2 className="text-2xl font-bold">{t('auth:register.title')}</h2>
+            <p className="text-muted-foreground mt-1">{t('auth:register.subtitle')}</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -213,37 +224,50 @@ export default function RegisterPage() {
               <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-sm text-red-400">{error}</div>
             )}
             {successEmail && (
-              <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-3 text-sm text-emerald-500">
-                Ссылка для завершения регистрации отправлена на {successEmail}. Перейдите по ней для активации аккаунта.
+              <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-3 text-sm text-emerald-500 break-words">
+                {t('auth:register.success', { email: successEmail })}
               </div>
             )}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
-                <Label htmlFor="first_name">Имя</Label>
+                <Label htmlFor="first_name">{t('auth:fields.firstName')}</Label>
                 <Input id="first_name" value={form.first_name} onChange={update('first_name')} className={fieldClass('first_name')} />
                 {fieldErrors.first_name && <p className="text-xs text-red-400">{fieldErrors.first_name}</p>}
               </div>
               <div className="space-y-1">
-                <Label htmlFor="last_name">Фамилия</Label>
+                <Label htmlFor="last_name">{t('auth:fields.lastName')}</Label>
                 <Input id="last_name" value={form.last_name} onChange={update('last_name')} className={fieldClass('last_name')} />
                 {fieldErrors.last_name && <p className="text-xs text-red-400">{fieldErrors.last_name}</p>}
               </div>
             </div>
             <div className="space-y-1">
-              <Label htmlFor="org_name">Организация</Label>
-              <Input id="org_name" placeholder="Моя компания" value={form.org_name} onChange={update('org_name')} className={fieldClass('org_name')} />
+              <Label htmlFor="org_name">{t('auth:fields.orgName')}</Label>
+              <Input
+                id="org_name"
+                placeholder={t('auth:placeholders.orgName')}
+                value={form.org_name}
+                onChange={update('org_name')}
+                className={fieldClass('org_name')}
+              />
               {fieldErrors.org_name && <p className="text-xs text-red-400">{fieldErrors.org_name}</p>}
             </div>
             <div className="space-y-1">
-              <Label htmlFor="email">Эл. почта</Label>
-              <Input id="email" type="text" placeholder="you@company.com" value={form.email} onChange={update('email')} className={fieldClass('email')} />
+              <Label htmlFor="email">{t('auth:fields.email')}</Label>
+              <Input
+                id="email"
+                type="text"
+                placeholder={t('auth:placeholders.email')}
+                value={form.email}
+                onChange={update('email')}
+                className={fieldClass('email')}
+              />
               {fieldErrors.email && <p className="text-xs text-red-400">{fieldErrors.email}</p>}
             </div>
             <div className="space-y-1">
-              <Label htmlFor="password">Пароль</Label>
+              <Label htmlFor="password">{t('auth:fields.password')}</Label>
               <PasswordInput
                 id="password"
-                placeholder="Минимум 8 символов"
+                placeholder={t('auth:placeholders.password')}
                 value={form.password}
                 onChange={update('password')}
                 className={fieldClass('password')}
@@ -252,7 +276,7 @@ export default function RegisterPage() {
             </div>
             <Button type="submit" className="w-full h-11 gradient-primary border-0 text-white font-semibold" disabled={loading}>
               {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <ArrowRight className="h-4 w-4 mr-2" />}
-              {loading ? 'Отправка...' : successEmail ? 'Отправить ссылку повторно' : 'Создать аккаунт'}
+              {loading ? t('auth:register.submitting') : successEmail ? t('auth:register.resend') : t('auth:register.submit')}
             </Button>
             <label className="flex items-start gap-2 text-xs text-muted-foreground">
               <input
@@ -262,13 +286,13 @@ export default function RegisterPage() {
                 onChange={(e) => setAcceptedPolicy(e.target.checked)}
               />
               <span>
-                Я принимаю{' '}
+                {t('auth:register.policyPrefix')}{' '}
                 <Link to="/privacy-policy" className="text-primary hover:underline">
-                  политику конфиденциальности
+                  {t('auth:register.privacyPolicy')}
                 </Link>{' '}
-                и даю{' '}
+                {t('auth:register.policyMiddle')}{' '}
                 <Link to="/personal-data-consent" className="text-primary hover:underline">
-                  согласие на обработку персональных данных
+                  {t('auth:register.consent')}
                 </Link>
                 .
               </span>
@@ -276,8 +300,10 @@ export default function RegisterPage() {
           </form>
 
           <div className="text-center text-sm text-muted-foreground">
-            Уже есть аккаунт?{' '}
-            <Link to="/login" className="text-primary hover:underline font-medium">Войти</Link>
+            {t('auth:links.hasAccount')}{' '}
+            <Link to="/login" className="text-primary hover:underline font-medium">
+              {t('auth:links.login')}
+            </Link>
           </div>
         </div>
       </div>

@@ -12,6 +12,7 @@ from src.config import settings
 from src.modules.billing.lifecycle_policy import FreePlanLimits, should_send_post_expiry_notice
 from src.modules.billing.repository_sync import BillingSyncRepository
 from src.modules.files import storage
+from src.modules.notifications.email_content import compose_billing_lifecycle_email
 from src.modules.notifications.public_api import queue_email_notification
 from src.modules.org.models import Subscription
 
@@ -185,7 +186,7 @@ class BillingServiceSync:
         if not recipients:
             return 0
 
-        for user_id, email in recipients:
+        for user_id, email, locale in recipients:
             self.repo.add_in_app_notification(
                 org_id=org_id,
                 user_id=user_id,
@@ -193,11 +194,20 @@ class BillingServiceSync:
                 body=body,
                 meta=meta,
             )
+            email_subject, email_body = compose_billing_lifecycle_email(
+                notice_kind=str(meta.get("kind") or ""),
+                grace_days=int(settings.BILLING_GRACE_DAYS),
+                days_left=(int(meta["days_left"]) if "days_left" in meta and meta["days_left"] is not None else None),
+                locale=locale,
+                fallback_title=title,
+                fallback_body=body,
+            )
             queue_email_notification(
                 to_email=email,
-                subject=title,
-                body=body,
-                kind="billing_lifecycle",
+                subject=email_subject,
+                body=email_body,
+                kind="billing",
+                locale=locale,
             )
         self.repo.flush()
         return len(recipients)

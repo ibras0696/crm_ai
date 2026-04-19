@@ -1,4 +1,5 @@
 ﻿import axios from 'axios'
+import { getPreferredLocale } from '@/lib/i18n'
 
 const api = axios.create({
   baseURL: '/api/v1',
@@ -9,6 +10,16 @@ const api = axios.create({
 
 let refreshPromise: Promise<void> | null = null
 let authRedirectInProgress = false
+
+api.interceptors.request.use((config) => {
+  const locale = getPreferredLocale()
+  if (config.headers && typeof config.headers.set === 'function') {
+    config.headers.set('Accept-Language', locale)
+  } else {
+    ;(config.headers as Record<string, string>)['Accept-Language'] = locale
+  }
+  return config
+})
 
 api.interceptors.response.use(
   (response) => response,

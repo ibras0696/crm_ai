@@ -30,7 +30,9 @@ from src.modules.auth.security import (
     hash_password,
     refresh_token_expires_at,
 )
+from src.modules.auth.services.locale import normalize_locale, resolve_locale_from_accept_language
 from src.modules.auth.services.utils import build_token_response, slugify_org_name
+from src.modules.notifications.email_content import compose_registration_confirm_email
 from src.modules.notifications.public_api import queue_email_notification
 from src.modules.org.models import Membership, Organization, Subscription
 from src.modules.org.repository import (
@@ -101,7 +103,12 @@ class AuthRegistrationService:
                 await redis.delete(cache_key)
             return payload
 
-    async def request_registration_confirmation(self, data: RegisterRequest, ip_address: str | None = None) -> None:
+    async def request_registration_confirmation(
+        self,
+        data: RegisterRequest,
+        ip_address: str | None = None,
+        accept_language: str | None = None,
+    ) -> None:
         if getattr(data, "invite_token", None):
             raise ValidationError("Для приглашения используйте отдельную ссылку-приглашение", field="invite_token")
 
@@ -112,6 +119,7 @@ class AuthRegistrationService:
                 raise ConflictError("User with this email already exists", field="email")
 
         await self._check_registration_rpm_limits(email=str(data.email), ip_address=ip_address)
+        locale = resolve_locale_from_accept_language(accept_language)
 
         token = secrets.token_urlsafe(max(32, int(settings.AUTH_REGISTRATION_CONFIRM_TOKEN_BYTES)))
         cache_key = self._registration_confirm_cache_key(token)
@@ -122,6 +130,7 @@ class AuthRegistrationService:
                 "first_name": data.first_name,
                 "last_name": data.last_name,
                 "org_name": data.org_name,
+                "locale": locale,
             }
         )
 
@@ -137,20 +146,14 @@ class AuthRegistrationService:
             ) from exc
 
         confirm_url = f"{settings.FRONTEND_URL.rstrip('/')}/register?confirm_token={token}"
-        subject = "Подтвердите регистрацию в CRM Platform"
-        body = (
-            "Вы запросили создание аккаунта в CRM Platform.\n\n"
-            "Чтобы завершить регистрацию, перейдите по ссылке:\n"
-            f"{confirm_url}\n\n"
-            "Ссылка одноразовая и действует 30 минут.\n"
-            "Если это были не вы, просто проигнорируйте это письмо.\n"
-        )
+        subject, body = compose_registration_confirm_email(confirm_url=confirm_url, locale=locale)
 
         enqueue_result = queue_email_notification(
             to_email=str(data.email),
             subject=subject,
             body=body,
             kind="registration_confirm",
+            locale=locale,
         )
         if not enqueue_result.queued:
             try:
@@ -168,6 +171,7 @@ class AuthRegistrationService:
         *,
         token: str,
         ip_address: str | None = None,
+        accept_language: str | None = None,
     ) -> tuple[User, Organization, TokenResponse]:
         cache_key = self._registration_confirm_cache_key(token)
         try:
@@ -190,6 +194,8 @@ class AuthRegistrationService:
             first_name = str(payload["first_name"])
             last_name = str(payload["last_name"])
             org_name = str(payload["org_name"])
+            payload_locale_raw = payload.get("locale")
+            locale = normalize_locale(payload_locale_raw if payload_locale_raw is not None else accept_language)
         except (TypeError, ValueError, KeyError) as exc:
             logger.exception("Failed to parse registration token payload")
             raise BadRequestError("Поврежденные данные подтверждения регистрации") from exc
@@ -212,6 +218,7 @@ class AuthRegistrationService:
                 first_name=first_name,
                 last_name=last_name,
                 org_name=org_name,
+                locale=locale,
                 ip_address=ip_address,
                 user_repo=user_repo,
                 org_repo=org_repo,
@@ -227,7 +234,9 @@ class AuthRegistrationService:
         self,
         data: RegisterRequest,
         ip_address: str | None = None,
+        accept_language: str | None = None,
     ) -> tuple[User, Organization, TokenResponse]:
+        locale = resolve_locale_from_accept_language(accept_language)
         async with UnitOfWork() as uow:
             user_repo = UserRepository(uow.session)
             org_repo = OrganizationRepository(uow.session)
@@ -244,6 +253,7 @@ class AuthRegistrationService:
                 user, org, token_response = await self._register_by_invite(
                     data=data,
                     ip_address=ip_address,
+                    locale=locale,
                     user_repo=user_repo,
                     org_repo=org_repo,
                     member_repo=member_repo,
@@ -258,6 +268,7 @@ class AuthRegistrationService:
             user, org, token_response = await self._register_new_org(
                 data=data,
                 ip_address=ip_address,
+                locale=locale,
                 user_repo=user_repo,
                 org_repo=org_repo,
                 member_repo=member_repo,
@@ -273,6 +284,7 @@ class AuthRegistrationService:
         *,
         data: RegisterRequest,
         ip_address: str | None,
+        locale: str,
         user_repo: UserRepository,
         org_repo: OrganizationRepository,
         member_repo: MembershipRepository,
@@ -300,6 +312,7 @@ class AuthRegistrationService:
             hashed_password=hash_password(data.password),
             first_name=data.first_name,
             last_name=data.last_name,
+            locale=normalize_locale(locale),
         )
         user = await user_repo.create(user)
         await self._enforce_member_limit(member_repo=member_repo, sub_repo=sub_repo, org_id=org.id)
@@ -355,6 +368,7 @@ class AuthRegistrationService:
         *,
         data: RegisterRequest,
         ip_address: str | None,
+        locale: str,
         user_repo: UserRepository,
         org_repo: OrganizationRepository,
         member_repo: MembershipRepository,
@@ -368,6 +382,7 @@ class AuthRegistrationService:
             first_name=data.first_name,
             last_name=data.last_name,
             org_name=data.org_name,
+            locale=normalize_locale(locale),
             ip_address=ip_address,
             user_repo=user_repo,
             org_repo=org_repo,
@@ -385,6 +400,7 @@ class AuthRegistrationService:
         first_name: str,
         last_name: str,
         org_name: str,
+        locale: str,
         ip_address: str | None,
         user_repo: UserRepository,
         org_repo: OrganizationRepository,
@@ -398,6 +414,7 @@ class AuthRegistrationService:
             hashed_password=hashed_password,
             first_name=first_name,
             last_name=last_name,
+            locale=normalize_locale(locale),
         )
         user = await user_repo.create(user)
 

@@ -16,6 +16,7 @@ from src.modules.auth.security import (
     hash_password,
     refresh_token_expires_at,
 )
+from src.modules.auth.services.locale import resolve_locale_from_accept_language
 from src.modules.notifications.public_api import queue_invite_email
 from src.modules.org.models import Invite, Membership
 from src.modules.org.repository import (
@@ -94,7 +95,13 @@ class OrgInviteService:
             org_name = org.name if org else "CRM"
             await uow.commit()
 
-            queue_invite_email(to_email=email, org_name=org_name, invite_token=token, invite_url=None)
+            queue_invite_email(
+                to_email=email,
+                org_name=org_name,
+                invite_token=token,
+                invite_url=None,
+                locale=(getattr(existing_user, "locale", None) if existing_user else None),
+            )
             # UI uses this to show clear handling for unregistered users.
             invite.invitee_exists = existing_user is not None  # type: ignore[attr-defined]
             return invite
@@ -111,6 +118,7 @@ class OrgInviteService:
             invite_repo = InviteRepository(uow.session)
             org_repo = OrganizationRepository(uow.session)
             audit_repo = AuditRepository(uow.session)
+            user_repo = UserRepository(uow.session)
 
             invite = await invite_repo.get_pending_by_id(invite_id, org_id)
             if not invite:
@@ -131,9 +139,16 @@ class OrgInviteService:
 
             org = await org_repo.get_by_id(org_id)
             org_name = org.name if org else "CRM"
+            existing_user = await user_repo.get_by_email(invite.email)
             await uow.commit()
 
-            queue_invite_email(to_email=invite.email, org_name=org_name, invite_token=invite.token, invite_url=None)
+            queue_invite_email(
+                to_email=invite.email,
+                org_name=org_name,
+                invite_token=invite.token,
+                invite_url=None,
+                locale=(getattr(existing_user, "locale", None) if existing_user else None),
+            )
 
             invite.expires_at = new_expiry
             return invite
@@ -146,6 +161,7 @@ class OrgInviteService:
         first_name: str,
         last_name: str,
         ip_address: str | None = None,
+        accept_language: str | None = None,
     ) -> tuple[User, dict]:
         async with UnitOfWork() as uow:
             invite_repo = InviteRepository(uow.session)
@@ -161,11 +177,13 @@ class OrgInviteService:
 
             user = await user_repo.get_by_email(invite.email)
             if not user:
+                locale = resolve_locale_from_accept_language(accept_language)
                 user = User(
                     email=invite.email,
                     hashed_password=hash_password(password),
                     first_name=first_name,
                     last_name=last_name,
+                    locale=locale,
                 )
                 user = await user_repo.create(user)
             else:

@@ -34,6 +34,8 @@ class AuthProfileService:
                 user.last_name = str(updates["last_name"]).strip()
             if "timezone" in updates and updates["timezone"] is not None:
                 user.timezone = str(updates["timezone"]).strip()
+            if "locale" in updates and updates["locale"] is not None:
+                user.locale = str(updates["locale"]).strip()
 
             await repo.update(user)
             await uow.commit()

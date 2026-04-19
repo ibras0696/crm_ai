@@ -134,9 +134,9 @@ class BillingSyncRepository:
             row[0] for row in self.session.execute(select(Membership.user_id).where(Membership.org_id == org_id)).all()
         ]
 
-    def get_notification_recipients_with_email(self, *, org_id: uuid.UUID) -> list[tuple[uuid.UUID, str]]:
+    def get_notification_recipients_with_email(self, *, org_id: uuid.UUID) -> list[tuple[uuid.UUID, str, str]]:
         rows = self.session.execute(
-            select(Membership.user_id, User.email)
+            select(Membership.user_id, User.email, User.locale)
             .join(User, User.id == Membership.user_id)
             .where(
                 Membership.org_id == org_id,
@@ -145,11 +145,15 @@ class BillingSyncRepository:
         ).all()
         if not rows:
             rows = self.session.execute(
-                select(Membership.user_id, User.email)
+                select(Membership.user_id, User.email, User.locale)
                 .join(User, User.id == Membership.user_id)
                 .where(Membership.org_id == org_id)
             ).all()
-        return [(user_id, str(email or "").strip()) for user_id, email in rows if str(email or "").strip()]
+        return [
+            (user_id, str(email or "").strip(), str(locale or "ru"))
+            for user_id, email, locale in rows
+            if str(email or "").strip()
+        ]
 
     def add_in_app_notification(
         self,

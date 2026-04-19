@@ -5,6 +5,7 @@ import { BrowserRouter } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import { ThemeProvider } from './contexts/ThemeContext'
 import App from './App'
+import './i18n'
 import './index.css'
 
 if (import.meta.env.PROD && typeof window !== 'undefined') {

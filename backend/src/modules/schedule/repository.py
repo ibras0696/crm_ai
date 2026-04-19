@@ -97,11 +97,11 @@ class ScheduleRepository:
         *,
         org_id: uuid.UUID,
         user_ids: list[uuid.UUID],
-    ) -> dict[uuid.UUID, tuple[str, str, str]]:
+    ) -> dict[uuid.UUID, tuple[str, str, str, str]]:
         if not user_ids:
             return {}
         stmt = (
-            select(User.id, User.email, User.first_name, User.last_name)
+            select(User.id, User.email, User.first_name, User.last_name, User.locale)
             .join(Membership, Membership.user_id == User.id)
             .where(
                 Membership.org_id == org_id,
@@ -111,8 +111,8 @@ class ScheduleRepository:
         )
         result = await self.session.execute(stmt)
         return {
-            user_id: (email, first_name, last_name)
-            for user_id, email, first_name, last_name in result.all()
+            user_id: (email, first_name, last_name, locale)
+            for user_id, email, first_name, last_name, locale in result.all()
         }
 
     async def delete(self, event: Event) -> None:

@@ -62,7 +62,8 @@ def _clear_auth_cookies(response: Response) -> None:
 @router.post("/register", response_model=ApiResponse[TokenResponse], status_code=201)
 async def register(body: RegisterRequest, request: Request, response: Response):
     ip = request.client.host if request.client else None
-    _, _, tokens = await _auth_service.register(body, ip_address=ip)
+    accept_language = request.headers.get("accept-language")
+    _, _, tokens = await _auth_service.register(body, ip_address=ip, accept_language=accept_language)
     _set_auth_cookies(response, tokens)
     return ApiResponse(data=tokens)
 
@@ -70,14 +71,18 @@ async def register(body: RegisterRequest, request: Request, response: Response):
 @router.post("/register/request", response_model=ApiResponse, status_code=202)
 async def request_registration_confirmation(body: RegisterRequest, request: Request):
     ip = request.client.host if request.client else None
-    await _auth_service.request_registration_confirmation(body, ip_address=ip)
+    accept_language = request.headers.get("accept-language")
+    await _auth_service.request_registration_confirmation(body, ip_address=ip, accept_language=accept_language)
     return ApiResponse(data=None)
 
 
 @router.post("/register/confirm", response_model=ApiResponse[TokenResponse], status_code=201)
 async def confirm_registration(body: RegisterConfirmRequest, request: Request, response: Response):
     ip = request.client.host if request.client else None
-    _, _, tokens = await _auth_service.confirm_registration(token=body.token, ip_address=ip)
+    accept_language = request.headers.get("accept-language")
+    _, _, tokens = await _auth_service.confirm_registration(
+        token=body.token, ip_address=ip, accept_language=accept_language
+    )
     _set_auth_cookies(response, tokens)
     return ApiResponse(data=tokens)
 
@@ -117,6 +122,8 @@ async def me(current_user: CurrentUser = Depends(get_current_user)):
     cache_key = f"user_profile:{current_user.user_id}"
     cached = await cache.get(cache_key)
     if cached:
+        if isinstance(cached, dict) and "locale" not in cached:
+            cached["locale"] = "ru"
         return ApiResponse(data=cached)
 
     user = await _auth_service.get_user(current_user.user_id)
@@ -124,6 +131,7 @@ async def me(current_user: CurrentUser = Depends(get_current_user)):
         raise NotFoundError("User")
 
     response_data = UserResponse.model_validate(user).model_dump(mode="json")
+    response_data.setdefault("locale", "ru")
     await cache.set(cache_key, response_data, ttl=300)
     return ApiResponse(data=response_data)
 

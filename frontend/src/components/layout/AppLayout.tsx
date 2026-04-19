@@ -4,9 +4,11 @@ import { useAuth } from '@/contexts/AuthContext'
 import { cn } from '@/lib/utils'
 import Sidebar from './Sidebar'
 import Header from './Header'
+import { useTranslation } from 'react-i18next'
 
 export default function AppLayout() {
   const { isAuthenticated, isLoading } = useAuth()
+  const { t } = useTranslation('common')
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
 
@@ -15,7 +17,7 @@ export default function AppLayout() {
       <div className="flex h-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
           <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
-          <span className="text-sm text-muted-foreground">Загрузка...</span>
+          <span className="text-sm text-muted-foreground">{t('layout.loading')}</span>
         </div>
       </div>
     )

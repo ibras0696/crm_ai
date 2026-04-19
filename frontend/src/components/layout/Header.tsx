@@ -7,6 +7,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { notificationsApi, NotificationInfo } from '@/lib/api'
+import { useTranslation } from 'react-i18next'
 
 interface HeaderProps {
   onMenuToggle?: () => void
@@ -15,6 +16,7 @@ interface HeaderProps {
 export default function Header({ onMenuToggle }: HeaderProps) {
   const { user, org, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
+  const { t } = useTranslation('common')
   const navigate = useNavigate()
   const [notifOpen, setNotifOpen] = useState(false)
   const notifRef = useRef<HTMLDivElement>(null)
@@ -103,6 +105,7 @@ export default function Header({ onMenuToggle }: HeaderProps) {
   const initials = user
     ? `${user.first_name?.[0] ?? ''}${user.last_name?.[0] ?? ''}`.toUpperCase()
     : '??'
+  const dateLocale = user?.locale === 'en' ? 'en-US' : 'ru-RU'
 
   return (
     <header className="sticky top-0 z-30 flex h-14 md:h-16 items-center gap-2 md:gap-4 border-b border-border bg-background supports-[backdrop-filter]:bg-background/85 supports-[backdrop-filter]:backdrop-blur-md px-3 md:px-6">
@@ -125,13 +128,13 @@ export default function Header({ onMenuToggle }: HeaderProps) {
         {notifOpen && (
           <div className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-1rem)] rounded-lg border border-border bg-popover shadow-lg z-50">
             <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-              <span className="text-sm font-semibold">Уведомления</span>
+              <span className="text-sm font-semibold">{t('header.notifications')}</span>
               {unreadCount > 0 && <Badge variant="default" className="text-[10px]">{unreadCount}</Badge>}
             </div>
             {unreadCount > 0 && (
               <div className="px-4 py-2 border-b border-border">
                 <button onClick={handleMarkAllRead} className="text-xs text-primary hover:underline flex items-center gap-1">
-                  <CheckCheck className="h-3 w-3" /> Прочитать все
+                  <CheckCheck className="h-3 w-3" /> {t('header.readAll')}
                 </button>
               </div>
             )}
@@ -139,7 +142,7 @@ export default function Header({ onMenuToggle }: HeaderProps) {
               {notifications.length === 0 ? (
                 <div className="flex flex-col items-center py-8 text-muted-foreground">
                   <BellOff className="h-8 w-8 mb-2 opacity-40" />
-                  <span className="text-sm">Нет уведомлений</span>
+                  <span className="text-sm">{t('header.empty')}</span>
                 </div>
               ) : (
                 notifications.map((n) => (
@@ -150,7 +153,7 @@ export default function Header({ onMenuToggle }: HeaderProps) {
                   >
                     <p className="text-sm">{n.title}</p>
                     {n.body && <p className="text-xs text-muted-foreground mt-0.5">{n.body}</p>}
-                    <p className="text-xs text-muted-foreground mt-1">{new Date(n.created_at).toLocaleString('ru')}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{new Date(n.created_at).toLocaleString(dateLocale)}</p>
                   </div>
                 ))
               )}
@@ -175,7 +178,7 @@ export default function Header({ onMenuToggle }: HeaderProps) {
           </span>
           <span className="text-xs text-muted-foreground">{user?.email}</span>
         </div>
-        <Button variant="ghost" size="icon" onClick={handleLogout} className="text-muted-foreground hover:text-destructive" title="Выйти">
+        <Button variant="ghost" size="icon" onClick={handleLogout} className="text-muted-foreground hover:text-destructive" title={t('header.logout')}>
           <LogOut className="h-4 w-4" />
         </Button>
       </div>

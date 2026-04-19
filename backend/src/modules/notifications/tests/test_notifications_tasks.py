@@ -35,8 +35,16 @@ def test_send_invite_email_sends_when_validation_passes(monkeypatch):
         assert invite_token == "inv-token"
         return True, "ok"
 
-    def _mock_send_email_notification_impl(*_args, to_email: str, subject: str, body: str, kind: str = "generic"):
+    def _mock_send_email_notification_impl(
+        *_args,
+        to_email: str,
+        subject: str,
+        body: str,
+        kind: str = "generic",
+        locale: str | None = None,
+    ):
         sent["called"] += 1
+        _ = locale
         assert to_email == "user@example.com"
         assert "Приглашение в организацию" in subject
         assert "Test Org" in body
@@ -51,6 +59,46 @@ def test_send_invite_email_sends_when_validation_passes(monkeypatch):
         to_email="user@example.com",
         org_name="Test Org",
         invite_token="inv-token",
+    )
+
+    assert result["status"] == "sent"
+    assert result["to"] == "user@example.com"
+    assert sent["called"] == 1
+
+
+def test_send_invite_email_uses_english_locale(monkeypatch):
+    sent = {"called": 0}
+
+    def _mock_can_send_invite_email(*, to_email: str, invite_token: str):
+        assert to_email == "user@example.com"
+        assert invite_token == "inv-token"
+        return True, "ok"
+
+    def _mock_send_email_notification_impl(
+        *_args,
+        to_email: str,
+        subject: str,
+        body: str,
+        kind: str = "generic",
+        locale: str | None = None,
+    ):
+        sent["called"] += 1
+        assert to_email == "user@example.com"
+        assert locale == "en"
+        assert "Invitation to organization" in subject
+        assert "Use this link to accept the invitation" in body
+        assert "/auth/accept-invite?token=inv-token" in body
+        assert kind == "invite"
+        return {"status": "sent", "to": to_email}
+
+    monkeypatch.setattr(tasks, "_can_send_invite_email", _mock_can_send_invite_email)
+    monkeypatch.setattr(tasks, "_send_email_notification_impl", _mock_send_email_notification_impl)
+
+    result = tasks.send_invite_email(
+        to_email="user@example.com",
+        org_name="Test Org",
+        invite_token="inv-token",
+        locale="en",
     )
 
     assert result["status"] == "sent"
@@ -115,6 +163,36 @@ def test_send_email_notification_renders_html_body(monkeypatch):
     assert "body_html" in captured
     assert "<html" in str(captured["body_html"]).lower()
     assert "Line 1" in str(captured["body_html"])
+
+
+def test_send_email_notification_renders_html_body_in_english(monkeypatch):
+    captured: dict[str, str] = {}
+
+    class _Task:
+        class MaxRetriesExceededError(Exception):
+            pass
+
+        def retry(self, exc=None):
+            _ = exc
+            return
+
+    def _mock_send_smtp_email(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(tasks, "send_smtp_email", _mock_send_smtp_email)
+
+    result = tasks._send_email_notification_impl(
+        _Task(),
+        to_email="user@example.com",
+        subject="Hello",
+        body="Line 1\nhttps://example.com",
+        kind="generic",
+        locale="en",
+    )
+
+    assert result["status"] == "sent"
+    assert "body_html" in captured
+    assert "automated crm platform email" in str(captured["body_html"]).lower()
 
 
 def test_send_email_notification_does_not_retry_on_permanent_config_error(monkeypatch):

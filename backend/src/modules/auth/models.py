@@ -23,6 +23,7 @@ class User(BaseDBModel):
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
     timezone: Mapped[str] = mapped_column(String(50), default="UTC", server_default=text("'UTC'"))
+    locale: Mapped[str] = mapped_column(String(8), default="ru", server_default=text("'ru'"))
 
     memberships: Mapped[list[Membership]] = relationship(back_populates="user", lazy="noload")
     refresh_tokens: Mapped[list[RefreshToken]] = relationship(back_populates="user", lazy="noload")

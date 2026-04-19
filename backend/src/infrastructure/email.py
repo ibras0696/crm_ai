@@ -40,9 +40,9 @@ def send_smtp_email(
     msg["Subject"] = subject
     msg["From"] = f"{from_name} <{from_email}>" if from_name else from_email
     msg["To"] = to_email
-    msg.set_content(body_text or "")
+    msg.set_content(body_text or "", charset="utf-8")
     if body_html:
-        msg.add_alternative(body_html, subtype="html")
+        msg.add_alternative(body_html, subtype="html", charset="utf-8")
 
     try:
         with smtplib.SMTP(host=host, port=int(port), timeout=float(timeout_s)) as smtp:

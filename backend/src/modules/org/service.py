@@ -67,6 +67,7 @@ class OrgService:
         first_name: str,
         last_name: str,
         ip_address: str | None = None,
+        accept_language: str | None = None,
     ) -> tuple[User, dict]:
         return await self._invite.accept_invite(
             token=token,
@@ -74,6 +75,7 @@ class OrgService:
             first_name=first_name,
             last_name=last_name,
             ip_address=ip_address,
+            accept_language=accept_language,
         )
 
     async def update_member_role(

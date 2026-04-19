@@ -33,6 +33,7 @@ export interface UserInfo {
   last_name: string
   is_active: boolean
   timezone: string
+  locale: 'ru' | 'en'
   created_at: string
 }
 

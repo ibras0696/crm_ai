@@ -121,10 +121,12 @@ class BillingRepository:
             return recipients
         return await self.list_org_member_user_ids(org_id=org_id)
 
-    async def get_notification_recipients_with_email(self, *, org_id: uuid.UUID) -> list[tuple[uuid.UUID, str]]:
+    async def get_notification_recipients_with_email(
+        self, *, org_id: uuid.UUID
+    ) -> list[tuple[uuid.UUID, str, str]]:
         rows = (
             await self.session.execute(
-                select(Membership.user_id, User.email)
+                select(Membership.user_id, User.email, User.locale)
                 .join(User, User.id == Membership.user_id)
                 .where(
                     Membership.org_id == org_id,
@@ -135,12 +137,16 @@ class BillingRepository:
         if not rows:
             rows = (
                 await self.session.execute(
-                    select(Membership.user_id, User.email)
+                    select(Membership.user_id, User.email, User.locale)
                     .join(User, User.id == Membership.user_id)
                     .where(Membership.org_id == org_id)
                 )
             ).all()
-        return [(user_id, str(email or "").strip()) for user_id, email in rows if str(email or "").strip()]
+        return [
+            (user_id, str(email or "").strip(), str(locale or "ru"))
+            for user_id, email, locale in rows
+            if str(email or "").strip()
+        ]
 
     async def list_files_for_org(self, *, org_id: uuid.UUID) -> list[File]:
         stmt = select(File).where(File.org_id == org_id)

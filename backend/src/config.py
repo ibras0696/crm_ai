@@ -259,7 +259,7 @@ class Settings(BaseSettings):
 
     # Domain
     DOMAIN: str = "localhost"
-    FRONTEND_URL: str = "http://localhost:5173"
+    FRONTEND_URL: str = "https://crm.example.com"
     TRUSTED_HOSTS: list[str] = []
 
     # RabbitMQ

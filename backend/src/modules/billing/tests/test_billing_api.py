@@ -1043,6 +1043,86 @@ async def test_payment_status_reconciles_subscription_when_webhook_missed(client
 
 
 @pytest.mark.asyncio
+async def test_payment_status_replay_does_not_extend_subscription_period(client: AsyncClient):
+    token = await _register_owner(client)
+    await _seed_runtime_yookassa_config()
+
+    current_org = await client.get("/api/v1/orgs/current", headers=_headers(token))
+    assert current_org.status_code == 200
+    org_id = current_org.json()["data"]["id"]
+    payment_id = f"pay-replay-{uuid.uuid4().hex[:8]}"
+
+    import httpx
+
+    class _MockResponse:
+        def __init__(self, status_code: int, payload: dict):
+            self.status_code = status_code
+            self._payload = payload
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                req = httpx.Request("GET", f"https://api.yookassa.ru/v3/payments/{payment_id}")
+                resp = httpx.Response(self.status_code, request=req)
+                raise httpx.HTTPStatusError("mock error", request=req, response=resp)
+
+        def json(self):
+            return self._payload
+
+    class _MockAsyncClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url: str, auth=None, headers=None):
+            _ = headers
+            assert url == f"https://api.yookassa.ru/v3/payments/{payment_id}"
+            assert auth == ("runtime-shop-webhook", "runtime-secret-webhook")
+            return _MockResponse(
+                200,
+                {
+                    "id": payment_id,
+                    "status": "succeeded",
+                    "paid": True,
+                    "metadata": {"org_id": org_id, "plan_name": "team", "period": "monthly"},
+                },
+            )
+
+    from src.modules.billing import service as billing_service_module
+
+    old_async_client = billing_service_module.httpx.AsyncClient
+    billing_service_module.httpx.AsyncClient = _MockAsyncClient
+    try:
+        first = await client.get(f"/api/v1/billing/payments/{payment_id}", headers=_headers(token))
+        assert first.status_code == 200
+        assert first.json()["ok"] is True
+
+        sub_1 = await client.get("/api/v1/billing/subscription", headers=_headers(token))
+        assert sub_1.status_code == 200
+        data_1 = sub_1.json()["data"]
+        assert data_1["external_id"] == payment_id
+        assert data_1["plan"] == "team"
+
+        second = await client.get(f"/api/v1/billing/payments/{payment_id}", headers=_headers(token))
+        assert second.status_code == 200
+        assert second.json()["ok"] is True
+
+        sub_2 = await client.get("/api/v1/billing/subscription", headers=_headers(token))
+        assert sub_2.status_code == 200
+        data_2 = sub_2.json()["data"]
+        assert data_2["external_id"] == payment_id
+        assert data_2["plan"] == "team"
+        assert data_2["current_period_start"] == data_1["current_period_start"]
+        assert data_2["current_period_end"] == data_1["current_period_end"]
+    finally:
+        billing_service_module.httpx.AsyncClient = old_async_client
+
+
+@pytest.mark.asyncio
 async def test_payment_status_hides_payment_from_other_org(client: AsyncClient):
     token_org_1 = await _register_owner(client)
     token_org_2 = await _register_owner(client)
@@ -1105,3 +1185,20 @@ async def test_payment_status_hides_payment_from_other_org(client: AsyncClient):
     assert status_resp.status_code == 200
     assert status_resp.json()["ok"] is False
     assert status_resp.json()["error"]["code"] == "PAYMENT_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_billing_webhook_requires_shared_secret_when_configured(client: AsyncClient, monkeypatch):
+    monkeypatch.setattr(settings, "BILLING_WEBHOOK_SHARED_SECRET", "local-shared-secret")
+    payload = {"event": "payment.waiting_for_capture", "object": {"id": "pay-noop"}}
+
+    no_secret = await client.post("/api/v1/billing/webhook/yookassa", json=payload)
+    assert no_secret.status_code == 403
+
+    with_secret = await client.post(
+        "/api/v1/billing/webhook/yookassa",
+        json=payload,
+        headers={"X-Billing-Webhook-Secret": "local-shared-secret"},
+    )
+    assert with_secret.status_code == 200
+    assert with_secret.json()["status"] == "ok"

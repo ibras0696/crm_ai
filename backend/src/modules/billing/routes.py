@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from src.common.enums import UserRole
 from src.common.schemas import ApiResponse
+from src.config import settings
 from src.modules.auth.dependencies import CurrentUser, require_roles
 from src.modules.billing.schemas import (
     CreatePaymentRequest,
@@ -133,6 +135,11 @@ async def purchase_tokens(
 async def yookassa_webhook(request: Request):
     """Handle YooKassa payment notifications."""
     try:
+        expected_secret = str(settings.BILLING_WEBHOOK_SHARED_SECRET or "").strip()
+        if expected_secret:
+            supplied_secret = str(request.headers.get("X-Billing-Webhook-Secret") or "").strip()
+            if not secrets.compare_digest(supplied_secret, expected_secret):
+                raise HTTPException(status_code=403, detail="Invalid webhook signature")
         body = await request.json()
         await _billing_service.handle_yookassa_webhook(body)
         return {"status": "ok"}

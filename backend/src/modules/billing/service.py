@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 from botocore.exceptions import BotoCoreError, ClientError
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from src.common.enums import PlanTier, SubscriptionStatus
 from src.config import settings
@@ -194,6 +194,11 @@ class BillingService:
         purchase_kind = str(metadata.get("purchase_kind") or "").strip()
         package_code = str(metadata.get("package_code") or "").strip()
         if purchase_kind == "token_package" and package_code:
+            if not payment_id:
+                raise BillingOperationError(
+                    "WEBHOOK_INVALID_PAYLOAD",
+                    "Webhook payload не содержит payment_id",
+                )
             user_id_raw = str(metadata.get("user_id") or "").strip()
             user_uuid: uuid.UUID | None = None
             if user_id_raw:
@@ -211,25 +216,43 @@ class BillingService:
                 billing_repo = BillingRepository(uow.session)
                 if user_uuid is None:
                     user_uuid = await self._resolve_payment_user_id(repo=billing_repo, org_id=org_uuid)
-                await purchase_addon_tokens(
-                    uow.session,
-                    org_id=org_uuid,
-                    user_id=user_uuid,
-                    package_code=package_code,
-                    months_valid=12,
-                    payment_id=payment_id or None,
-                    purchase_meta={
-                        "purchase_kind": "token_package",
-                        "payment_status": "succeeded",
-                        "status": str(payment.get("status") or "succeeded"),
-                    },
-                )
-                await uow.commit()
+                try:
+                    await purchase_addon_tokens(
+                        uow.session,
+                        org_id=org_uuid,
+                        user_id=user_uuid,
+                        package_code=package_code,
+                        months_valid=12,
+                        payment_id=payment_id or None,
+                        purchase_meta={
+                            "purchase_kind": "token_package",
+                            "payment_status": "succeeded",
+                            "status": str(payment.get("status") or "succeeded"),
+                        },
+                    )
+                    await uow.commit()
+                except IntegrityError as exc:
+                    await uow.rollback()
+                    # Race-safe idempotency: another concurrent request committed this payment first.
+                    async with UnitOfWork() as check_uow:
+                        check_repo = TokenWalletRepository(check_uow.session)
+                        existing = await check_repo.get_purchase_by_payment_id(payment_id=payment_id)
+                        if existing is not None:
+                            return
+                    raise BillingOperationError(
+                        "BILLING_STATE_CONFLICT",
+                        "Платеж уже обработан, повторное начисление отклонено",
+                    ) from exc
             return
 
         plan_name = str(metadata.get("plan_name") or "").strip().lower()
         if not plan_name:
             return
+        if not payment_id:
+            raise BillingOperationError(
+                "WEBHOOK_INVALID_PAYLOAD",
+                "Webhook payload не содержит payment_id",
+            )
 
         plan_map = {"free": PlanTier.FREE, "team": PlanTier.TEAM, "business": PlanTier.BUSINESS}
         plan_tier = plan_map.get(plan_name)
@@ -240,12 +263,16 @@ class BillingService:
         period_end = self._add_months_utc(now, months=1)
         async with UnitOfWork() as uow:
             repo = BillingRepository(uow.session)
+            sub = await repo.get_subscription(org_id=org_uuid)
+            # Idempotency for subscription settlement: do not re-apply same external payment.
+            if sub is not None and str(sub.external_id or "").strip() == payment_id:
+                return
             await repo.activate_subscription(
                 org_id=org_uuid,
                 plan=plan_tier,
                 current_period_start=now,
                 current_period_end=period_end,
-                external_id=payment_id or None,
+                external_id=payment_id,
             )
             await uow.commit()
 

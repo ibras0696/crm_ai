@@ -270,6 +270,7 @@ class Settings(BaseSettings):
     YOOKASSA_SECRET_KEY: str = ""
     YOOKASSA_RETURN_URL: str = "http://localhost:5173/billing/success"
     YOOKASSA_WEBHOOK_URL: str = ""
+    BILLING_WEBHOOK_SHARED_SECRET: str = ""
     BILLING_GRACE_DAYS: int = 30
     BILLING_PRE_EXPIRY_NOTICE_HOURS: int = 24
     BILLING_PURGE_AFTER_END_DAYS: int = 30
@@ -323,14 +324,21 @@ class Settings(BaseSettings):
         merged = dict(data)
         for field_name in cls.model_fields:
             file_env_name = f"{field_name}_FILE"
-            file_path = str(os.getenv(file_env_name, "") or "").strip()
+            # Prefer value provided by settings sources (e.g. .env), fallback to process env.
+            file_path_raw = merged.get(file_env_name)
+            if file_path_raw is None:
+                file_path_raw = os.getenv(file_env_name, "")
+            file_path = str(file_path_raw or "").strip()
             if not file_path:
                 continue
+            resolved_path = os.path.expanduser(file_path)
             try:
-                with open(file_path, encoding="utf-8") as fh:
+                with open(resolved_path, encoding="utf-8") as fh:
                     merged[field_name] = fh.read().strip()
             except OSError as exc:
-                raise ValueError(f"Failed to load {field_name} from {file_env_name}={file_path}: {exc}") from exc
+                raise ValueError(
+                    f"Failed to load {field_name} from {file_env_name}={resolved_path}: {exc}"
+                ) from exc
         return merged
 
     @model_validator(mode="after")
@@ -350,21 +358,25 @@ class Settings(BaseSettings):
             return v in defaults
 
         errors: list[str] = []
+        jwt_user_secret = str(self.JWT_USER_SECRET_KEY or "").strip()
+        jwt_superadmin_secret = str(self.JWT_SUPERADMIN_SECRET_KEY or "").strip()
+        openai_bearer_token = str(self.OPENAI_BEARER_TOKEN or "").strip()
+        openai_api_key = str(self.OPENAI_API_KEY or "").strip()
+        superadmin_email = str(self.SUPERADMIN_EMAIL or "").strip()
+        superadmin_password_hash = str(self.SUPERADMIN_PASSWORD_HASH or "").strip()
+        superadmin_password = str(self.SUPERADMIN_PASSWORD or "").strip()
+        billing_webhook_shared_secret = str(self.BILLING_WEBHOOK_SHARED_SECRET or "").strip()
 
         if len((self.SECRET_KEY or "").strip()) < 32 or _is_unsafe(
             self.SECRET_KEY,
             defaults=("super-secret-change-in-prod", "super-secret-dev-key-change-in-prod"),
         ):
             errors.append("SECRET_KEY")
-        if len((self.JWT_USER_SECRET_KEY or "").strip()) < 32 or _is_unsafe(self.JWT_USER_SECRET_KEY):
+        if len(jwt_user_secret) < 32 or _is_unsafe(self.JWT_USER_SECRET_KEY):
             errors.append("JWT_USER_SECRET_KEY")
-        if len((self.JWT_SUPERADMIN_SECRET_KEY or "").strip()) < 32 or _is_unsafe(self.JWT_SUPERADMIN_SECRET_KEY):
+        if len(jwt_superadmin_secret) < 32 or _is_unsafe(self.JWT_SUPERADMIN_SECRET_KEY):
             errors.append("JWT_SUPERADMIN_SECRET_KEY")
-        if (
-            self.JWT_USER_SECRET_KEY.strip()
-            and self.JWT_SUPERADMIN_SECRET_KEY.strip()
-            and self.JWT_USER_SECRET_KEY.strip() == self.JWT_SUPERADMIN_SECRET_KEY.strip()
-        ):
+        if jwt_user_secret and jwt_superadmin_secret and jwt_user_secret == jwt_superadmin_secret:
             errors.append("JWT_USER_SECRET_KEY/JWT_SUPERADMIN_SECRET_KEY")
 
         if _is_unsafe(
@@ -394,12 +406,14 @@ class Settings(BaseSettings):
         if any("localhost" in (o or "").lower() for o in (self.CORS_ORIGINS or [])):
             errors.append("CORS_ORIGINS")
 
-        if self.ENABLE_AI and not (self.OPENAI_BEARER_TOKEN.strip() or self.OPENAI_API_KEY.strip()):
+        if self.ENABLE_AI and not (openai_bearer_token or openai_api_key):
             errors.append("OPENAI_BEARER_TOKEN/OPENAI_API_KEY")
-        if bool(self.SUPERADMIN_EMAIL.strip()) ^ bool(self.SUPERADMIN_PASSWORD_HASH.strip()):
+        if bool(superadmin_email) ^ bool(superadmin_password_hash):
             errors.append("SUPERADMIN_EMAIL/SUPERADMIN_PASSWORD_HASH")
-        if self.SUPERADMIN_PASSWORD.strip():
+        if superadmin_password:
             errors.append("SUPERADMIN_PASSWORD")
+        if not billing_webhook_shared_secret:
+            errors.append("BILLING_WEBHOOK_SHARED_SECRET")
         if not bool(self.AUTH_COOKIE_SECURE):
             errors.append("AUTH_COOKIE_SECURE")
         if self.AUTH_COOKIE_SAMESITE == "none" and not bool(self.AUTH_COOKIE_SECURE):

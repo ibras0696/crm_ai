@@ -60,6 +60,7 @@ class TokenBalance(BaseDBModel):
 class TokenPurchase(BaseDBModel):
     __tablename__ = "token_purchases"
     __table_args__ = (
+        UniqueConstraint("payment_id", name="uq_token_purchases_payment_id"),
         CheckConstraint("tokens_total > 0", name="ck_token_purchases_tokens_total_positive"),
         CheckConstraint("tokens_remaining >= 0", name="ck_token_purchases_tokens_remaining_non_negative"),
         CheckConstraint("tokens_remaining <= tokens_total", name="ck_token_purchases_tokens_remaining_le_total"),

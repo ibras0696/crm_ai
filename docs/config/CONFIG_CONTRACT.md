@@ -33,6 +33,7 @@
 - `S3_SECRET_KEY`
 - `OPENAI_*`
 - `YOOKASSA_*`
+- `BILLING_WEBHOOK_SHARED_SECRET`
 - `SMTP_PASSWORD`
 
 ## 3. Runtime settings

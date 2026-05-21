@@ -91,7 +91,7 @@ function CellValue({ value }: { value: Cell }) {
 export default function PlansPage() {
   return (
     <div className="w-full">
-      <div className="mx-auto w-full max-w-6xl space-y-8">
+      <div className="w-full space-y-8">
         {/* Header */}
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
@@ -103,7 +103,7 @@ export default function PlansPage() {
         </div>
 
         {/* Plan cards */}
-        <div className="mx-auto grid w-full max-w-4xl grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-3">
           {PLANS.map(plan => (
             <div key={plan.key} className={`relative rounded-2xl border-2 ${plan.border} ${plan.bg} p-5`}>
               {plan.badge && (

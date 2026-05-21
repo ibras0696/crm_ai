@@ -361,7 +361,7 @@ async def test_ai_chat_regression_greeting_and_math_without_action_and_with_prom
 
 
 @pytest.mark.asyncio
-async def test_ai_chat_executes_action_when_model_returns_action(client: AsyncClient, monkeypatch):
+async def test_ai_chat_ignores_unsolicited_action_when_user_did_not_request_mutation(client: AsyncClient, monkeypatch):
     token = await _register_owner(client)
 
     from src.config import settings
@@ -397,8 +397,8 @@ async def test_ai_chat_executes_action_when_model_returns_action(client: AsyncCl
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True
-    assert body["data"]["action_result"] is not None
-    assert body["data"]["action_result"]["ok"] is True
+    assert body["data"]["action_result"] is None
+    assert "Привет" in body["data"]["reply"]
 
     settings.OPENAI_BEARER_TOKEN = old_token
 
@@ -897,6 +897,84 @@ async def test_ai_chat_create_document_via_ui_intent_fallback(client: AsyncClien
         assert action_result["ok"] is True
         assert action_result["file"]["type"] == "docx"
         assert action_result["job"]["status"] == "queued"
+    finally:
+        settings.OPENAI_BEARER_TOKEN = old_token
+
+
+@pytest.mark.asyncio
+async def test_ai_chat_document_request_rejects_table_action_and_uses_document_fallback(
+    client: AsyncClient, monkeypatch
+):
+    token = await _register_owner(client)
+
+    from src.config import settings
+    from src.modules.ai.internal import chat_controller as ai_chat_controller
+    from src.modules.ai.internal.chat_controller_parts import actions as ai_actions
+
+    old_token = settings.OPENAI_BEARER_TOKEN
+    settings.OPENAI_BEARER_TOKEN = "test-token"
+
+    async def _fake_call(*_args, **_kwargs):
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": (
+                            "Сделал для вас таблицу.\n"
+                            "```crm_action\n"
+                            '{"action":"create_table","name":"Трекер вакансий",'
+                            '"columns":[{"name":"Компания","field_type":"text"}]}\n'
+                            "```"
+                        )
+                    }
+                }
+            ],
+            "usage": {"prompt_tokens": 12, "completion_tokens": 18, "total_tokens": 30},
+        }
+
+    captured_payload: dict[str, object] = {}
+
+    async def _fake_doc_handler(uow, org_id, user_id, action_payload, user_message=None):
+        _ = (uow, org_id, user_id, user_message)
+        captured_payload.update(action_payload)
+        return {
+            "action": "create_document",
+            "ok": True,
+            "file": {
+                "id": str(uuid.uuid4()),
+                "title": "Резюме",
+                "type": "docx",
+                "status": "draft",
+            },
+            "job": {
+                "id": str(uuid.uuid4()),
+                "status": "queued",
+                "file_type": "docx",
+                "title": "Резюме",
+                "estimated_request_tokens": 256,
+            },
+        }
+
+    monkeypatch.setattr(ai_chat_controller, "call_openai_compatible_api", _fake_call)
+    monkeypatch.setitem(ai_actions.ACTION_HANDLERS, "create_document", _fake_doc_handler)
+
+    try:
+        resp = await client.post(
+            "/api/v1/ai/chat",
+            json={
+                "message": "создай документ, не таблицу, оформи резюме",
+                "include_context": False,
+            },
+            headers=_headers(token),
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        action_result = body["data"]["action_result"]
+        assert action_result is not None
+        assert action_result["ok"] is True
+        assert action_result["action"] == "create_document"
+        assert captured_payload.get("action") == "create_document"
     finally:
         settings.OPENAI_BEARER_TOKEN = old_token
 

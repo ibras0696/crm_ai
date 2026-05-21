@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -65,6 +66,16 @@ _UI_INTENT_TO_DOMAIN: dict[str, IntentDomain] = {
 }
 
 
+def _marker_is_negated(text: str, marker: str) -> bool:
+    """Проверить, что marker употреблен в отрицательном контексте."""
+    escaped = re.escape(marker)
+    if " " in marker:
+        pattern = rf"(?:^|[\s,;:()])(?:не|not|without)\s+{escaped}"
+    else:
+        pattern = rf"(?:^|[\s,;:()])(?:не|not|without)\s+\w*{escaped}\w*"
+    return re.search(pattern, text) is not None
+
+
 def _normalize(text: str) -> str:
     return " ".join((text or "").strip().lower().split())
 
@@ -103,10 +114,21 @@ def _detect_domain(text: str, *, ui_intent: str | None) -> tuple[IntentDomain, l
     for domain, markers in _DOMAIN_MARKERS.items():
         if domain == "general":
             continue
-        hit_count = sum(1 for marker in markers if marker in text)
-        if hit_count > 0:
+        hit_count = 0
+        negated_count = 0
+        for marker in markers:
+            if marker not in text:
+                continue
+            if _marker_is_negated(text, marker):
+                negated_count += 1
+                reasons.append(f"{domain}_negated_marker:{marker}")
+                continue
+            hit_count += 1
+        if hit_count:
             scores[domain] += hit_count
             reasons.append(f"{domain}_markers:{hit_count}")
+        if negated_count:
+            scores[domain] -= negated_count * 2
 
     if ui_intent:
         mapped = _UI_INTENT_TO_DOMAIN.get(ui_intent.strip())

@@ -17,6 +17,7 @@ import {
   X,
   Wrench,
   CreditCard,
+  BookMarked,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useAuth } from '@/contexts/AuthContext'
@@ -123,6 +124,21 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed = false, 
       </nav>
 
       <div className="border-t border-sidebar-border p-3">
+        <NavLink
+          to="/guide"
+          onClick={isMobile ? onMobileClose : undefined}
+          className={({ isActive }) =>
+            cn(
+              'mb-2 flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all',
+              isActive ? 'bg-sidebar-accent text-sidebar-primary' : 'text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground',
+              isCollapsed && 'justify-center px-2'
+            )
+          }
+        >
+          <BookMarked className="h-5 w-5 shrink-0" />
+          {!isCollapsed && <span>{t('sidebar.modules.guide')}</span>}
+        </NavLink>
+
         <NavLink
           to="/settings"
           onClick={isMobile ? onMobileClose : undefined}

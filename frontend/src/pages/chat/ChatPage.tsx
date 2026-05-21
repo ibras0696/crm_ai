@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent } from 'react'
-import { Plus } from 'lucide-react'
 import { chatApi, type ChatInfo, type ChatMemberInfo, type ChatMessageInfo, type ChatMessageMeta } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
-import { Button } from '@/components/ui/button'
 import {
   CHAT_ATTACHMENT_MAX_BYTES,
   CHAT_ATTACHMENT_MAX_MB,
@@ -37,6 +35,7 @@ export default function ChatPage() {
   const [typingUsers, setTypingUsers] = useState<Record<string, number>>({})
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  const [dialogsQuery, setDialogsQuery] = useState('')
   const [replyToMessageId, setReplyToMessageId] = useState<string | null>(null)
   const [menuOpenMessageId, setMenuOpenMessageId] = useState<string | null>(null)
   const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({})
@@ -57,6 +56,7 @@ export default function ChatPage() {
   const [addMemberOpen, setAddMemberOpen] = useState(false)
   const [addingMemberUserId, setAddingMemberUserId] = useState('')
   const [addingMember, setAddingMember] = useState(false)
+  const [deleteChatConfirmOpen, setDeleteChatConfirmOpen] = useState(false)
   const [deletingChat, setDeletingChat] = useState(false)
 
   const [draft, setDraft] = useState('')
@@ -100,6 +100,7 @@ export default function ChatPage() {
     setIsAttachMenuOpen(false)
     setMediaPreview(null)
     setAddMemberOpen(false)
+    setDeleteChatConfirmOpen(false)
     setAddingMemberUserId('')
   }, [selectedChatId])
 
@@ -195,6 +196,17 @@ export default function ChatPage() {
     },
     [membersById, user?.id],
   )
+
+  const visibleChats = useMemo(() => {
+    const q = dialogsQuery.trim().toLowerCase()
+    if (!q) return chats
+    return chats.filter((chat) => {
+      const title = getChatDisplayTitle(chat).toLowerCase()
+      const type = String(chat.chat_type || '').toLowerCase()
+      const memberHit = chat.member_ids.some((memberId) => (membersById.get(memberId) || memberId).toLowerCase().includes(q))
+      return title.includes(q) || type.includes(q) || memberHit
+    })
+  }, [chats, dialogsQuery, getChatDisplayTitle, membersById])
 
   const visibleMessages = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
@@ -1242,9 +1254,6 @@ export default function ChatPage() {
 
   const handleDeleteSelectedChat = async () => {
     if (!selectedChat || deletingChat) return
-    const title = getChatDisplayTitle(selectedChat)
-    const confirmed = window.confirm(`Удалить чат "${title}"?\nСообщения и медиа будут удалены.`)
-    if (!confirmed) return
 
     setDeletingChat(true)
     setErrorText('')
@@ -1259,6 +1268,7 @@ export default function ChatPage() {
         setSelectedChatId(next[0]?.id || null)
         return next
       })
+      setDeleteChatConfirmOpen(false)
       setMessages([])
       setChatMembers([])
       setPresence({})
@@ -1348,7 +1358,7 @@ export default function ChatPage() {
   const renderChatList = (compact: boolean) => (
     <ChatList
       loadingChats={loadingChats}
-      chats={chats}
+      chats={visibleChats}
       selectedChatId={selectedChatId}
       compact={compact}
       getChatDisplayTitle={getChatDisplayTitle}
@@ -1358,18 +1368,12 @@ export default function ChatPage() {
 
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-bold">Чат</h1>
-        <Button
-          type="button"
-          size="icon"
-          onClick={() => setCreateChatOpen(true)}
-          aria-label="Создать чат"
-          title="Создать чат"
-        >
-          <Plus className="h-5 w-5" />
-        </Button>
+    <div className="space-y-3">
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">Мессенджер</h1>
+          <p className="text-sm text-muted-foreground">Диалоги, группы и вложения в одном окне</p>
+        </div>
       </div>
 
       {errorText && (
@@ -1401,6 +1405,12 @@ export default function ChatPage() {
         setAddingMemberUserId={setAddingMemberUserId}
         addingMember={addingMember}
         handleAddMemberToSelectedChat={handleAddMemberToSelectedChat}
+        deleteChatConfirmOpen={deleteChatConfirmOpen}
+        setDeleteChatConfirmOpen={setDeleteChatConfirmOpen}
+        canDeleteSelectedChat={canDeleteSelectedChat}
+        deletingChat={deletingChat}
+        selectedChatTitle={selectedChat ? getChatDisplayTitle(selectedChat) : ''}
+        handleDeleteSelectedChat={handleDeleteSelectedChat}
       />
 
       <ChatDialogsCard
@@ -1409,6 +1419,8 @@ export default function ChatPage() {
         isDesktopSidebarCollapsed={isDesktopSidebarCollapsed}
         setIsDesktopSidebarCollapsed={setIsDesktopSidebarCollapsed}
         renderChatList={renderChatList}
+        dialogsQuery={dialogsQuery}
+        setDialogsQuery={setDialogsQuery}
         selectedChat={selectedChat}
         getChatDisplayTitle={getChatDisplayTitle}
         selectedChatMembers={selectedChatMembers}
@@ -1421,7 +1433,7 @@ export default function ChatPage() {
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
         canDeleteSelectedChat={canDeleteSelectedChat}
-        handleDeleteSelectedChat={handleDeleteSelectedChat}
+        onRequestDeleteSelectedChat={() => setDeleteChatConfirmOpen(true)}
         deletingChat={deletingChat}
         messagesViewportRef={messagesViewportRef}
         handleMessagesScroll={handleMessagesScroll}
@@ -1481,6 +1493,7 @@ export default function ChatPage() {
         stopVoiceRecording={stopVoiceRecording}
         mediaPreview={mediaPreview}
         setMediaPreview={setMediaPreview}
+        onOpenCreateChat={() => setCreateChatOpen(true)}
       />
     </div>
   )

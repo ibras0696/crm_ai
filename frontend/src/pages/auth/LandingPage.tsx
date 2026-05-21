@@ -13,7 +13,7 @@ import {
   Globe, Sparkles, Layout,
   Search, Plus, MessageSquare, Send,
   ChevronRight, LineChart, Database, LayoutDashboard,
-  MousePointer2
+  MousePointer2, Layers
 } from 'lucide-react'
 import { LANDING_CONTENT, type LandingContent, type LandingLocale } from './landingContent'
 
@@ -173,11 +173,8 @@ const CursorManager = ({ cursorIndex }: { cursorIndex: number }) => {
 
 const Logo = () => (
   <div className="flex items-center gap-3 group cursor-pointer">
-    {/* Minimalist Solid Icon */}
     <div className="relative flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 text-primary transition-all duration-300 group-hover:scale-105 group-hover:bg-primary group-hover:text-primary-foreground group-hover:shadow-[0_0_20px_rgba(37,99,235,0.4)]">
-      <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-      </svg>
+      <Layers className="h-5 w-5" />
     </div>
 
     <div className="flex flex-col justify-center">

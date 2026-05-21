@@ -3,8 +3,8 @@ import { useState, useEffect, useCallback, useRef, useMemo, Component, type Erro
 import { useParams, useNavigate } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { tablesApi, recordsApi, TableInfo, RecordInfo, ColumnInfo } from '@/lib/api'
-import { ArrowLeft, Plus, Loader2, Trash2, X, Check, Type, Hash, Calendar, ToggleLeft, List, Link2, Mail, Phone, FileIcon, Download, Search, ArrowUpDown, ArrowUp, ArrowDown, Filter, ChevronLeft, ChevronRight, Pencil } from 'lucide-react'
+import { tablesApi, recordsApi, TableInfo, RecordInfo, ColumnInfo, TableViewInfo, RecordFilterItem, CsvImportPreview, CsvImportCommit, RecordHistoryItem, RelationOptionInfo, FormulaPreviewInfo } from '@/lib/api'
+import { ArrowLeft, Plus, Loader2, Trash2, X, Check, Type, Hash, Calendar, ToggleLeft, List, Link2, Mail, Phone, FileIcon, Download, Search, ArrowUpDown, ArrowUp, ArrowDown, Filter, ChevronLeft, ChevronRight, Pencil, Save, Upload, History, RotateCcw } from 'lucide-react'
 
 const FIELD_TYPES = [
   { value: 'text', label: 'Текст', icon: Type },
@@ -18,10 +18,15 @@ const FIELD_TYPES = [
   { value: 'email', label: 'Email', icon: Mail },
   { value: 'phone', label: 'Телефон', icon: Phone },
   { value: 'file', label: 'Файл', icon: FileIcon },
+  { value: 'relation', label: 'Связь', icon: Link2 },
+  { value: 'lookup', label: 'Lookup', icon: Search },
+  { value: 'rollup', label: 'Rollup', icon: Hash },
+  { value: 'formula', label: 'Формула', icon: Hash },
 ]
 const ftMap = Object.fromEntries(FIELD_TYPES.map(f => [f.value, f]))
 type CellValue = string | string[]
 const DATA_COLUMN_WIDTH = 240
+type FilterOp = 'contains' | 'eq' | 'neq' | 'gt' | 'lt' | 'between' | 'is_empty' | 'in'
 
 function isOptionFieldType(fieldType: string) {
   return fieldType === 'select' || fieldType === 'multi_select'
@@ -50,10 +55,77 @@ function parseOptionsText(value: string) {
   ))
 }
 
-function buildColumnConfig(fieldType: string, optionsText: string) {
-  if (!isOptionFieldType(fieldType)) return null
-  const options = parseOptionsText(optionsText)
-  return options.length > 0 ? { options } : null
+function relationConfigFromColumn(column: ColumnInfo | null | undefined): { related_table_id: string; multiple: boolean; related_column_id?: string } | null {
+  const cfg = column?.config
+  if (!cfg || typeof cfg !== 'object') return null
+  const relatedTableId = String((cfg as Record<string, unknown>).related_table_id || '').trim()
+  if (!relatedTableId) return null
+  const relatedColumnId = String((cfg as Record<string, unknown>).related_column_id || '').trim()
+  return {
+    related_table_id: relatedTableId,
+    multiple: Boolean((cfg as Record<string, unknown>).multiple),
+    related_column_id: relatedColumnId || undefined,
+  }
+}
+
+function lookupOrRollupConfigFromColumn(column: ColumnInfo | null | undefined): { relation_column_id?: string; lookup_column_id?: string; aggregation?: string } {
+  const cfg = column?.config
+  if (!cfg || typeof cfg !== 'object') return {}
+  const relationColumnId = String((cfg as Record<string, unknown>).relation_column_id || '').trim()
+  const lookupColumnId = String((cfg as Record<string, unknown>).lookup_column_id || '').trim()
+  const aggregation = String((cfg as Record<string, unknown>).aggregation || '').trim()
+  return {
+    relation_column_id: relationColumnId || undefined,
+    lookup_column_id: lookupColumnId || undefined,
+    aggregation: aggregation || undefined,
+  }
+}
+
+function formulaConfigFromColumn(column: ColumnInfo | null | undefined): { expression?: string; result_type?: string } {
+  const cfg = column?.config
+  if (!cfg || typeof cfg !== 'object') return {}
+  const expression = String((cfg as Record<string, unknown>).expression || '').trim()
+  const resultType = String((cfg as Record<string, unknown>).result_type || '').trim()
+  return {
+    expression: expression || undefined,
+    result_type: resultType || undefined,
+  }
+}
+
+function buildColumnConfig(draft: ColumnSettingsDraft) {
+  if (isOptionFieldType(draft.type)) {
+    const options = parseOptionsText(draft.optionsText)
+    return options.length > 0 ? { options } : null
+  }
+  if (draft.type === 'relation') {
+    if (!draft.relatedTableId) return null
+    return {
+      related_table_id: draft.relatedTableId,
+      related_column_id: draft.relatedColumnId || undefined,
+      multiple: draft.relationMultiple,
+    }
+  }
+  if (draft.type === 'lookup') {
+    if (!draft.relationColumnId || !draft.lookupColumnId) return null
+    return {
+      relation_column_id: draft.relationColumnId,
+      lookup_column_id: draft.lookupColumnId,
+    }
+  }
+  if (draft.type === 'rollup') {
+    if (!draft.relationColumnId || !draft.lookupColumnId) return null
+    return {
+      relation_column_id: draft.relationColumnId,
+      lookup_column_id: draft.lookupColumnId,
+      aggregation: draft.rollupAggregation,
+    }
+  }
+  if (draft.type === 'formula') {
+    const expression = draft.formulaExpression.trim()
+    if (!expression) return null
+    return { expression }
+  }
+  return null
 }
 
 function valueAsString(value: unknown) {
@@ -98,6 +170,36 @@ function getRequestErrorMessage(error: unknown, fallback: string) {
   }
   if (error instanceof Error && error.message) return error.message
   return fallback
+}
+
+type CsvWizardStep = 'upload' | 'mapping' | 'validate' | 'commit'
+
+function buildInitialCsvMapping(preview: CsvImportPreview, columns: ColumnInfo[]): Record<string, string> {
+  const byName = new Map(columns.map((col) => [col.name.trim().toLowerCase(), col.id]))
+  const fromPreview = new Map(
+    preview.matched_columns
+      .filter((item) => item.table_column_id && item.csv_column)
+      .map((item) => [String(item.csv_column), String(item.table_column_id)]),
+  )
+  const mapping: Record<string, string> = {}
+  for (const csvColumn of preview.header) {
+    const exact = fromPreview.get(csvColumn)
+    if (exact) {
+      mapping[csvColumn] = exact
+      continue
+    }
+    const byHeader = byName.get(csvColumn.trim().toLowerCase())
+    if (byHeader) {
+      mapping[csvColumn] = byHeader
+    }
+  }
+  return mapping
+}
+
+function actorLabel(actorId: string | null): string {
+  if (!actorId) return 'System'
+  if (actorId.length <= 12) return actorId
+  return `${actorId.slice(0, 8)}…${actorId.slice(-4)}`
 }
 
 function OptionConfigEditor({
@@ -228,14 +330,20 @@ function OptionConfigEditor({
 function EditableCell({
   value,
   column,
+  relationOptions,
   onSave,
 }: {
   value: unknown
   column: ColumnInfo
+  relationOptions?: RelationOptionInfo[]
   onSave: (v: CellValue) => void
 }) {
   const fieldType = column.field_type
   const options = getColumnOptions(column)
+  const relationCfg = relationConfigFromColumn(column)
+  const relationMultiple = Boolean(relationCfg?.multiple)
+  const relationChoices = relationOptions || []
+  const relationLabelById = useMemo(() => Object.fromEntries(relationChoices.map((o) => [o.id, o.label])), [relationChoices])
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(valueAsString(value))
   const [multiDraft, setMultiDraft] = useState<string[]>(valueAsList(value))
@@ -269,6 +377,76 @@ function EditableCell({
   if (fieldType === 'boolean') {
     const on = String(value) === 'true'
     return <button onClick={() => onSave(String(!on))} className={`h-6 w-11 rounded-full flex items-center px-0.5 transition-colors ${on ? 'bg-primary' : 'bg-secondary'}`}><span className={`h-5 w-5 rounded-full bg-white shadow transition-transform ${on ? 'translate-x-5' : 'translate-x-0'}`} /></button>
+  }
+  if (fieldType === 'lookup' || fieldType === 'rollup' || fieldType === 'formula') {
+    return <div className="min-h-[28px] w-full overflow-hidden px-1.5 py-1 rounded text-sm text-ellipsis whitespace-nowrap">{value ? fmtVal(value, fieldType) : <span className="text-muted-foreground/30 italic">—</span>}</div>
+  }
+  if (fieldType === 'relation') {
+    const selectedIds = relationMultiple ? valueAsList(value) : (valueAsString(value) ? [valueAsString(value)] : [])
+    const selectedLabels = selectedIds.map((id) => relationLabelById[id] || id).filter(Boolean)
+    if (!editing) {
+      return (
+        <div
+          onClick={() => setEditing(true)}
+          className="min-h-[28px] w-full overflow-hidden px-1.5 py-1 rounded cursor-pointer hover:bg-secondary/40 transition-colors text-sm text-ellipsis whitespace-nowrap"
+        >
+          {selectedLabels.length > 0 ? selectedLabels.join(', ') : <span className="text-muted-foreground/30 italic">Выбрать связь</span>}
+        </div>
+      )
+    }
+    if (relationMultiple) {
+      return (
+        <div className="relative min-h-[28px]">
+          <div className="absolute left-0 top-0 z-20 w-[260px] rounded-lg border border-primary/50 bg-background p-2 ring-1 ring-primary/20 shadow-xl">
+            <div className="max-h-40 overflow-y-auto space-y-1">
+              {relationChoices.map((option) => {
+                const checked = multiDraft.includes(option.id)
+                return (
+                  <label key={option.id} className="flex items-center gap-2 rounded px-1.5 py-1 text-sm hover:bg-secondary/40 cursor-pointer">
+                    <input type="checkbox" checked={checked} onChange={() => toggleMultiDraft(option.id)} />
+                    <span className="truncate">{option.label}</span>
+                  </label>
+                )
+              })}
+            </div>
+            <div className="mt-2 flex justify-end gap-1">
+              <button
+                onClick={() => {
+                  committed.current = true
+                  setEditing(false)
+                  onSave(multiDraft)
+                }}
+                className="h-7 px-2 rounded bg-primary text-white text-xs hover:bg-primary/90"
+              >
+                Готово
+              </button>
+              <button onClick={() => { setMultiDraft(valueAsList(value)); setEditing(false) }} className="h-7 px-2 rounded text-xs text-muted-foreground hover:bg-secondary">Отмена</button>
+            </div>
+          </div>
+        </div>
+      )
+    }
+    return (
+      <div className="relative min-h-[28px]">
+        <div className="absolute left-0 top-0 z-20 w-[240px] rounded-lg border border-primary/50 bg-background p-2 shadow-xl ring-1 ring-primary/20">
+          <select
+            autoFocus
+            value={draft}
+            onBlur={() => setEditing(false)}
+            onChange={(e) => {
+              committed.current = true
+              setDraft(e.target.value)
+              setEditing(false)
+              onSave(e.target.value)
+            }}
+            className="w-full h-8 rounded border border-input bg-background px-2 text-sm outline-none"
+          >
+            <option value="">— без связи —</option>
+            {relationChoices.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
+          </select>
+        </div>
+      </div>
+    )
   }
   if (fieldType === 'select' && options.length > 0) {
     if (!editing) return <div onClick={() => setEditing(true)} className="min-h-[28px] w-full overflow-hidden px-1.5 py-1 rounded cursor-pointer hover:bg-secondary/40 transition-colors text-sm text-ellipsis whitespace-nowrap">{draft ? fmtVal(value, fieldType) : <span className="text-muted-foreground/30 italic">Выбрать</span>}</div>
@@ -338,6 +516,28 @@ type ColumnSettingsDraft = {
   name: string
   type: string
   optionsText: string
+  relatedTableId: string
+  relationMultiple: boolean
+  relatedColumnId: string
+  relationColumnId: string
+  lookupColumnId: string
+  rollupAggregation: 'count' | 'sum' | 'avg' | 'min' | 'max'
+  formulaExpression: string
+}
+
+function emptyColumnDraft(): ColumnSettingsDraft {
+  return {
+    name: '',
+    type: 'text',
+    optionsText: '',
+    relatedTableId: '',
+    relationMultiple: false,
+    relatedColumnId: '',
+    relationColumnId: '',
+    lookupColumnId: '',
+    rollupAggregation: 'count',
+    formulaExpression: '',
+  }
 }
 
 function ColumnSettingsModal({
@@ -347,8 +547,14 @@ function ColumnSettingsModal({
   draft,
   optionsOpen,
   saving,
+  allTables,
+  currentTableId,
+  currentColumns,
   onDraftChange,
   onToggleOptions,
+  formulaPreview,
+  formulaPreviewLoading,
+  onPreviewFormula,
   onClose,
   onSubmit,
 }: {
@@ -358,8 +564,14 @@ function ColumnSettingsModal({
   draft: ColumnSettingsDraft
   optionsOpen: boolean
   saving: boolean
+  allTables: TableInfo[]
+  currentTableId: string
+  currentColumns: ColumnInfo[]
   onDraftChange: (patch: Partial<ColumnSettingsDraft>) => void
   onToggleOptions: () => void
+  formulaPreview: FormulaPreviewInfo | null
+  formulaPreviewLoading: boolean
+  onPreviewFormula: () => void
   onClose: () => void
   onSubmit: () => void
 }) {
@@ -372,6 +584,16 @@ function ColumnSettingsModal({
 
   const optionsEnabled = isOptionFieldType(draft.type)
   const optionsCount = parseOptionsText(draft.optionsText).length
+  const relationColumns = currentColumns.filter((col) => col.field_type === 'relation')
+  const relationTableOptions = allTables.filter((tbl) => tbl.id !== currentTableId)
+  const selectedRelationColumn = relationColumns.find((col) => col.id === draft.relationColumnId) || null
+  const selectedRelationConfig = relationConfigFromColumn(selectedRelationColumn)
+  const lookupTargetTableId = draft.type === 'relation'
+    ? draft.relatedTableId
+    : (selectedRelationConfig?.related_table_id || '')
+  const lookupTargetTable = allTables.find((tbl) => tbl.id === lookupTargetTableId) || null
+  const lookupTargetColumns = lookupTargetTable?.columns || []
+  const canSubmit = Boolean(draft.name.trim() && (draft.type !== 'formula' || draft.formulaExpression.trim()))
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -422,12 +644,168 @@ function ColumnSettingsModal({
               )}
             </div>
           )}
+          {draft.type === 'relation' && (
+            <div className="rounded-xl border border-border bg-secondary/15 p-3 space-y-3">
+              <div className="text-sm font-medium text-foreground">Настройки связи</div>
+              <label className="block">
+                <div className="mb-2 text-xs font-medium text-muted-foreground">Связанная таблица</div>
+                <select
+                  value={draft.relatedTableId}
+                  onChange={(e) => onDraftChange({ relatedTableId: e.target.value, relatedColumnId: '' })}
+                  className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-primary"
+                >
+                  <option value="">— выберите таблицу —</option>
+                  {relationTableOptions.map((tbl) => (
+                    <option key={tbl.id} value={tbl.id}>{tbl.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <div className="mb-2 text-xs font-medium text-muted-foreground">Колонка отображения (опционально)</div>
+                <select
+                  value={draft.relatedColumnId}
+                  onChange={(e) => onDraftChange({ relatedColumnId: e.target.value })}
+                  className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-primary"
+                >
+                  <option value="">Primary колонка</option>
+                  {lookupTargetColumns.map((col) => (
+                    <option key={col.id} value={col.id}>{col.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={draft.relationMultiple}
+                  onChange={(e) => onDraftChange({ relationMultiple: e.target.checked })}
+                />
+                <span>Разрешить несколько связанных записей</span>
+              </label>
+            </div>
+          )}
+          {draft.type === 'lookup' && (
+            <div className="rounded-xl border border-border bg-secondary/15 p-3 space-y-3">
+              <div className="text-sm font-medium text-foreground">Настройки Lookup</div>
+              <label className="block">
+                <div className="mb-2 text-xs font-medium text-muted-foreground">Relation-колонка</div>
+                <select
+                  value={draft.relationColumnId}
+                  onChange={(e) => onDraftChange({ relationColumnId: e.target.value, lookupColumnId: '' })}
+                  className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-primary"
+                >
+                  <option value="">— выберите relation-колонку —</option>
+                  {relationColumns.map((col) => (
+                    <option key={col.id} value={col.id}>{col.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <div className="mb-2 text-xs font-medium text-muted-foreground">Lookup-колонка</div>
+                <select
+                  value={draft.lookupColumnId}
+                  onChange={(e) => onDraftChange({ lookupColumnId: e.target.value })}
+                  className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-primary"
+                >
+                  <option value="">— выберите колонку —</option>
+                  {lookupTargetColumns.map((col) => (
+                    <option key={col.id} value={col.id}>{col.name}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          )}
+          {draft.type === 'rollup' && (
+            <div className="rounded-xl border border-border bg-secondary/15 p-3 space-y-3">
+              <div className="text-sm font-medium text-foreground">Настройки Rollup</div>
+              <label className="block">
+                <div className="mb-2 text-xs font-medium text-muted-foreground">Relation-колонка</div>
+                <select
+                  value={draft.relationColumnId}
+                  onChange={(e) => onDraftChange({ relationColumnId: e.target.value, lookupColumnId: '' })}
+                  className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-primary"
+                >
+                  <option value="">— выберите relation-колонку —</option>
+                  {relationColumns.map((col) => (
+                    <option key={col.id} value={col.id}>{col.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <div className="mb-2 text-xs font-medium text-muted-foreground">Колонка для агрегирования</div>
+                <select
+                  value={draft.lookupColumnId}
+                  onChange={(e) => onDraftChange({ lookupColumnId: e.target.value })}
+                  className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-primary"
+                >
+                  <option value="">— выберите колонку —</option>
+                  {lookupTargetColumns.map((col) => (
+                    <option key={col.id} value={col.id}>{col.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <div className="mb-2 text-xs font-medium text-muted-foreground">Агрегация</div>
+                <select
+                  value={draft.rollupAggregation}
+                  onChange={(e) => onDraftChange({ rollupAggregation: (e.target.value as ColumnSettingsDraft['rollupAggregation']) })}
+                  className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm outline-none focus:border-primary"
+                >
+                  <option value="count">count</option>
+                  <option value="sum">sum</option>
+                  <option value="avg">avg</option>
+                  <option value="min">min</option>
+                  <option value="max">max</option>
+                </select>
+              </label>
+            </div>
+          )}
+          {draft.type === 'formula' && (
+            <div className="rounded-xl border border-border bg-secondary/15 p-3 space-y-3">
+              <div className="text-sm font-medium text-foreground">Настройки Formula</div>
+              <label className="block">
+                <div className="mb-2 text-xs font-medium text-muted-foreground">Выражение</div>
+                <textarea
+                  value={draft.formulaExpression}
+                  onChange={(e) => onDraftChange({ formulaExpression: e.target.value })}
+                  rows={4}
+                  placeholder={'IF(GT({column_id}, 100), "High", "Low")'}
+                  className="w-full resize-y rounded-xl border border-input bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+                />
+              </label>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={onPreviewFormula}
+                  disabled={formulaPreviewLoading || !draft.formulaExpression.trim()}
+                  className="h-9 px-3 rounded-lg border border-border text-sm text-foreground hover:bg-secondary disabled:opacity-50 transition-colors"
+                >
+                  {formulaPreviewLoading ? 'Проверка...' : 'Live preview'}
+                </button>
+                <div className="text-xs text-muted-foreground">Поддержка: IF, CONCAT, DATE_DIFF, ROUND</div>
+              </div>
+              {formulaPreview && (
+                <div className={`rounded-lg border p-3 text-xs ${formulaPreview.is_valid ? 'border-emerald-300/50 bg-emerald-500/5' : 'border-destructive/40 bg-destructive/5'}`}>
+                  <div className="font-medium">
+                    {formulaPreview.is_valid ? 'Формула валидна' : 'Ошибка формулы'}
+                  </div>
+                  {formulaPreview.error ? (
+                    <div className="mt-1 text-destructive">{formulaPreview.error}</div>
+                  ) : (
+                    <div className="mt-1 text-foreground">Preview: {valueAsString(formulaPreview.value_preview)}</div>
+                  )}
+                  {formulaPreview.warnings.length > 0 && (
+                    <div className="mt-1 text-amber-500">{formulaPreview.warnings.join(' • ')}</div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="mt-6 flex justify-end gap-2">
           <button onClick={onClose} className="h-10 px-4 rounded-xl border border-border text-sm text-muted-foreground hover:bg-secondary transition-colors">
             Отмена
           </button>
-          <button onClick={onSubmit} disabled={saving || !draft.name.trim()} className="h-10 px-5 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors">
+          <button onClick={onSubmit} disabled={saving || !canSubmit} className="h-10 px-5 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors">
             {saving ? 'Сохранение...' : submitLabel}
           </button>
         </div>
@@ -499,19 +877,118 @@ function TableDetailPageContent() {
   const [sortCol, setSortCol] = useState<string | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [filterCol, setFilterCol] = useState<string>('')
+  const [filterOp, setFilterOp] = useState<FilterOp>('contains')
   const [filterVal, setFilterVal] = useState<string>('')
+  const [filterValTo, setFilterValTo] = useState<string>('')
   const [showFilter, setShowFilter] = useState(false)
   const [saveError, setSaveError] = useState('')
   const [page, setPage] = useState(0)
   const [columnDialog, setColumnDialog] = useState<{ mode: 'create' } | { mode: 'edit'; columnId: string } | null>(null)
-  const [columnDraft, setColumnDraft] = useState<ColumnSettingsDraft>({ name: '', type: 'text', optionsText: '' })
+  const [columnDraft, setColumnDraft] = useState<ColumnSettingsDraft>(emptyColumnDraft())
   const [columnOptionsOpen, setColumnOptionsOpen] = useState(false)
+  const [formulaPreview, setFormulaPreview] = useState<FormulaPreviewInfo | null>(null)
+  const [formulaPreviewLoading, setFormulaPreviewLoading] = useState(false)
   const [savingColumn, setSavingColumn] = useState(false)
   const [movingRecordId, setMovingRecordId] = useState<string | null>(null)
   const [exporting, setExporting] = useState<'csv' | 'xlsx' | null>(null)
+  const [views, setViews] = useState<TableViewInfo[]>([])
+  const [selectedRecordIds, setSelectedRecordIds] = useState<Set<string>>(new Set())
+  const [bulkColumnId, setBulkColumnId] = useState('')
+  const [bulkValue, setBulkValue] = useState('')
+  const [importing, setImporting] = useState(false)
+  const [csvWizardOpen, setCsvWizardOpen] = useState(false)
+  const [csvWizardStep, setCsvWizardStep] = useState<CsvWizardStep>('upload')
+  const [csvWizardMode, setCsvWizardMode] = useState<'append' | 'replace'>('append')
+  const [csvWizardFile, setCsvWizardFile] = useState<File | null>(null)
+  const [csvWizardPreview, setCsvWizardPreview] = useState<CsvImportPreview | null>(null)
+  const [csvWizardMapping, setCsvWizardMapping] = useState<Record<string, string>>({})
+  const [csvWizardStrict, setCsvWizardStrict] = useState(false)
+  const [csvWizardCommit, setCsvWizardCommit] = useState<CsvImportCommit | null>(null)
+  const [csvWizardError, setCsvWizardError] = useState('')
+  const [historyRecordId, setHistoryRecordId] = useState<string | null>(null)
+  const [historyItems, setHistoryItems] = useState<RecordHistoryItem[]>([])
+  const [historyTotal, setHistoryTotal] = useState(0)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [rollingBackRecordId, setRollingBackRecordId] = useState<string | null>(null)
+  const [tablesCatalog, setTablesCatalog] = useState<TableInfo[]>([])
+  const [relationOptionsByColumn, setRelationOptionsByColumn] = useState<Record<string, RelationOptionInfo[]>>({})
+  const csvWizardFileInputRef = useRef<HTMLInputElement>(null)
   const moveLockRef = useRef(false)
 
-  const load = useCallback(async () => {
+  const allColumns = useMemo(
+    () => (Array.isArray(table?.columns) ? table.columns : []).filter(isColumnInfo).sort((a, b) => a.position - b.position),
+    [table],
+  )
+
+  const buildFilterPayload = useCallback((): RecordFilterItem[] => {
+    if (!filterCol) return []
+    if (filterOp === 'is_empty') {
+      return [{ col_id: filterCol, op: 'is_empty' }]
+    }
+    if (filterOp === 'between') {
+      if (!filterVal.trim() || !filterValTo.trim()) return []
+      return [{ col_id: filterCol, op: 'between', value: { from: filterVal.trim(), to: filterValTo.trim() } }]
+    }
+    if (filterOp === 'in') {
+      const items = filterVal
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+      if (items.length === 0) return []
+      return [{ col_id: filterCol, op: 'in', value: items }]
+    }
+    if (!filterVal.trim()) return []
+    return [{ col_id: filterCol, op: filterOp, value: filterVal.trim() }]
+  }, [filterCol, filterOp, filterVal, filterValTo])
+
+  const loadTablesCatalog = useCallback(async () => {
+    try {
+      const resp = await tablesApi.list()
+      if (resp.data.ok && Array.isArray(resp.data.data)) {
+        setTablesCatalog(resp.data.data)
+      } else {
+        setTablesCatalog([])
+      }
+    } catch {
+      setTablesCatalog([])
+    }
+  }, [])
+
+  const loadRelationOptionsForTable = useCallback(async (tableValue: TableInfo) => {
+    if (!tableId) {
+      setRelationOptionsByColumn({})
+      return
+    }
+    const relationCols = (tableValue.columns || []).filter((col) => col.field_type === 'relation')
+    if (relationCols.length === 0) {
+      setRelationOptionsByColumn({})
+      return
+    }
+    const entries = await Promise.all(relationCols.map(async (col) => {
+      try {
+        const resp = await tablesApi.relationOptions(tableId, col.id, { limit: 200 })
+        const options = resp.data.ok && Array.isArray(resp.data.data) ? resp.data.data : []
+        return [col.id, options] as const
+      } catch {
+        return [col.id, []] as const
+      }
+    }))
+    setRelationOptionsByColumn(Object.fromEntries(entries))
+  }, [tableId])
+
+  const loadViews = useCallback(async () => {
+    if (!tableId) return
+    try {
+      const resp = await tablesApi.listViews(tableId)
+      if (resp.data.ok && Array.isArray(resp.data.data)) {
+        setViews(resp.data.data)
+      }
+    } catch {
+      setViews([])
+    }
+  }, [tableId])
+
+  const loadMeta = useCallback(async () => {
     if (!tableId) return
     setLoading(true)
     setLoadError(false)
@@ -522,55 +999,108 @@ function TableDetailPageContent() {
     setSortCol(null)
     setSortDir('asc')
     setFilterCol('')
+    setFilterOp('contains')
     setFilterVal('')
+    setFilterValTo('')
     setPage(0)
     setShowNewRow(false)
+    setSelectedRecordIds(new Set())
+    setCsvWizardOpen(false)
+    setCsvWizardStep('upload')
+    setCsvWizardFile(null)
+    setCsvWizardPreview(null)
+    setCsvWizardMapping({})
+    setCsvWizardCommit(null)
+    setCsvWizardError('')
+    setHistoryRecordId(null)
+    setHistoryItems([])
+    setHistoryTotal(0)
+    setRelationOptionsByColumn({})
     try {
+      await loadTablesCatalog()
       const tR = await tablesApi.get(tableId)
       if (!tR.data.ok || !tR.data.data) {
         setLoadError(true)
         return
       }
       setTable(tR.data.data)
-
-      const rR = await recordsApi.list(tableId, 500)
-      if (rR.data.ok && rR.data.data) {
-        const normalized = (rR.data.data.records ?? [])
-          .filter(isRecordInfo)
-          .map((r) => ({ ...r, data: safeRecordData(r.data) }))
-        setRecords(normalized)
-        setTotal(typeof rR.data.data.total === 'number' ? rR.data.data.total : normalized.length)
-      }
+      await loadRelationOptionsForTable(tR.data.data)
+      await loadViews()
     } catch {
       setLoadError(true)
     } finally {
       setLoading(false)
     }
-  }, [tableId])
+  }, [tableId, loadRelationOptionsForTable, loadTablesCatalog, loadViews])
 
-  useEffect(() => { load() }, [load])
+  const loadRecords = useCallback(async () => {
+    if (!tableId) return
+    const payload = {
+      search: search.trim() || undefined,
+      filters: buildFilterPayload(),
+      sorts: sortCol ? [{ col_id: sortCol, dir: sortDir }] : [],
+    }
+    try {
+      const resp = await recordsApi.filter(tableId, payload, PAGE_SIZE, page * PAGE_SIZE)
+      if (resp.data.ok && resp.data.data) {
+        const normalized = (resp.data.data.records ?? [])
+          .filter(isRecordInfo)
+          .map((r) => ({ ...r, data: safeRecordData(r.data) }))
+        setRecords(normalized)
+        setTotal(typeof resp.data.data.total === 'number' ? resp.data.data.total : normalized.length)
+      } else {
+        setRecords([])
+        setTotal(0)
+      }
+    } catch {
+      setRecords([])
+      setTotal(0)
+    }
+  }, [tableId, search, buildFilterPayload, sortCol, sortDir, page])
+
+  useEffect(() => { loadMeta() }, [loadMeta])
+  useEffect(() => {
+    if (!tableId || loadError) return
+    void loadRecords()
+  }, [tableId, loadError, loadRecords])
 
   const closeColumnDialog = () => {
     setColumnDialog(null)
-    setColumnDraft({ name: '', type: 'text', optionsText: '' })
+    setColumnDraft(emptyColumnDraft())
     setColumnOptionsOpen(false)
+    setFormulaPreview(null)
+    setFormulaPreviewLoading(false)
     setSavingColumn(false)
   }
 
   const openCreateColumnDialog = () => {
     setColumnDialog({ mode: 'create' })
-    setColumnDraft({ name: '', type: 'text', optionsText: '' })
+    setColumnDraft(emptyColumnDraft())
     setColumnOptionsOpen(false)
+    setFormulaPreview(null)
+    setFormulaPreviewLoading(false)
   }
 
   const openEditColumnDialog = (col: ColumnInfo) => {
+    const relationCfg = relationConfigFromColumn(col)
+    const lookupCfg = lookupOrRollupConfigFromColumn(col)
+    const formulaCfg = formulaConfigFromColumn(col)
     setColumnDialog({ mode: 'edit', columnId: col.id })
     setColumnDraft({
       name: col.name,
       type: col.field_type,
       optionsText: optionsToMultiline(getColumnOptions(col)),
+      relatedTableId: relationCfg?.related_table_id || '',
+      relationMultiple: relationCfg?.multiple || false,
+      relatedColumnId: relationCfg?.related_column_id || '',
+      relationColumnId: lookupCfg.relation_column_id || '',
+      lookupColumnId: lookupCfg.lookup_column_id || '',
+      rollupAggregation: (lookupCfg.aggregation as ColumnSettingsDraft['rollupAggregation']) || 'count',
+      formulaExpression: formulaCfg.expression || '',
     })
     setColumnOptionsOpen(false)
+    setFormulaPreview(null)
+    setFormulaPreviewLoading(false)
   }
 
   const updateColumnDraft = (patch: Partial<ColumnSettingsDraft>) => {
@@ -578,17 +1108,73 @@ function TableDetailPageContent() {
     if ('type' in patch && !isOptionFieldType(nextType)) {
       setColumnOptionsOpen(false)
     }
-    setColumnDraft((prev) => ({ ...prev, ...patch }))
+    if ('type' in patch || 'formulaExpression' in patch) {
+      setFormulaPreview(null)
+    }
+    setColumnDraft((prev) => {
+      const next = { ...prev, ...patch }
+      if (patch.type && patch.type !== prev.type) {
+        if (patch.type !== 'relation') {
+          next.relatedTableId = ''
+          next.relationMultiple = false
+          next.relatedColumnId = ''
+        }
+        if (patch.type !== 'lookup' && patch.type !== 'rollup') {
+          next.relationColumnId = ''
+          next.lookupColumnId = ''
+          next.rollupAggregation = 'count'
+        }
+        if (patch.type !== 'formula') {
+          next.formulaExpression = ''
+        }
+      }
+      return next
+    })
+  }
+
+  const handlePreviewFormula = async () => {
+    if (!tableId || columnDraft.type !== 'formula') return
+    const expression = columnDraft.formulaExpression.trim()
+    if (!expression) return
+    setFormulaPreviewLoading(true)
+    try {
+      const sampleRow = records[0] ? safeRecordData(records[0].data) : undefined
+      const resp = await tablesApi.previewFormula(tableId, { expression, sample_row: sampleRow })
+      if (resp.data.ok && resp.data.data) {
+        setFormulaPreview(resp.data.data)
+      } else {
+        setFormulaPreview({
+          expression,
+          referenced_column_ids: [],
+          value_preview: null,
+          warnings: [],
+          is_valid: false,
+          error: resp.data.error?.message || 'Не удалось провалидировать формулу',
+        })
+      }
+    } catch (error) {
+      setFormulaPreview({
+        expression,
+        referenced_column_ids: [],
+        value_preview: null,
+        warnings: [],
+        is_valid: false,
+        error: getRequestErrorMessage(error, 'Не удалось провалидировать формулу'),
+      })
+    } finally {
+      setFormulaPreviewLoading(false)
+    }
   }
 
   const submitColumnDialog = async () => {
     if (!tableId || !columnDialog || !columnDraft.name.trim()) return
+    if (columnDraft.type === 'formula' && !columnDraft.formulaExpression.trim()) return
     setSavingColumn(true)
     try {
       const payload = {
         name: columnDraft.name.trim(),
         field_type: columnDraft.type,
-        config: buildColumnConfig(columnDraft.type, columnDraft.optionsText),
+        config: buildColumnConfig(columnDraft),
       }
       if (columnDialog.mode === 'create') {
         await tablesApi.createColumn(tableId, payload)
@@ -596,7 +1182,7 @@ function TableDetailPageContent() {
         await tablesApi.updateColumn(tableId, columnDialog.columnId, payload)
       }
       closeColumnDialog()
-      await load()
+      await loadMeta()
     } finally {
       setSavingColumn(false)
     }
@@ -605,7 +1191,7 @@ function TableDetailPageContent() {
   const handleDeleteColumn = async (colId: string) => {
     if (!tableId) return
     await tablesApi.deleteColumn(tableId, colId)
-    await load()
+    await loadMeta()
   }
 
   const handleAddRecord = async () => {
@@ -614,10 +1200,9 @@ function TableDetailPageContent() {
     try {
       const resp = await recordsApi.create(tableId, newRowData)
       if (resp.data.ok && resp.data.data) {
-        setRecords(prev => [...prev, resp.data.data!])
-        setTotal(prev => prev + 1)
         setNewRowData({})
         setShowNewRow(false)
+        await loadRecords()
       }
     } catch { /* ignore */ }
     setAddingRecord(false)
@@ -629,8 +1214,7 @@ function TableDetailPageContent() {
     try {
       const resp = await recordsApi.create(tableId, {})
       if (resp.data.ok && resp.data.data) {
-        setRecords(prev => [...prev, resp.data.data!])
-        setTotal(prev => prev + 1)
+        await loadRecords()
       }
     } catch { /* ignore */ }
     setAddingRecord(false)
@@ -658,11 +1242,7 @@ function TableDetailPageContent() {
       setRecords(prev => prev.map(r => r.id === recordId ? previousRecord : r))
       setSaveError(getRequestErrorMessage(error, 'Не удалось сохранить ячейку'))
       try {
-        const sync = await recordsApi.list(tableId, 500)
-        if (sync.data.ok && sync.data.data) {
-          setRecords(sync.data.data.records)
-          setTotal(sync.data.data.total)
-        }
+        await loadRecords()
       } catch {
         // leave local rollback state if refresh fails
       }
@@ -673,8 +1253,12 @@ function TableDetailPageContent() {
   const handleDeleteRecord = async (recordId: string) => {
     if (!tableId) return
     await recordsApi.delete(tableId, recordId)
-    setRecords(prev => prev.filter(r => r.id !== recordId))
-    setTotal(prev => prev - 1)
+    setSelectedRecordIds((prev) => {
+      const next = new Set(prev)
+      next.delete(recordId)
+      return next
+    })
+    await loadRecords()
   }
 
   const handleMoveRecord = async (recordId: string, direction: 'up' | 'down') => {
@@ -705,14 +1289,7 @@ function TableDetailPageContent() {
       }
 
       // Final sync to guarantee strict order from server without manual refresh.
-      const sync = await recordsApi.list(tableId, 500)
-      if (sync.data.ok && sync.data.data) {
-        const normalized = (sync.data.data.records ?? [])
-          .filter(isRecordInfo)
-          .map((r) => ({ ...r, data: safeRecordData(r.data) }))
-        setRecords(normalized)
-        setTotal(typeof sync.data.data.total === 'number' ? sync.data.data.total : normalized.length)
-      }
+      await loadRecords()
     } catch {
       setRecords(before)
     } finally {
@@ -749,41 +1326,14 @@ function TableDetailPageContent() {
     }
   }
 
-  const columns = (Array.isArray(table?.columns) ? table.columns : [])
-    .filter(isColumnInfo)
-    .sort((a: ColumnInfo, b: ColumnInfo) => a.position - b.position)
-
-  // --- Client-side search / filter / sort ---
-  const processedRecords = useMemo(() => {
-    let result = [...records]
-    // Search across all fields
-    if (search.trim()) {
-      const q = search.trim().toLowerCase()
-      result = result.filter(r =>
-        columns.some(col => String(safeRecordData(r.data)[col.id] ?? '').toLowerCase().includes(q))
-      )
-    }
-    // Column filter
-    if (filterCol && filterVal.trim()) {
-      const fv = filterVal.trim().toLowerCase()
-      result = result.filter(r => String(safeRecordData(r.data)[filterCol] ?? '').toLowerCase().includes(fv))
-    }
-    // Sort
-    if (sortCol) {
-      result.sort((a, b) => {
-        const av = String(safeRecordData(a.data)[sortCol] ?? '')
-        const bv = String(safeRecordData(b.data)[sortCol] ?? '')
-        const na = parseFloat(av), nb = parseFloat(bv)
-        const cmp = !isNaN(na) && !isNaN(nb) ? na - nb : av.localeCompare(bv, 'ru')
-        return sortDir === 'asc' ? cmp : -cmp
-      })
-    }
-    return result
-  }, [records, search, filterCol, filterVal, sortCol, sortDir, columns])
-
-  const totalPages = Math.ceil(processedRecords.length / PAGE_SIZE)
-  const pagedRecords = processedRecords.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
-  const canManualReorder = !search.trim() && !filterCol && !sortCol
+  const columns = allColumns
+  const columnNameById = useMemo(
+    () => Object.fromEntries(columns.map((col) => [col.id, col.name])),
+    [columns],
+  )
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const pagedRecords = records
+  const canManualReorder = !search.trim() && !filterCol && !sortCol && page === 0 && total <= PAGE_SIZE
 
   const handleSort = (colId: string) => {
     if (sortCol === colId) {
@@ -793,6 +1343,251 @@ function TableDetailPageContent() {
       setSortCol(colId); setSortDir('asc')
     }
     setPage(0)
+  }
+
+  const saveCurrentView = async () => {
+    if (!tableId) return
+    const name = window.prompt('Название представления')
+    if (!name || !name.trim()) return
+    const payload = {
+      name: name.trim(),
+      view_type: 'grid',
+      filters: buildFilterPayload(),
+      sorts: sortCol ? [{ col_id: sortCol, dir: sortDir }] : [],
+      config: { search: search.trim() || '' },
+    }
+    await tablesApi.createView(tableId, payload)
+    await loadViews()
+  }
+
+  const applyView = useCallback((view: TableViewInfo) => {
+    const config = (view.config || {}) as Record<string, unknown>
+    const savedSearch = typeof config.search === 'string' ? config.search : ''
+    setSearch(savedSearch)
+
+    const sortItems = Array.isArray(view.sorts) ? view.sorts : []
+    const firstSort = sortItems.find((item) => item && typeof item === 'object') as { col_id?: string; dir?: 'asc' | 'desc' } | undefined
+    if (firstSort?.col_id) {
+      setSortCol(firstSort.col_id)
+      setSortDir(firstSort.dir === 'desc' ? 'desc' : 'asc')
+    } else {
+      setSortCol(null)
+      setSortDir('asc')
+    }
+
+    const filterItems = Array.isArray(view.filters) ? view.filters : []
+    const firstFilter = filterItems.find((item) => item && typeof item === 'object') as { col_id?: string; op?: FilterOp; value?: unknown } | undefined
+    if (firstFilter?.col_id) {
+      setFilterCol(firstFilter.col_id)
+      setFilterOp(firstFilter.op || 'contains')
+      if (firstFilter.op === 'between' && firstFilter.value && typeof firstFilter.value === 'object') {
+        const betweenVal = firstFilter.value as { from?: unknown; to?: unknown }
+        setFilterVal(String(betweenVal.from ?? ''))
+        setFilterValTo(String(betweenVal.to ?? ''))
+      } else if (firstFilter.op === 'in' && Array.isArray(firstFilter.value)) {
+        setFilterVal(firstFilter.value.map((v) => String(v ?? '')).join(', '))
+        setFilterValTo('')
+      } else {
+        setFilterVal(String(firstFilter.value ?? ''))
+        setFilterValTo('')
+      }
+    } else {
+      setFilterCol('')
+      setFilterOp('contains')
+      setFilterVal('')
+      setFilterValTo('')
+    }
+    setPage(0)
+  }, [])
+
+  useEffect(() => {
+    const defaultView = views.find((view) => view.is_default)
+    if (!defaultView) return
+    applyView(defaultView)
+  }, [views, applyView])
+
+  const setDefaultView = async (viewId: string) => {
+    if (!tableId) return
+    await tablesApi.updateView(tableId, viewId, { is_default: true })
+    await loadViews()
+  }
+
+  const deleteView = async (viewId: string) => {
+    if (!tableId) return
+    await tablesApi.deleteView(tableId, viewId)
+    await loadViews()
+  }
+
+  const toggleSelectRecord = (recordId: string, checked: boolean) => {
+    setSelectedRecordIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(recordId)
+      else next.delete(recordId)
+      return next
+    })
+  }
+
+  const toggleSelectAllPageRecords = (checked: boolean) => {
+    setSelectedRecordIds((prev) => {
+      const next = new Set(prev)
+      for (const rec of pagedRecords) {
+        if (checked) next.add(rec.id)
+        else next.delete(rec.id)
+      }
+      return next
+    })
+  }
+
+  const handleBulkDelete = async () => {
+    if (!tableId || selectedRecordIds.size === 0) return
+    await recordsApi.bulkDelete(tableId, Array.from(selectedRecordIds))
+    setSelectedRecordIds(new Set())
+    await loadRecords()
+  }
+
+  const handleBulkUpdate = async () => {
+    if (!tableId || selectedRecordIds.size === 0 || !bulkColumnId) return
+    await recordsApi.bulkUpdate(tableId, Array.from(selectedRecordIds), { [bulkColumnId]: bulkValue })
+    setSelectedRecordIds(new Set())
+    await loadRecords()
+  }
+
+  const openCsvWizard = () => {
+    setCsvWizardOpen(true)
+    setCsvWizardStep('upload')
+    setCsvWizardFile(null)
+    setCsvWizardPreview(null)
+    setCsvWizardCommit(null)
+    setCsvWizardMapping({})
+    setCsvWizardStrict(false)
+    setCsvWizardError('')
+  }
+
+  const closeCsvWizard = () => {
+    setCsvWizardOpen(false)
+    setCsvWizardStep('upload')
+    setCsvWizardFile(null)
+    setCsvWizardPreview(null)
+    setCsvWizardCommit(null)
+    setCsvWizardMapping({})
+    setCsvWizardStrict(false)
+    setCsvWizardError('')
+    setImporting(false)
+  }
+
+  const handleCsvWizardFileSelected = async (file: File | null) => {
+    if (!file || !tableId) return
+    setImporting(true)
+    setCsvWizardError('')
+    try {
+      const resp = await recordsApi.previewImportCsv(tableId, file, csvWizardMode)
+      if (resp.data.ok && resp.data.data) {
+        setCsvWizardFile(file)
+        setCsvWizardPreview(resp.data.data)
+        setCsvWizardMapping(buildInitialCsvMapping(resp.data.data, columns))
+        setCsvWizardCommit(null)
+        setCsvWizardStep('mapping')
+      } else {
+        setCsvWizardError(resp.data.error?.message || 'Не удалось прочитать CSV')
+      }
+    } catch (error) {
+      setCsvWizardError(getRequestErrorMessage(error, 'Не удалось прочитать CSV'))
+    } finally {
+      setImporting(false)
+      if (csvWizardFileInputRef.current) csvWizardFileInputRef.current.value = ''
+    }
+  }
+
+  const handleCsvWizardValidate = async () => {
+    if (!tableId || !csvWizardFile) return
+    setImporting(true)
+    setCsvWizardError('')
+    try {
+      const resp = await recordsApi.previewImportCsv(tableId, csvWizardFile, csvWizardMode, csvWizardMapping)
+      if (resp.data.ok && resp.data.data) {
+        setCsvWizardPreview(resp.data.data)
+        setCsvWizardStep('validate')
+      } else {
+        setCsvWizardError(resp.data.error?.message || 'Ошибка валидации CSV')
+      }
+    } catch (error) {
+      setCsvWizardError(getRequestErrorMessage(error, 'Ошибка валидации CSV'))
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const handleCsvWizardCommit = async () => {
+    if (!tableId || !csvWizardFile) return
+    setImporting(true)
+    setCsvWizardError('')
+    try {
+      const resp = await recordsApi.commitImportCsv(
+        tableId,
+        csvWizardFile,
+        csvWizardMode,
+        csvWizardStrict,
+        csvWizardMapping,
+      )
+      if (resp.data.ok && resp.data.data) {
+        setCsvWizardCommit(resp.data.data)
+        setCsvWizardStep('commit')
+        setPage(0)
+        await loadRecords()
+      } else {
+        setCsvWizardError(resp.data.error?.message || 'Не удалось выполнить импорт')
+      }
+    } catch (error) {
+      setCsvWizardError(getRequestErrorMessage(error, 'Не удалось выполнить импорт'))
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const handleOpenHistory = async (recordId: string) => {
+    if (!tableId) return
+    setHistoryRecordId(recordId)
+    setHistoryLoading(true)
+    try {
+      const resp = await recordsApi.listHistory(tableId, recordId, 30, 0)
+      if (resp.data.ok && resp.data.data) {
+        setHistoryItems(resp.data.data.items || [])
+        setHistoryTotal(resp.data.data.total || 0)
+      } else {
+        setHistoryItems([])
+        setHistoryTotal(0)
+      }
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  const handleRollbackLast = async (recordId: string) => {
+    if (!tableId) return
+    setRollingBackRecordId(recordId)
+    try {
+      const resp = await recordsApi.rollbackLast(tableId, recordId)
+      if (resp.data.ok && resp.data.data) {
+        setRecords((prev) => prev.map((r) => (r.id === recordId ? resp.data.data!.record : r)))
+        await handleOpenHistory(recordId)
+      }
+    } finally {
+      setRollingBackRecordId(null)
+    }
+  }
+
+  const getHistoryCellChanges = (item: RecordHistoryItem) => {
+    const before = item.before_data || {}
+    const after = item.after_data || {}
+    const keys = item.changed_columns.length > 0
+      ? item.changed_columns
+      : Array.from(new Set([...Object.keys(before), ...Object.keys(after)]))
+    return keys.map((colId) => ({
+      columnId: colId,
+      columnName: columnNameById[colId] || colId,
+      beforeValue: before[colId],
+      afterValue: after[colId],
+    }))
   }
 
   if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
@@ -816,9 +1611,51 @@ function TableDetailPageContent() {
           {exporting === 'xlsx' ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Download className="h-3.5 w-3.5 mr-1" />}
           Excel
         </Button>
+        <Button variant="outline" size="sm" className="h-8" onClick={openCsvWizard} disabled={importing}>
+          {importing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
+          CSV Wizard
+        </Button>
         <Button size="sm" onClick={() => setShowNewRow(v => !v)} className="gradient-primary border-0 text-white h-8">
           {showNewRow ? <><X className="h-4 w-4 mr-1" />Отмена</> : <><Plus className="h-4 w-4 mr-1" />Добавить запись</>}
         </Button>
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <Button variant="outline" size="sm" className="h-8" onClick={saveCurrentView}>
+          <Save className="h-3.5 w-3.5 mr-1" />
+          Сохранить вид
+        </Button>
+        <select
+          className="h-8 rounded-lg border border-input bg-background px-2 text-sm"
+          onChange={(e) => {
+            const id = e.target.value
+            if (!id) return
+            const view = views.find((v) => v.id === id)
+            if (view) applyView(view)
+            e.currentTarget.value = ''
+          }}
+          defaultValue=""
+        >
+          <option value="" disabled>Применить вид...</option>
+          {views.map((view) => (
+            <option key={view.id} value={view.id}>
+              {view.is_default ? '★ ' : ''}{view.name}
+            </option>
+          ))}
+        </select>
+        {views.length > 0 && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            {views.map((view) => (
+              <span key={view.id} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1">
+                {view.name}
+                {!view.is_default && (
+                  <button className="hover:text-foreground" onClick={() => setDefaultView(view.id)} title="Сделать по умолчанию">★</button>
+                )}
+                <button className="hover:text-destructive" onClick={() => deleteView(view.id)} title="Удалить">×</button>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {saveError && (
@@ -839,13 +1676,13 @@ function TableDetailPageContent() {
           />
         </div>
         <button
-          onClick={() => { setShowFilter(v => !v); if (showFilter) { setFilterCol(''); setFilterVal('') } }}
+          onClick={() => { setShowFilter(v => !v); if (showFilter) { setFilterCol(''); setFilterVal(''); setFilterValTo(''); setFilterOp('contains') } }}
           className={`flex items-center gap-1.5 h-8 px-3 rounded-lg border text-sm transition-colors ${
-            filterCol && filterVal ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-secondary'
+            filterCol ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-secondary'
           }`}
         >
           <Filter className="h-3.5 w-3.5" />
-          Фильтр{filterCol && filterVal ? ` (${columns.find(c => c.id === filterCol)?.name})` : ''}
+          Фильтр{filterCol ? ` (${columns.find(c => c.id === filterCol)?.name})` : ''}
         </button>
         {sortCol && (
           <button onClick={() => { setSortCol(null); setSortDir('asc') }} className="flex items-center gap-1 h-8 px-3 rounded-lg border border-primary bg-primary/10 text-primary text-sm">
@@ -855,12 +1692,12 @@ function TableDetailPageContent() {
           </button>
         )}
         {(search || filterCol) && (
-          <button onClick={() => { setSearch(''); setFilterCol(''); setFilterVal(''); setPage(0) }} className="h-8 px-2 rounded-lg border border-border text-xs text-muted-foreground hover:bg-secondary">
+          <button onClick={() => { setSearch(''); setFilterCol(''); setFilterOp('contains'); setFilterVal(''); setFilterValTo(''); setPage(0) }} className="h-8 px-2 rounded-lg border border-border text-xs text-muted-foreground hover:bg-secondary">
             Сбросить
           </button>
         )}
         <span className="ml-auto text-xs text-muted-foreground">
-          {processedRecords.length !== total ? `${processedRecords.length} из ${total}` : total} записей
+          {total} записей
         </span>
       </div>
 
@@ -870,26 +1707,76 @@ function TableDetailPageContent() {
           <span className="text-xs text-muted-foreground whitespace-nowrap">Столбец:</span>
           <select
             value={filterCol}
-            onChange={e => { setFilterCol(e.target.value); setFilterVal(''); setPage(0) }}
+            onChange={e => { setFilterCol(e.target.value); setFilterVal(''); setFilterValTo(''); setPage(0) }}
             className="h-8 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary max-sm:w-full"
           >
             <option value="">— выберите —</option>
             {columns.map(col => <option key={col.id} value={col.id}>{col.name}</option>)}
           </select>
-          <span className="text-xs text-muted-foreground whitespace-nowrap">Содержит:</span>
+          <span className="text-xs text-muted-foreground whitespace-nowrap">Оператор:</span>
+          <select
+            value={filterOp}
+            onChange={(e) => { setFilterOp(e.target.value as FilterOp); setFilterVal(''); setFilterValTo(''); setPage(0) }}
+            className="h-8 px-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary max-sm:w-full"
+          >
+            <option value="contains">contains</option>
+            <option value="eq">=</option>
+            <option value="neq">!=</option>
+            <option value="gt">&gt;</option>
+            <option value="lt">&lt;</option>
+            <option value="between">between</option>
+            <option value="is_empty">is empty</option>
+            <option value="in">in</option>
+          </select>
           <input
             value={filterVal}
             onChange={e => { setFilterVal(e.target.value); setPage(0) }}
             placeholder="Значение..."
-            disabled={!filterCol}
+            disabled={!filterCol || filterOp === 'is_empty'}
             className="flex-1 h-8 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary disabled:opacity-50 max-sm:w-full"
           />
+          {filterOp === 'between' && (
+            <input
+              value={filterValTo}
+              onChange={(e) => { setFilterValTo(e.target.value); setPage(0) }}
+              placeholder="И до..."
+              disabled={!filterCol}
+              className="flex-1 h-8 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary disabled:opacity-50 max-sm:w-full"
+            />
+          )}
+        </div>
+      )}
+
+      {selectedRecordIds.size > 0 && (
+        <div className="flex items-center gap-2 p-3 rounded-lg border border-primary/30 bg-primary/5 max-sm:flex-col max-sm:items-stretch">
+          <span className="text-xs text-muted-foreground">{selectedRecordIds.size} выбрано</span>
+          <select
+            value={bulkColumnId}
+            onChange={(e) => setBulkColumnId(e.target.value)}
+            className="h-8 rounded-lg border border-input bg-background px-2 text-sm"
+          >
+            <option value="">Поле для массового обновления</option>
+            {columns.map((col) => <option key={col.id} value={col.id}>{col.name}</option>)}
+          </select>
+          <input
+            value={bulkValue}
+            onChange={(e) => setBulkValue(e.target.value)}
+            placeholder="Значение"
+            className="h-8 rounded-lg border border-input bg-background px-3 text-sm"
+          />
+          <Button variant="outline" size="sm" className="h-8" onClick={handleBulkUpdate} disabled={!bulkColumnId}>
+            Применить к выбранным
+          </Button>
+          <Button variant="destructive" size="sm" className="h-8" onClick={handleBulkDelete}>
+            Удалить выбранные
+          </Button>
         </div>
       )}
 
       <div className="border border-border rounded-lg overflow-x-auto">
         <table className="min-w-full max-md:min-w-[760px] table-fixed text-sm">
           <colgroup>
+            <col className="w-9" />
             <col className="w-10" />
             {columns.map((col: ColumnInfo) => (
               <col key={col.id} style={{ width: `${DATA_COLUMN_WIDTH}px` }} />
@@ -899,6 +1786,13 @@ function TableDetailPageContent() {
           </colgroup>
           <thead>
             <tr className="border-b border-border bg-secondary/30">
+              <th className="px-2 py-2.5 w-9">
+                <input
+                  type="checkbox"
+                  checked={pagedRecords.length > 0 && pagedRecords.every((r) => selectedRecordIds.has(r.id))}
+                  onChange={(e) => toggleSelectAllPageRecords(e.target.checked)}
+                />
+              </th>
               <th className="px-3 py-2.5 w-8 text-left text-xs text-muted-foreground font-medium">#</th>
               {columns.map((col: ColumnInfo) => {
                 const info = ftMap[col.field_type]
@@ -941,11 +1835,48 @@ function TableDetailPageContent() {
           <tbody>
             {showNewRow && (
               <tr className="border-b border-primary/20 bg-primary/5">
+                <td />
                 <td className="px-3 py-1.5 text-xs text-muted-foreground">new</td>
                 {columns.map((col: ColumnInfo) => (
                   <td key={col.id} className="px-2 py-1.5 overflow-hidden">
                     {col.field_type === 'boolean' ? (
                       <button onClick={() => setNewRowData(prev => ({ ...prev, [col.id]: String(!(prev[col.id] === 'true')) }))} className={`h-6 w-11 rounded-full flex items-center px-0.5 transition-colors ${newRowData[col.id] === 'true' ? 'bg-primary' : 'bg-secondary'}`}><span className={`h-5 w-5 rounded-full bg-white shadow transition-transform ${newRowData[col.id] === 'true' ? 'translate-x-5' : 'translate-x-0'}`} /></button>
+                    ) : col.field_type === 'relation' ? (
+                      relationConfigFromColumn(col)?.multiple ? (
+                        <div className="min-w-[190px] rounded-md border border-input bg-background px-2 py-1.5">
+                          <div className="space-y-1 max-h-24 overflow-y-auto">
+                            {(relationOptionsByColumn[col.id] || []).map((option) => {
+                              const selected = valueAsList(newRowData[col.id]).includes(option.id)
+                              return (
+                                <label key={option.id} className="flex items-center gap-2 text-xs cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={selected}
+                                    onChange={() => {
+                                      const next = selected
+                                        ? valueAsList(newRowData[col.id]).filter((item) => item !== option.id)
+                                        : [...valueAsList(newRowData[col.id]), option.id]
+                                      setNewRowData(prev => ({ ...prev, [col.id]: next }))
+                                    }}
+                                  />
+                                  <span className="truncate">{option.label}</span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      ) : (
+                        <select
+                          value={valueAsString(newRowData[col.id])}
+                          onChange={e => setNewRowData(prev => ({ ...prev, [col.id]: e.target.value }))}
+                          className="w-full h-7 px-1.5 text-sm rounded border border-input bg-background outline-none focus:border-primary/50"
+                        >
+                          <option value="">— без связи —</option>
+                          {(relationOptionsByColumn[col.id] || []).map((option) => (
+                            <option key={option.id} value={option.id}>{option.label}</option>
+                          ))}
+                        </select>
+                      )
                     ) : col.field_type === 'select' && getColumnOptions(col).length > 0 ? (
                       <select
                         value={valueAsString(newRowData[col.id])}
@@ -978,6 +1909,10 @@ function TableDetailPageContent() {
                           })}
                         </div>
                       </div>
+                    ) : col.field_type === 'lookup' || col.field_type === 'rollup' || col.field_type === 'formula' ? (
+                      <div className="h-7 px-2 rounded border border-dashed border-border text-xs text-muted-foreground/60 flex items-center">
+                        вычисляется автоматически
+                      </div>
                     ) : (
                       <input type={getInputType(col.field_type)} value={valueAsString(newRowData[col.id])} onChange={e => setNewRowData(prev => ({ ...prev, [col.id]: e.target.value }))} onKeyDown={e => { if (e.key === 'Enter') handleAddRecord() }} placeholder={col.name} className="w-full h-7 px-1.5 text-sm rounded border border-input bg-background outline-none focus:border-primary/50" />
                     )}
@@ -994,10 +1929,22 @@ function TableDetailPageContent() {
             )}
             {pagedRecords.map((record: RecordInfo, idx: number) => (
               <tr key={record.id} className="border-b border-border/40 hover:bg-secondary/10 transition-colors group/row">
+                <td className="px-2 py-0.5">
+                  <input
+                    type="checkbox"
+                    checked={selectedRecordIds.has(record.id)}
+                    onChange={(e) => toggleSelectRecord(record.id, e.target.checked)}
+                  />
+                </td>
                 <td className="px-3 py-0.5 text-xs text-muted-foreground/50 select-none">{page * PAGE_SIZE + idx + 1}</td>
                 {columns.map((col: ColumnInfo) => (
                   <td key={col.id} className="px-2 py-0.5 overflow-hidden">
-                    <EditableCell value={safeRecordData(record.data)[col.id]} column={col} onSave={v => handleCellSave(record.id, col.id, v)} />
+                    <EditableCell
+                      value={safeRecordData(record.data)[col.id]}
+                      column={col}
+                      relationOptions={relationOptionsByColumn[col.id]}
+                      onSave={v => handleCellSave(record.id, col.id, v)}
+                    />
                   </td>
                 ))}
                 <td />
@@ -1013,11 +1960,18 @@ function TableDetailPageContent() {
                     </button>
                     <button
                       onClick={() => handleMoveRecord(record.id, 'down')}
-                      disabled={!canManualReorder || !!movingRecordId || (page * PAGE_SIZE + idx) === (processedRecords.length - 1)}
+                      disabled={!canManualReorder || !!movingRecordId || idx === (pagedRecords.length - 1)}
                       className="h-7 w-7 flex items-center justify-center opacity-0 group-hover/row:opacity-100 max-md:opacity-100 text-muted-foreground hover:text-foreground disabled:opacity-30 transition-opacity"
                       title={canManualReorder ? 'Переместить вниз' : 'Отключено при сортировке/фильтре/поиске'}
                     >
                       <ArrowDown className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleOpenHistory(record.id)}
+                      className="h-7 w-7 flex items-center justify-center opacity-0 group-hover/row:opacity-100 max-md:opacity-100 text-muted-foreground hover:text-foreground transition-opacity"
+                      title="История изменений"
+                    >
+                      <History className="h-3.5 w-3.5" />
                     </button>
                     <button onClick={() => handleDeleteRecord(record.id)} className="h-7 w-7 flex items-center justify-center opacity-0 group-hover/row:opacity-100 max-md:opacity-100 text-muted-foreground hover:text-destructive transition-opacity">
                       <Trash2 className="h-3.5 w-3.5" />
@@ -1026,9 +1980,9 @@ function TableDetailPageContent() {
                 </td>
               </tr>
             ))}
-            {processedRecords.length === 0 && !showNewRow && (
+            {pagedRecords.length === 0 && !showNewRow && (
               <tr>
-                <td colSpan={columns.length + 3} className="text-center py-10 text-muted-foreground">
+                <td colSpan={columns.length + 4} className="text-center py-10 text-muted-foreground">
                   <button onClick={() => setShowNewRow(true)} className="flex flex-col items-center gap-2 mx-auto hover:text-foreground transition-colors group">
                     <div className="h-12 w-12 rounded-full border-2 border-dashed border-border group-hover:border-primary/50 flex items-center justify-center transition-colors">
                       <Plus className="h-5 w-5" />
@@ -1044,6 +1998,7 @@ function TableDetailPageContent() {
                 onClick={handleQuickAddRecord}
                 className="border-t border-dashed border-border/50 hover:bg-secondary/20 cursor-pointer transition-colors group/addrow"
               >
+                <td />
                 <td className="px-3 py-1.5">
                   {addingRecord
                     ? <Loader2 className="h-3.5 w-3.5 text-primary animate-spin" />
@@ -1062,7 +2017,7 @@ function TableDetailPageContent() {
       {totalPages > 1 && (
         <div className="flex items-center justify-between max-sm:flex-col max-sm:items-start gap-2">
           <span className="text-xs text-muted-foreground">
-            Страница {page + 1} из {totalPages} · {processedRecords.length} записей
+            Страница {page + 1} из {totalPages} · всего {total} записей
           </span>
           <div className="flex items-center gap-1 max-sm:overflow-x-auto max-sm:pb-1 max-sm:w-full">
             <button
@@ -1104,7 +2059,297 @@ function TableDetailPageContent() {
 
       {/* Column calculators */}
       {columns.length > 0 && records.length > 0 && (
-        <ColumnCalculators columns={columns} records={processedRecords} />
+        <ColumnCalculators columns={columns} records={records} />
+      )}
+
+      {csvWizardOpen && (
+        <div className="fixed inset-0 z-40 bg-black/40 p-4 flex items-center justify-center">
+          <div className="w-full max-w-5xl rounded-xl border border-border bg-background shadow-xl">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <div>
+                <div className="text-sm font-semibold">CSV Wizard</div>
+                <div className="text-xs text-muted-foreground">
+                  Upload -&gt; Mapping -&gt; Validate -&gt; Commit
+                </div>
+              </div>
+              <Button variant="ghost" size="sm" className="h-8" onClick={closeCsvWizard}>
+                Закрыть
+              </Button>
+            </div>
+
+            <div className="px-4 py-3 border-b border-border flex items-center gap-2 text-xs">
+              {(['upload', 'mapping', 'validate', 'commit'] as CsvWizardStep[]).map((step, idx) => {
+                const active = step === csvWizardStep
+                const done = ['upload', 'mapping', 'validate', 'commit'].indexOf(step) < ['upload', 'mapping', 'validate', 'commit'].indexOf(csvWizardStep)
+                return (
+                  <span
+                    key={step}
+                    className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 ${
+                      active ? 'border-primary bg-primary/10 text-primary' : done ? 'border-emerald-400/40 bg-emerald-500/10 text-emerald-500' : 'border-border text-muted-foreground'
+                    }`}
+                  >
+                    <span>{idx + 1}.</span>
+                    <span className="capitalize">{step}</span>
+                  </span>
+                )
+              })}
+              <span className="ml-auto text-muted-foreground">
+                {csvWizardFile ? csvWizardFile.name : 'Файл не выбран'}
+              </span>
+            </div>
+
+            <div className="max-h-[70vh] overflow-y-auto p-4 space-y-4">
+              {csvWizardError && (
+                <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+                  {csvWizardError}
+                </div>
+              )}
+
+              <input
+                ref={csvWizardFileInputRef}
+                type="file"
+                accept=".csv,text/csv"
+                className="hidden"
+                onChange={(e) => handleCsvWizardFileSelected(e.target.files?.[0] || null)}
+              />
+
+              <div className="flex items-center gap-2 flex-wrap">
+                <label className="text-xs text-muted-foreground">Режим:</label>
+                <select
+                  value={csvWizardMode}
+                  onChange={(e) => setCsvWizardMode(e.target.value === 'replace' ? 'replace' : 'append')}
+                  className="h-8 rounded-lg border border-input bg-background px-2 text-xs"
+                >
+                  <option value="append">append</option>
+                  <option value="replace">replace</option>
+                </select>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={() => csvWizardFileInputRef.current?.click()}
+                  disabled={importing}
+                >
+                  {importing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
+                  Выбрать CSV
+                </Button>
+                {csvWizardPreview && (
+                  <span className="text-xs text-muted-foreground">
+                    Строк: {csvWizardPreview.total_rows}, валидных: {csvWizardPreview.valid_rows}, ошибок: {csvWizardPreview.invalid_rows}
+                  </span>
+                )}
+              </div>
+
+              {csvWizardPreview && (
+                <div className="rounded-lg border border-border overflow-hidden">
+                  <div className="px-3 py-2 border-b border-border text-sm font-medium">Mapping колонок</div>
+                  <table className="w-full text-sm">
+                    <thead className="bg-secondary/30">
+                      <tr>
+                        <th className="px-3 py-2 text-left">CSV колонка</th>
+                        <th className="px-3 py-2 text-left">Колонка таблицы</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {csvWizardPreview.header.map((csvColumn) => (
+                        <tr key={csvColumn} className="border-t border-border/60">
+                          <td className="px-3 py-2">{csvColumn}</td>
+                          <td className="px-3 py-2">
+                            <select
+                              value={csvWizardMapping[csvColumn] || ''}
+                              onChange={(e) => {
+                                const value = e.target.value
+                                setCsvWizardMapping((prev) => {
+                                  const next = { ...prev }
+                                  if (!value) {
+                                    delete next[csvColumn]
+                                  } else {
+                                    next[csvColumn] = value
+                                  }
+                                  return next
+                                })
+                              }}
+                              className="h-8 rounded-lg border border-input bg-background px-2 text-sm min-w-[220px]"
+                            >
+                              <option value="">-- пропустить --</option>
+                              {columns.map((col) => (
+                                <option key={col.id} value={col.id}>{col.name}</option>
+                              ))}
+                            </select>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {csvWizardPreview && csvWizardStep !== 'commit' && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  <label className="inline-flex items-center gap-2 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={csvWizardStrict}
+                      onChange={(e) => setCsvWizardStrict(e.target.checked)}
+                    />
+                    <span>Strict mode (блокировать commit при ошибках в строках)</span>
+                  </label>
+                  <Button variant="outline" size="sm" className="h-8" onClick={handleCsvWizardValidate} disabled={importing || !csvWizardFile}>
+                    {importing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Check className="h-3.5 w-3.5 mr-1" />}
+                    Validate
+                  </Button>
+                  <Button
+                    size="sm"
+                    className="h-8"
+                    onClick={handleCsvWizardCommit}
+                    disabled={importing || !csvWizardFile}
+                  >
+                    {importing ? <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" /> : <Upload className="h-3.5 w-3.5 mr-1" />}
+                    Commit
+                  </Button>
+                </div>
+              )}
+
+              {csvWizardPreview && csvWizardStep === 'validate' && (
+                <div className="space-y-3">
+                  <div className="text-sm font-medium">Результат validate</div>
+                  {csvWizardPreview.errors.length === 0 ? (
+                    <div className="rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-500">
+                      Ошибок не найдено.
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-border overflow-auto">
+                      <table className="w-full text-xs min-w-[720px]">
+                        <thead className="bg-secondary/30">
+                          <tr>
+                            <th className="px-2 py-2 text-left">Строка</th>
+                            <th className="px-2 py-2 text-left">Колонка</th>
+                            <th className="px-2 py-2 text-left">Код</th>
+                            <th className="px-2 py-2 text-left">Причина</th>
+                            <th className="px-2 py-2 text-left">Значение</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {csvWizardPreview.errors.map((err, idx) => (
+                            <tr key={`${err.row_number}-${idx}`} className="border-t border-border/60">
+                              <td className="px-2 py-2">{err.row_number}</td>
+                              <td className="px-2 py-2">{err.column}</td>
+                              <td className="px-2 py-2">{err.code}</td>
+                              <td className="px-2 py-2">{err.message}</td>
+                              <td className="px-2 py-2">{valueAsString(err.raw_value)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {csvWizardCommit && (
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-emerald-400/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-500">
+                    Импорт завершен: создано {csvWizardCommit.records_created}, пропущено {csvWizardCommit.records_skipped}
+                    {csvWizardCommit.deleted_before > 0 ? `, удалено до импорта ${csvWizardCommit.deleted_before}` : ''}
+                  </div>
+                  {csvWizardCommit.errors.length > 0 && (
+                    <div className="rounded-lg border border-border overflow-auto">
+                      <table className="w-full text-xs min-w-[720px]">
+                        <thead className="bg-secondary/30">
+                          <tr>
+                            <th className="px-2 py-2 text-left">Строка</th>
+                            <th className="px-2 py-2 text-left">Колонка</th>
+                            <th className="px-2 py-2 text-left">Код</th>
+                            <th className="px-2 py-2 text-left">Причина</th>
+                            <th className="px-2 py-2 text-left">Значение</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {csvWizardCommit.errors.map((err, idx) => (
+                            <tr key={`${err.row_number}-${idx}`} className="border-t border-border/60">
+                              <td className="px-2 py-2">{err.row_number}</td>
+                              <td className="px-2 py-2">{err.column}</td>
+                              <td className="px-2 py-2">{err.code}</td>
+                              <td className="px-2 py-2">{err.message}</td>
+                              <td className="px-2 py-2">{valueAsString(err.raw_value)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {historyRecordId && (
+        <div className="fixed inset-0 z-40 bg-black/40 p-4 flex items-center justify-center">
+          <div className="w-full max-w-3xl rounded-xl border border-border bg-background shadow-xl">
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <div>
+                <div className="text-sm font-semibold">История записи</div>
+                <div className="text-xs text-muted-foreground">{historyTotal} событий</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={() => handleRollbackLast(historyRecordId)}
+                  disabled={historyLoading || rollingBackRecordId === historyRecordId}
+                >
+                  {rollingBackRecordId === historyRecordId ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                  )}
+                  Откатить последнее
+                </Button>
+                <Button variant="ghost" size="sm" className="h-8" onClick={() => setHistoryRecordId(null)}>
+                  Закрыть
+                </Button>
+              </div>
+            </div>
+            <div className="max-h-[55vh] overflow-y-auto p-4 space-y-2">
+              {historyLoading ? (
+                <div className="text-sm text-muted-foreground flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Загрузка истории...
+                </div>
+              ) : historyItems.length === 0 ? (
+                <div className="text-sm text-muted-foreground">Изменений пока нет.</div>
+              ) : (
+                historyItems.map((item) => (
+                  <div key={item.id} className="rounded-lg border border-border/70 bg-secondary/20 p-3">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
+                      <span>{new Date(item.created_at).toLocaleString('ru-RU')}</span>
+                      <span>•</span>
+                      <span>{item.source || item.action}</span>
+                      <span>•</span>
+                      <span>Кто: {actorLabel(item.actor_id)}</span>
+                    </div>
+                    <div className="mt-2 space-y-1">
+                      {getHistoryCellChanges(item).length === 0 ? (
+                        <div className="text-xs text-muted-foreground">Нет данных по измененным ячейкам.</div>
+                      ) : (
+                        getHistoryCellChanges(item).map((change) => (
+                          <div key={`${item.id}-${change.columnId}`} className="text-xs grid grid-cols-[170px_1fr_20px_1fr] gap-2 items-start">
+                            <span className="text-muted-foreground truncate">{change.columnName}</span>
+                            <span className="rounded px-1.5 py-0.5 bg-background/70 break-words">{valueAsString(change.beforeValue) || '—'}</span>
+                            <span className="text-muted-foreground">→</span>
+                            <span className="rounded px-1.5 py-0.5 bg-background/70 break-words">{valueAsString(change.afterValue) || '—'}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       <ColumnSettingsModal
@@ -1114,8 +2359,14 @@ function TableDetailPageContent() {
         draft={columnDraft}
         optionsOpen={columnOptionsOpen}
         saving={savingColumn}
+        allTables={tablesCatalog}
+        currentTableId={table.id}
+        currentColumns={columns}
         onDraftChange={updateColumnDraft}
         onToggleOptions={() => setColumnOptionsOpen((prev) => !prev)}
+        formulaPreview={formulaPreview}
+        formulaPreviewLoading={formulaPreviewLoading}
+        onPreviewFormula={handlePreviewFormula}
         onClose={closeColumnDialog}
         onSubmit={submitColumnDialog}
       />

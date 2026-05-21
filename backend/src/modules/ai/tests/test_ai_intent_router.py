@@ -28,3 +28,10 @@ def test_routing_hint_for_read_mode():
     hint = build_routing_system_hint(decision)
     assert "mode=read" in hint
     assert "не добавляй crm_action" in hint.lower()
+
+
+def test_intent_router_prefers_document_when_table_is_negated():
+    decision = interpret_user_intent("создай документ, не таблицу, в формате резюме")
+    assert decision.domain == "document"
+    assert decision.mode == "create"
+    assert decision.is_action is True

@@ -11,7 +11,7 @@ from src.common.schemas import ApiResponse
 from src.infrastructure.uow import UnitOfWork
 from src.modules.access.dependencies import require_access
 from src.modules.auth.dependencies import CurrentUser, require_roles
-from src.modules.tables.schemas import CreateViewRequest, ViewOut
+from src.modules.tables.schemas import CreateViewRequest, UpdateViewRequest, ViewOut
 from src.modules.tables.service import TableServiceError, TableViewsService
 
 router = APIRouter(prefix="/tables/{table_id}/views", tags=["views"])
@@ -80,3 +80,27 @@ async def delete_view(
             return _error_response(error)
         await uow.commit()
     return ApiResponse(data=None)
+
+
+@router.patch("/{view_id}", response_model=ApiResponse[ViewOut])
+async def update_view(
+    table_id: uuid.UUID,
+    view_id: uuid.UUID,
+    body: UpdateViewRequest,
+    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    _: None = Depends(require_access(resource_type="table", permission="can_write", resource_id_param="table_id")),
+):
+    async with UnitOfWork() as uow:
+        service = TableViewsService(uow.session)
+        try:
+            view = await service.update_view(
+                table_id=table_id,
+                view_id=view_id,
+                org_id=current_user.org_id,
+                body=body,
+            )
+        except TableServiceError as error:
+            return _error_response(error)
+        await uow.commit()
+        item = ViewOut.model_validate(view)
+    return ApiResponse(data=item)

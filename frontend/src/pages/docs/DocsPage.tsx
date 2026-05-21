@@ -94,6 +94,7 @@ export default function DocsPage() {
   const [aiPrompt, setAiPrompt] = useState('')
   const [aiTemplate, setAiTemplate] = useState('')
   const [aiTitle, setAiTitle] = useState('')
+  const [isAiDialogOpen, setIsAiDialogOpen] = useState(false)
   const [aiGenerating, setAiGenerating] = useState(false)
   const [aiJobs, setAiJobs] = useState<DocsAIGenerationJob[]>([])
   const [stoppingAiJobId, setStoppingAiJobId] = useState<string | null>(null)
@@ -162,6 +163,19 @@ export default function DocsPage() {
   }, [aiJobs, user?.id])
 
   const aiSubmitBlocked = aiGenerating || Boolean(activeAiJobForCurrentUser)
+
+  useEffect(() => {
+    if (!isAiDialogOpen) return
+
+    const handleEsc = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !aiGenerating) {
+        setIsAiDialogOpen(false)
+      }
+    }
+
+    window.addEventListener('keydown', handleEsc)
+    return () => window.removeEventListener('keydown', handleEsc)
+  }, [isAiDialogOpen, aiGenerating])
 
   const filesByFolder = useMemo(() => {
     const acc: Record<string, DocsFile[]> = {}
@@ -745,6 +759,7 @@ export default function DocsPage() {
         upsertAiJob(queuedJob.data.data)
       }
 
+      setIsAiDialogOpen(false)
       setAiPrompt('')
       await pollAiJobStatus(jobId, fileId)
     } catch (error) {
@@ -1072,104 +1087,25 @@ export default function DocsPage() {
 
       <Card className="border-border/80 bg-card/95 shadow-sm">
         <CardHeader className="pb-2">
-          <CardTitle className="text-base font-semibold flex items-center gap-2">
-            <Bot className="h-4 w-4 text-primary" /> Создать документ через AI
-          </CardTitle>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              <Bot className="h-4 w-4 text-primary" /> AI в документах
+            </CardTitle>
+            <Button onClick={() => setIsAiDialogOpen(true)} className="shadow-sm hover:shadow-md">
+              {aiGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+              Открыть AI-помощник
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="grid gap-3 xl:grid-cols-[minmax(0,1.55fr)_minmax(280px,0.95fr)]">
-            <div className="space-y-3">
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-[120px_minmax(0,1fr)]">
-                <select
-                  className="h-10 rounded-md border border-border/80 bg-background px-3 text-sm shadow-sm focus:border-primary focus:outline-none"
-                  value={aiType}
-                  onChange={(event) => setAiType(event.target.value as DocsFileType)}
-                  disabled={aiSubmitBlocked}
-                >
-                  <option value="docx">DOCX</option>
-                </select>
-                <input
-                  className="h-10 rounded-md border border-border/80 bg-background px-3 text-sm shadow-sm focus:border-primary focus:outline-none"
-                  placeholder="Название документа"
-                  value={aiTitle}
-                  onChange={(event) => setAiTitle(event.target.value)}
-                  disabled={aiSubmitBlocked}
-                  maxLength={200}
-                />
-              </div>
-              <input
-                className="h-10 w-full rounded-md border border-border/80 bg-background px-3 text-sm shadow-sm focus:border-primary focus:outline-none"
-                placeholder="Шаблон или стиль"
-                value={aiTemplate}
-                onChange={(event) => setAiTemplate(event.target.value)}
-                disabled={aiSubmitBlocked}
-                maxLength={120}
-              />
-              <textarea
-                className="min-h-[136px] w-full rounded-md border border-border/80 bg-background px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none"
-                placeholder="Коротко опишите, какой документ нужен и что в нём должно быть."
-                value={aiPrompt}
-                onChange={(event) => setAiPrompt(event.target.value)}
-                disabled={aiSubmitBlocked}
-                maxLength={12000}
-              />
-              <div className="flex items-center justify-between gap-3">
-                <p className="text-xs text-muted-foreground/90">
-                  Документ создаётся как новая версия и затем проходит проверку.
-                </p>
-                <Button className="shadow-sm hover:shadow-md" onClick={() => void createAIDocument()} disabled={aiSubmitBlocked || !aiPrompt.trim()}>
-                  {aiGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
-                  Сгенерировать
-                </Button>
-              </div>
-              {activeAiJobForCurrentUser && (
-                <p className="text-xs text-amber-700">
-                  Новая генерация недоступна: дождитесь завершения текущей задачи.
-                </p>
-              )}
-            </div>
-
-            <div className="rounded-lg border border-border/80 bg-card/80 p-3 shadow-inner">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-medium">Базовые шаблоны</p>
-                  <p className="text-xs text-muted-foreground/90">Можно взять за основу и быстро доработать под себя.</p>
-                </div>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setAiTitle('')
-                    setAiTemplate('')
-                    setAiPrompt('')
-                  }}
-                  disabled={aiSubmitBlocked}
-                >
-                  Очистить
-                </Button>
-              </div>
-              <div className="space-y-2">
-                {AI_DOCUMENT_PRESETS.map((preset) => (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    onClick={() => applyAiPreset(preset.id)}
-                    disabled={aiSubmitBlocked}
-                    className="w-full rounded-lg border border-border/80 bg-background px-3 py-2 text-left shadow-sm transition-colors hover:border-primary/55 hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium">{preset.title}</p>
-                        <p className="mt-1 text-xs text-muted-foreground/90">{preset.summary}</p>
-                      </div>
-                      <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary/80" />
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
+          <p className="text-sm text-muted-foreground/90">
+            Генерация документа через AI открывается во всплывающем окне.
+          </p>
+          {activeAiJobForCurrentUser && (
+            <p className="text-xs text-amber-700">
+              Новая генерация недоступна: дождитесь завершения текущей задачи.
+            </p>
+          )}
           {aiJobs.length > 0 && (
             <div className="space-y-2 rounded-md border border-border/80 bg-card/70 p-2">
               <p className="text-xs font-medium text-muted-foreground/90">Последние AI-задачи</p>
@@ -1218,6 +1154,133 @@ export default function DocsPage() {
           )}
         </CardContent>
       </Card>
+
+      {isAiDialogOpen && (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-background/60 p-4 backdrop-blur-sm"
+          onClick={() => {
+            if (!aiGenerating) setIsAiDialogOpen(false)
+          }}
+        >
+          <div
+            className="w-full max-w-6xl rounded-2xl border border-border bg-background shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+              <div>
+                <h3 className="text-lg font-semibold flex items-center gap-2">
+                  <Bot className="h-5 w-5 text-primary" />
+                  Создать документ через AI
+                </h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Заполните параметры и отправьте задачу на генерацию.
+                </p>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 w-8 p-0"
+                onClick={() => setIsAiDialogOpen(false)}
+                disabled={aiGenerating}
+                aria-label="Закрыть AI окно"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+
+            <div className="space-y-3 px-5 py-4">
+              <div className="grid gap-3 xl:grid-cols-[minmax(0,1.55fr)_minmax(280px,0.95fr)]">
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-[120px_minmax(0,1fr)]">
+                    <select
+                      className="h-10 rounded-md border border-border/80 bg-background px-3 text-sm shadow-sm focus:border-primary focus:outline-none"
+                      value={aiType}
+                      onChange={(event) => setAiType(event.target.value as DocsFileType)}
+                      disabled={aiSubmitBlocked}
+                    >
+                      <option value="docx">DOCX</option>
+                    </select>
+                    <input
+                      className="h-10 rounded-md border border-border/80 bg-background px-3 text-sm shadow-sm focus:border-primary focus:outline-none"
+                      placeholder="Название документа"
+                      value={aiTitle}
+                      onChange={(event) => setAiTitle(event.target.value)}
+                      disabled={aiSubmitBlocked}
+                      maxLength={200}
+                    />
+                  </div>
+                  <input
+                    className="h-10 w-full rounded-md border border-border/80 bg-background px-3 text-sm shadow-sm focus:border-primary focus:outline-none"
+                    placeholder="Шаблон или стиль"
+                    value={aiTemplate}
+                    onChange={(event) => setAiTemplate(event.target.value)}
+                    disabled={aiSubmitBlocked}
+                    maxLength={120}
+                  />
+                  <textarea
+                    className="min-h-[180px] w-full rounded-md border border-border/80 bg-background px-3 py-2 text-sm shadow-sm focus:border-primary focus:outline-none"
+                    placeholder="Коротко опишите, какой документ нужен и что в нём должно быть."
+                    value={aiPrompt}
+                    onChange={(event) => setAiPrompt(event.target.value)}
+                    disabled={aiSubmitBlocked}
+                    maxLength={12000}
+                  />
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs text-muted-foreground/90">
+                      Документ создаётся как новая версия и затем проходит проверку.
+                    </p>
+                    <Button className="shadow-sm hover:shadow-md" onClick={() => void createAIDocument()} disabled={aiSubmitBlocked || !aiPrompt.trim()}>
+                      {aiGenerating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Sparkles className="mr-2 h-4 w-4" />}
+                      Сгенерировать
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border/80 bg-card/80 p-3 shadow-inner">
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium">Базовые шаблоны</p>
+                      <p className="text-xs text-muted-foreground/90">Можно взять за основу и быстро доработать под себя.</p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setAiTitle('')
+                        setAiTemplate('')
+                        setAiPrompt('')
+                      }}
+                      disabled={aiSubmitBlocked}
+                    >
+                      Очистить
+                    </Button>
+                  </div>
+                  <div className="space-y-2">
+                    {AI_DOCUMENT_PRESETS.map((preset) => (
+                      <button
+                        key={preset.id}
+                        type="button"
+                        onClick={() => applyAiPreset(preset.id)}
+                        disabled={aiSubmitBlocked}
+                        className="w-full rounded-lg border border-border/80 bg-background px-3 py-2 text-left shadow-sm transition-colors hover:border-primary/55 hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium">{preset.title}</p>
+                            <p className="mt-1 text-xs text-muted-foreground/90">{preset.summary}</p>
+                          </div>
+                          <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-primary/80" />
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {errorText && <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">{errorText}</div>}
 

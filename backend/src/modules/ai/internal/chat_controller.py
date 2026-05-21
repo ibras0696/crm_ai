@@ -64,8 +64,10 @@ from src.modules.ai.internal.chat_policy import (
     build_intent_decision,
     extract_requested_record_count,
     has_selected_context,
+    infer_action_domain,
     looks_like_broken_action,
     looks_like_table_create_request,
+    reject_action_reason,
     resolve_provider_max_tokens,
     should_attach_context,
 )
@@ -582,6 +584,21 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
             ui_intent=body.ui_intent,
             user_message=body.message,
         )
+        rejection = reject_action_reason(
+            action_payload=action_payload,
+            user_message=body.message,
+            intent_decision=intent_decision,
+            ui_intent=body.ui_intent,
+        )
+        if rejection:
+            logger.info(
+                "ai_action_payload_rejected_pre_fallback reason=%s action=%s intent_domain=%s ui_intent=%s",
+                rejection,
+                str((action_payload or {}).get("action") or ""),
+                intent_decision.domain,
+                str(body.ui_intent or ""),
+            )
+            action_payload = None
         if action_mode and action_payload is None and looks_like_broken_action(reply_raw):
             repaired_payload, repaired_usage = await _await_with_deadline(
                 _repair_action_payload_with_model(
@@ -665,15 +682,65 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 user_message=body.message,
                 ui_intent=body.ui_intent,
                 ui_params=body.ui_intent_params,
+                force_from_intent=False,
             )
             action_payload = _normalize_action_payload_for_execution(
                 document_fallback,
                 ui_intent=body.ui_intent,
                 user_message=body.message,
             )
+        if (
+            action_payload is None
+            and intent_decision.domain == "document"
+            and intent_decision.mode == "create"
+        ):
+            document_fallback = _build_document_fallback_action(
+                user_message=body.message,
+                ui_intent=body.ui_intent,
+                ui_params=body.ui_intent_params,
+                force_from_intent=True,
+            )
+            action_payload = _normalize_action_payload_for_execution(
+                document_fallback,
+                ui_intent=body.ui_intent,
+                user_message=body.message,
+            )
+        action_payload = apply_ui_intent_overrides(action_payload, body.ui_intent, body.ui_intent_params)
+        rejection = reject_action_reason(
+            action_payload=action_payload,
+            user_message=body.message,
+            intent_decision=intent_decision,
+            ui_intent=body.ui_intent,
+        )
+        if rejection:
+            logger.info(
+                "ai_action_payload_rejected_final reason=%s action=%s action_domain=%s intent_domain=%s ui_intent=%s",
+                rejection,
+                str((action_payload or {}).get("action") or ""),
+                str(infer_action_domain(action_payload) or ""),
+                intent_decision.domain,
+                str(body.ui_intent or ""),
+            )
+            action_payload = None
+        if action_payload is None:
+            should_force_document_fallback = (
+                (body.ui_intent or "").strip().lower() == "create_document"
+                or (intent_decision.domain == "document" and intent_decision.mode == "create")
+            )
+            if should_force_document_fallback:
+                document_fallback = _build_document_fallback_action(
+                    user_message=body.message,
+                    ui_intent=body.ui_intent,
+                    ui_params=body.ui_intent_params,
+                    force_from_intent=intent_decision.domain == "document" and intent_decision.mode == "create",
+                )
+                action_payload = _normalize_action_payload_for_execution(
+                    document_fallback,
+                    ui_intent=body.ui_intent,
+                    user_message=body.message,
+                )
         if action_payload is None and _claims_action_completed(reply):
             reply = ACTION_NOT_EXECUTED_MESSAGE
-        action_payload = apply_ui_intent_overrides(action_payload, body.ui_intent, body.ui_intent_params)
         usage = _extract_usage_dict(data)
         # Нормализация usage для провайдеров, которые кладут токены в root-поля.
         if not usage:

@@ -62,3 +62,7 @@ celerybeat.pid
 
 # Alembic
 *.pyc
+
+
+AGENTS*
+NO_READ_IGNORE

@@ -216,7 +216,7 @@ export default function BillingPage() {
   if (loading) return <div className="flex items-center justify-center py-32"><div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>
 
   return (
-    <div className="space-y-6 max-w-5xl">
+    <div className="mx-auto w-full max-w-[1680px] space-y-6">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2"><CreditCard className="h-6 w-6 text-primary" /> Биллинг</h1>
@@ -284,8 +284,8 @@ export default function BillingPage() {
             { label: 'Хранилище', value: formatBytes(usage.storage_bytes), icon: HardDrive, color: 'text-rose-500', bg: 'bg-rose-500/10' },
           ].map(card => (
             <div key={card.label} className="rounded-xl border border-border bg-card p-3 flex items-center gap-3">
-              <div className={`h-9 w-9 rounded-lg ${card.bg} flex items-center justify-center shrink-0`}>
-                <card.icon className={`h-4 w-4 ${card.color}`} />
+              <div className={`h-10 w-10 rounded-lg ${card.bg} flex items-center justify-center shrink-0`}>
+                <card.icon className={`h-5 w-5 ${card.color}`} />
               </div>
               <div>
                 <p className="text-lg font-bold">{typeof card.value === 'number' ? card.value.toLocaleString('ru') : card.value}</p>

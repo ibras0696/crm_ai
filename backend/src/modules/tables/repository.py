@@ -168,10 +168,31 @@ class TableViewRepository:
         stmt = (
             select(TableView)
             .where(TableView.table_id == table_id, TableView.org_id == org_id)
-            .order_by(TableView.created_at)
+            .order_by(TableView.is_default.desc(), TableView.created_at.asc())
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def clear_default_for_table(
+        self,
+        *,
+        table_id: uuid.UUID,
+        org_id: uuid.UUID,
+        exclude_view_id: uuid.UUID | None = None,
+    ) -> None:
+        stmt = (
+            update(TableView)
+            .where(TableView.table_id == table_id, TableView.org_id == org_id, TableView.is_default.is_(True))
+            .values(is_default=False)
+        )
+        if exclude_view_id is not None:
+            stmt = stmt.where(TableView.id != exclude_view_id)
+        await self.session.execute(stmt)
+        await self.session.flush()
+
+    async def update(self, view: TableView) -> TableView:
+        await self.session.flush()
+        return view
 
     async def delete(self, view: TableView) -> None:
         await self.session.delete(view)

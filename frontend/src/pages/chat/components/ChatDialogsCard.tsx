@@ -1,6 +1,6 @@
 import { ArrowDown, Camera, ChevronLeft, ChevronRight, Image, Loader2, MessageSquare, Mic, Paperclip, Plus, Search, SendHorizontal, Square, Trash2, UserPlus, Video, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { linkifyTextToNodes } from '@/lib/linkify'
 import {
@@ -23,6 +23,8 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
     isDesktopSidebarCollapsed,
     setIsDesktopSidebarCollapsed,
     renderChatList,
+    dialogsQuery,
+    setDialogsQuery,
     selectedChat,
     getChatDisplayTitle,
     selectedChatMembers,
@@ -35,7 +37,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
     searchQuery,
     setSearchQuery,
     canDeleteSelectedChat,
-    handleDeleteSelectedChat,
+    onRequestDeleteSelectedChat,
     deletingChat,
     messagesViewportRef,
     handleMessagesScroll,
@@ -95,6 +97,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
     stopVoiceRecording,
     mediaPreview,
     setMediaPreview,
+    onOpenCreateChat,
   } = props as any
 
   const toggleMessageExpanded = (messageId: string) => {
@@ -102,69 +105,123 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
   }
 
   return (
-      <Card className="border-border/60">
-        <CardHeader className="flex flex-row items-center justify-between pb-3">
-          <CardTitle className="text-base">Диалоги</CardTitle>
-          <Button
-            type="button"
-            className="h-8 rounded-full border border-primary/30 bg-primary/10 px-3 text-xs text-primary hover:bg-primary/20 lg:hidden"
-            variant="ghost"
-            onClick={() => setIsMobileDialogsOpen(true)}
-            aria-label="Открыть диалоги"
-          >
-            <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
-            Чаты
-          </Button>
-        </CardHeader>
-        <CardContent className="relative h-[70vh] min-h-[420px] max-h-[760px] p-0 sm:min-h-[520px]">
-          <div className={`relative h-full min-h-0 p-4 ${isDesktopSidebarCollapsed ? 'lg:pl-16' : ''}`}>
-            {isDesktopSidebarCollapsed ? (
+      <Card className="overflow-hidden rounded-2xl border border-border/70 bg-background/55 shadow-[0_18px_45px_rgba(0,0,0,0.28)]">
+        {(isDesktopSidebarCollapsed || isMobileViewport) && (
+          <CardHeader className="flex flex-row items-center justify-between border-b border-border/60 px-3 py-2 sm:px-4">
+            <div className="flex min-w-0 items-center gap-2">
+              {isDesktopSidebarCollapsed && (
+                <div className="hidden items-center gap-1 rounded-full border border-border/70 bg-background/90 p-1 shadow-sm backdrop-blur lg:flex">
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 rounded-full border border-border/60"
+                    onClick={() => setIsDesktopSidebarCollapsed(false)}
+                    aria-label="Открыть панель чатов"
+                    title="Показать диалоги"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 rounded-full border border-primary/35 bg-primary/15 text-primary hover:bg-primary/25"
+                    onClick={onOpenCreateChat}
+                    aria-label="Создать чат"
+                    title="Новый чат"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+            </div>
+            <div className="flex items-center gap-2 lg:hidden">
               <Button
                 type="button"
-                size="icon"
+                className="h-8 rounded-full border border-primary/30 bg-primary/15 px-3 text-xs text-primary hover:bg-primary/25"
                 variant="ghost"
-                className="absolute left-4 top-6 z-30 hidden h-9 w-9 rounded-full border border-border/70 bg-background/90 shadow-sm backdrop-blur lg:flex"
-                onClick={() => setIsDesktopSidebarCollapsed(false)}
-                aria-label="Открыть панель чатов"
+                onClick={onOpenCreateChat}
+                aria-label="Создать чат"
               >
-                <ChevronRight className="h-4 w-4" />
+                <Plus className="mr-1.5 h-3.5 w-3.5" />
+                Новый
               </Button>
+              <Button
+                type="button"
+                className="h-8 rounded-full border border-primary/30 bg-primary/15 px-3 text-xs text-primary hover:bg-primary/25"
+                variant="ghost"
+                onClick={() => setIsMobileDialogsOpen(true)}
+                aria-label="Открыть диалоги"
+              >
+                <MessageSquare className="mr-1.5 h-3.5 w-3.5" />
+                Чаты
+              </Button>
+            </div>
+          </CardHeader>
+        )}
+        <CardContent className="relative h-[76vh] min-h-[480px] max-h-[860px] p-0 sm:min-h-[560px]">
+          <div className="relative flex h-full min-h-0">
+            {isDesktopSidebarCollapsed ? (
+              null
             ) : (
-              <>
-                <button
-                  type="button"
-                  aria-label="Закрыть панель чатов"
-                  onClick={() => setIsDesktopSidebarCollapsed(true)}
-                  className="absolute inset-0 z-10 hidden bg-black/20 lg:block"
-                />
-                <div className="absolute inset-y-4 left-4 z-20 hidden w-[280px] lg:block">
-                  <div className="flex h-full min-h-0 flex-col rounded-md border border-border/60 bg-background/95 shadow-xl backdrop-blur">
-                    <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
-                      <span className="text-xs text-muted-foreground">Чаты</span>
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        onClick={() => setIsDesktopSidebarCollapsed(true)}
-                        aria-label="Свернуть панель чатов"
-                      >
-                        <ChevronLeft className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <div className="min-h-0 flex-1 overflow-y-auto p-2">
-                      {renderChatList(false)}
-                    </div>
+              <aside className="hidden h-full w-[340px] shrink-0 border-r border-border/60 bg-background/95 lg:flex lg:flex-col">
+                <div className="space-y-2 border-b border-border/60 px-3 py-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">Диалоги</span>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7"
+                      onClick={() => setIsDesktopSidebarCollapsed(true)}
+                      aria-label="Свернуть панель чатов"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={dialogsQuery}
+                      onChange={(event) => setDialogsQuery(event.target.value)}
+                      placeholder="Поиск чатов"
+                      className="h-9 rounded-full border-border/70 bg-background/80 pl-8 text-sm"
+                    />
                   </div>
                 </div>
-              </>
+                <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
+                  <span className="text-[11px] text-muted-foreground">Список чатов</span>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-8 w-8 rounded-full border border-primary/35 bg-primary/10 text-primary hover:bg-primary/20"
+                      onClick={onOpenCreateChat}
+                      aria-label="Создать чат"
+                      title="Новый чат"
+                    >
+                      <Plus className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                  {renderChatList(false)}
+                </div>
+              </aside>
             )}
 
-            <div className="flex h-full min-h-0 min-w-0 flex-col rounded-md border border-border/60">
-              <div className="border-b border-border/60 px-3 py-2">
+            <div className="flex min-w-0 flex-1 flex-col bg-background/40">
+              <div className="border-b border-border/60 bg-background/92 px-3 py-3 sm:px-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-semibold">
+                    {selectedChat && (
+                      <div className="mb-1 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border/70 bg-muted/20 text-[11px] font-semibold text-muted-foreground">
+                        {getInitials(getChatDisplayTitle(selectedChat)).slice(0, 2)}
+                      </div>
+                    )}
+                    <div className="truncate text-sm font-semibold sm:text-base">
                       {selectedChat ? getChatDisplayTitle(selectedChat) : 'Выберите чат'}
                     </div>
                     {selectedChat && (
@@ -221,7 +278,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                         <UserPlus className="h-4 w-4" />
                       </Button>
                     )}
-                    <Button type="button" size="icon" variant="ghost" onClick={() => setSearchOpen((prev: boolean) => !prev)} aria-label="Поиск по сообщениям">
+                    <Button type="button" size="icon" variant="ghost" className="h-9 w-9 rounded-full border border-transparent hover:border-border/60" onClick={() => setSearchOpen((prev: boolean) => !prev)} aria-label="Поиск по сообщениям">
                       <Search className="h-4 w-4" />
                     </Button>
                     {canDeleteSelectedChat && (
@@ -229,7 +286,8 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                         type="button"
                         size="icon"
                         variant="ghost"
-                        onClick={() => void handleDeleteSelectedChat()}
+                        className="h-9 w-9 rounded-full border border-transparent hover:border-border/60"
+                        onClick={onRequestDeleteSelectedChat}
                         disabled={deletingChat}
                         aria-label="Удалить группу"
                         title="Удалить группу"
@@ -253,19 +311,21 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
               <div
                 ref={messagesViewportRef}
                 onScroll={handleMessagesScroll}
-                className="min-h-0 flex-1 space-y-2 overflow-x-hidden overflow-y-auto p-3"
+                className="min-h-0 flex-1 space-y-2 overflow-x-hidden overflow-y-auto bg-background/20 px-3 py-3 sm:px-4"
               >
                 {loadingOlderMessages && (
                   <div className="pb-1 text-center text-xs text-muted-foreground">Загрузка предыдущих сообщений...</div>
                 )}
                 {!selectedChat ? (
-                  <div className="text-sm text-muted-foreground">{isMobileViewport ? 'Откройте список через кнопку "Чаты"' : 'Откройте чат слева'}</div>
+                  <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-muted-foreground">
+                    {isMobileViewport ? 'Откройте список через кнопку "Чаты"' : 'Выберите диалог слева'}
+                  </div>
                 ) : loadingMessages ? (
-                  <div className="text-sm text-muted-foreground">Загрузка сообщений...</div>
+                  <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-muted-foreground">Загрузка сообщений...</div>
                 ) : messages.length === 0 ? (
-                  <div className="text-sm text-muted-foreground">Сообщений пока нет</div>
+                  <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-muted-foreground">Сообщений пока нет</div>
                 ) : visibleMessages.length === 0 ? (
-                  <div className="text-sm text-muted-foreground">Поиск не дал результатов</div>
+                  <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-muted-foreground">Поиск не дал результатов</div>
                 ) : (
                   <>
                     {!hasMoreMessages && (
@@ -275,6 +335,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                       const own = message.sender_id === user?.id
                       const prev = visibleMessages[index - 1]
                       const showDayDivider = !prev || toDayKey(prev.created_at) !== toDayKey(message.created_at)
+                      const showSender = !own && (!prev || prev.sender_id !== message.sender_id || showDayDivider)
                       const senderLabel = getMessageOwnerLabel(message)
                       const ownStatus = getOwnMessageStatus(message)
                       const attachments = getMessageAttachments(message)
@@ -305,21 +366,21 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                               <span className="rounded-full border border-border/60 px-2 py-0.5">{formatDayDivider(message.created_at)}</span>
                             </div>
                           )}
-                          <div className={`group flex w-full min-w-0 ${own ? 'justify-end' : 'justify-start'}`}>
-                            <div className={`min-w-0 ${own ? 'max-w-[82%] sm:max-w-[62%] text-right' : 'max-w-[90%] sm:max-w-[68%] text-left'}`}>
-                              {!own && (
-                                <div className="mb-1 flex items-center gap-2 px-1">
-                                  <div className="flex h-6 w-6 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground">
-                                    {getInitials(senderLabel)}
-                                  </div>
-                                  <div className="truncate text-[11px] text-muted-foreground">{senderLabel}</div>
-                                </div>
+                          <div className={`group flex w-full min-w-0 items-end gap-2 ${own ? 'justify-end' : 'justify-start'}`}>
+                            {!own && (
+                              <div className="mb-1 h-7 w-7 shrink-0 rounded-full border border-border/70 bg-muted/30 text-[10px] font-semibold text-muted-foreground flex items-center justify-center">
+                                {getInitials(senderLabel)}
+                              </div>
+                            )}
+                            <div className={`min-w-0 ${own ? 'max-w-[84%] sm:max-w-[64%] text-right' : 'max-w-[94%] sm:max-w-[72%] text-left'}`}>
+                              {showSender && (
+                                <div className="mb-1 truncate px-1 text-[11px] text-muted-foreground">{senderLabel}</div>
                               )}
                               <div
-                                className={`relative max-w-full rounded-xl border px-3 py-2 text-sm ${
+                                className={`relative max-w-full rounded-2xl px-3 py-2 text-sm shadow-sm ${
                                   own
-                                    ? 'ml-auto border-primary/35 bg-primary/[0.14] text-right'
-                                    : 'mr-auto border-border/70 bg-muted/25 text-left'
+                                    ? 'ml-auto rounded-br-md border border-primary/25 bg-primary text-primary-foreground text-right'
+                                    : 'mr-auto rounded-bl-md border border-border/60 bg-muted/[0.22] text-left'
                                 }`}
                               >
                                 {replyTarget && (
@@ -331,7 +392,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                                         setExpandedMessages((prev: Record<string, boolean>) => ({ ...prev, [replyTarget.id]: true }))
                                       }
                                     }}
-                                    className={`mb-2 block w-full overflow-hidden rounded border border-border/60 bg-background/40 px-2 py-1 text-[11px] text-muted-foreground ${
+                                    className={`mb-2 block w-full overflow-hidden rounded-lg border border-border/60 bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground ${
                                       own ? 'text-right' : 'text-left'
                                     }`}
                                   >
@@ -378,7 +439,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                                 <button
                                   type="button"
                                   onClick={() => setMenuOpenMessageId((prev: string | null) => (prev === message.id ? null : message.id))}
-                                  className={`absolute top-1 hidden rounded px-1 py-0.5 text-[12px] text-muted-foreground hover:bg-background/40 group-hover:block ${
+                                  className={`absolute top-1 hidden rounded px-1 py-0.5 text-[12px] text-muted-foreground hover:bg-background/70 group-hover:block ${
                                     own ? 'right-1' : 'left-1'
                                   }`}
                                   aria-label="Действия с сообщением"
@@ -421,7 +482,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                                   </div>
                                 )}
                               </div>
-                              <div className={`mt-1 px-1 text-[10px] text-muted-foreground ${own ? 'text-right' : 'text-left'}`}>
+                              <div className={`mt-1 px-1 text-[10px] text-muted-foreground/90 ${own ? 'text-right' : 'text-left'}`}>
                                 #{message.seq_no} · {new Date(message.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
                                 {ownStatus && ` · ${ownStatus}`}
                               </div>
@@ -442,9 +503,9 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                 )}
               </div>
 
-              <div className="sticky bottom-0 border-t border-border/60 bg-background/95 p-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+              <div className="sticky bottom-0 border-t border-border/60 bg-background/92 px-3 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:px-4">
                 {replyToMessage && (
-                  <div className="mb-2 flex items-center justify-between rounded-md border border-border/60 bg-muted/20 px-2 py-1 text-xs">
+                  <div className="mb-2 flex items-center justify-between rounded-xl border border-border/60 bg-muted/20 px-2.5 py-1.5 text-xs">
                     <div className="truncate">
                       Ответ на: <span className="text-muted-foreground">{getMessageOwnerLabel(replyToMessage)}</span> ·{' '}
                       {replyToMessage.body.trim() || (getMessageAttachments(replyToMessage).length > 0 ? 'Вложение' : '')}
@@ -541,13 +602,13 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                   onChange={(event) => void handleFileInputChange(event)}
                 />
 
-                <div className="relative flex items-end gap-2" ref={attachMenuRef}>
+                <div className="relative flex items-end gap-2 rounded-3xl border border-border/70 bg-background/95 p-2 shadow-sm" ref={attachMenuRef}>
                   <div className="relative shrink-0">
                     <Button
                       type="button"
                       size="icon"
-                      variant="outline"
-                      className="h-10 w-10 rounded-full"
+                      variant="ghost"
+                      className="h-10 w-10 rounded-full border border-border/70 bg-background/80"
                       onClick={() => setIsAttachMenuOpen((prev: boolean) => !prev)}
                       disabled={!selectedChatId || sending || isRecordingVoice || composerAttachments.length >= 1 || hasUploadingAttachments}
                       aria-label="Открыть меню вложений"
@@ -603,9 +664,9 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                     }}
                     maxLength={MESSAGE_MAX_CHARS}
                     rows={1}
-                    placeholder={selectedChat ? 'Пишите сообщение' : 'Выберите чат'}
+                    placeholder={selectedChat ? 'Напишите сообщение...' : 'Выберите чат'}
                     disabled={!selectedChat || sending || isRecordingVoice}
-                    className="max-h-40 min-h-[40px] flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="max-h-40 min-h-[40px] flex-1 resize-none rounded-2xl border border-transparent bg-transparent px-2 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onBlur={() => stopTyping()}
                     onPaste={handleComposerPaste}
                     onKeyDown={(e) => {
@@ -620,7 +681,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                       type="button"
                       size="icon"
                       variant="destructive"
-                      className="h-10 w-10 rounded-full"
+                      className="h-10 w-10 rounded-full shadow-sm"
                       onClick={() => stopVoiceRecording(true)}
                       aria-label="Остановить запись голосового"
                       title="Стоп запись"
@@ -631,7 +692,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                     <Button
                       type="button"
                       size="icon"
-                      className="h-10 w-10 rounded-full"
+                      className="h-10 w-10 rounded-full bg-primary shadow-sm hover:bg-primary/90"
                       onClick={() => void handleSend()}
                       disabled={sending || draft.trim().length > MESSAGE_MAX_CHARS || hasUploadingAttachments}
                       aria-label="Отправить сообщение"
@@ -643,8 +704,8 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                     <Button
                       type="button"
                       size="icon"
-                      variant="outline"
-                      className="h-10 w-10 rounded-full"
+                      variant="ghost"
+                      className="h-10 w-10 rounded-full border border-border/70"
                       onClick={() => void startVoiceRecording()}
                       disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
                       aria-label="Записать голосовое сообщение"
@@ -706,20 +767,31 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
               onClick={() => setIsMobileDialogsOpen(false)}
             >
               <div className="absolute inset-0 bg-black/60 backdrop-blur-[1px]" />
-              <div className="absolute inset-y-0 left-0 w-[88vw] max-w-[340px] p-3" onClick={(e) => e.stopPropagation()}>
-                <div className="flex h-full min-h-0 flex-col rounded-xl border border-border/70 bg-background shadow-2xl">
-                  <div className="flex items-center justify-between border-b border-border/60 px-3 py-2">
-                    <span className="text-xs text-muted-foreground">Чаты</span>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7"
-                      onClick={() => setIsMobileDialogsOpen(false)}
-                      aria-label="Закрыть список диалогов"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
+                <div className="absolute inset-y-0 left-0 w-[88vw] max-w-[340px] p-3" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex h-full min-h-0 flex-col rounded-xl border border-border/70 bg-background shadow-2xl">
+                  <div className="space-y-2 border-b border-border/60 px-3 py-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-muted-foreground">Чаты</span>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        onClick={() => setIsMobileDialogsOpen(false)}
+                        aria-label="Закрыть список диалогов"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <div className="relative">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        value={dialogsQuery}
+                        onChange={(event) => setDialogsQuery(event.target.value)}
+                        placeholder="Поиск чатов"
+                        className="h-9 rounded-full border-border/70 bg-background/80 pl-8 text-sm"
+                      />
+                    </div>
                   </div>
                   <div className="min-h-0 flex-1 overflow-y-auto p-2">
                     {renderChatList(false)}

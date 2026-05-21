@@ -379,9 +379,10 @@ def _build_document_fallback_action(
     user_message: str,
     ui_intent: str | None,
     ui_params: dict | None,
+    force_from_intent: bool = False,
 ) -> dict | None:
     """Build a minimal create_document action from UI intent when the model skipped crm_action."""
-    if (ui_intent or "").strip().lower() != "create_document":
+    if not force_from_intent and (ui_intent or "").strip().lower() != "create_document":
         return None
 
     params = ui_params if isinstance(ui_params, dict) else {}

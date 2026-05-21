@@ -13,6 +13,105 @@ def looks_like_table_create_request(text: str) -> bool:
     return ("созд" in t and "таблиц" in t) or ("create" in t and "table" in t)
 
 
+_ACTION_TO_DOMAIN = {
+    "create_table": "table",
+    "create_columns": "table",
+    "create_records": "table",
+    "create_dashboard": "dashboard",
+    "create_schedule_event": "schedule",
+    "create_kb_page": "knowledge",
+    "edit_kb_page": "knowledge",
+    "create_document": "document",
+}
+
+_UI_INTENT_TO_DOMAIN = {
+    "create_table": "table",
+    "create_columns": "table",
+    "create_records": "table",
+    "create_dashboard": "dashboard",
+    "create_schedule_event": "schedule",
+    "create_kb_page": "knowledge",
+    "create_document": "document",
+}
+
+_CONTINUE_ACTION_MARKERS = (
+    "продолж",
+    "continue",
+    "дальше",
+    "далее",
+)
+
+_NEGATED_DOMAIN_MARKERS = {
+    "table": ("таблиц", "table"),
+    "schedule": ("расписан", "календар", "schedule", "calendar"),
+    "knowledge": ("база знаний", "kb", "wiki", "knowledge"),
+    "dashboard": ("дашборд", "график", "dashboard", "chart"),
+    "document": ("документ", "docx", "pdf", "document", "file"),
+}
+
+
+def infer_action_domain(action_payload: dict | None) -> str | None:
+    """Определить домен действия по имени action."""
+    if not isinstance(action_payload, dict):
+        return None
+    action_name = str(action_payload.get("action") or "").strip().lower()
+    return _ACTION_TO_DOMAIN.get(action_name)
+
+
+def _looks_like_action_continuation(text: str) -> bool:
+    t = (text or "").lower()
+    return any(marker in t for marker in _CONTINUE_ACTION_MARKERS)
+
+
+def _domain_is_negated_in_message(text: str, domain: str) -> bool:
+    markers = _NEGATED_DOMAIN_MARKERS.get(domain, ())
+    lowered = (text or "").lower()
+    for marker in markers:
+        escaped = re.escape(marker)
+        if " " in marker:
+            pattern = rf"(?:^|[\s,;:()])(?:не|not|without)\s+{escaped}"
+        else:
+            pattern = rf"(?:^|[\s,;:()])(?:не|not|without)\s+\w*{escaped}\w*"
+        if re.search(pattern, lowered):
+            return True
+    return False
+
+
+def reject_action_reason(
+    *,
+    action_payload: dict | None,
+    user_message: str,
+    intent_decision: IntentDecision,
+    ui_intent: str | None,
+) -> str | None:
+    """Вернуть причину, по которой action нельзя исполнять, или None."""
+    action_domain = infer_action_domain(action_payload)
+    if not action_domain:
+        return None
+
+    if _domain_is_negated_in_message(user_message, action_domain):
+        return "domain_negated_by_user"
+
+    ui_domain = _UI_INTENT_TO_DOMAIN.get(str(ui_intent or "").strip().lower())
+    if ui_domain and ui_domain != action_domain:
+        return "ui_intent_domain_mismatch"
+
+    explicit_action_requested = bool(
+        intent_decision.is_action or ui_domain or _looks_like_action_continuation(user_message)
+    )
+    if not explicit_action_requested:
+        return "action_not_requested"
+
+    if (
+        intent_decision.domain != "general"
+        and intent_decision.mode in {"create", "update", "delete"}
+        and intent_decision.domain != action_domain
+    ):
+        return "intent_domain_mismatch"
+
+    return None
+
+
 def extract_requested_record_count(text: str) -> int | None:
     """Извлечь запрошенное количество записей из текста пользователя."""
     t = (text or "").lower()

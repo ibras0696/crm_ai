@@ -27,6 +27,12 @@ export function ChatModals(props: Record<string, unknown>) {
     setAddingMemberUserId,
     addingMember,
     handleAddMemberToSelectedChat,
+    deleteChatConfirmOpen,
+    setDeleteChatConfirmOpen,
+    canDeleteSelectedChat,
+    deletingChat,
+    selectedChatTitle,
+    handleDeleteSelectedChat,
   } = props as any
 
   return (
@@ -177,6 +183,43 @@ export function ChatModals(props: Record<string, unknown>) {
                   </div>
                 </>
               )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {deleteChatConfirmOpen && selectedChat && canDeleteSelectedChat && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => !deletingChat && setDeleteChatConfirmOpen(false)}>
+          <Card
+            role="dialog"
+            aria-modal="true"
+            aria-label="Подтверждение удаления чата"
+            className="w-full max-w-md border-border/60"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <CardHeader className="space-y-2 pb-2">
+              <CardTitle className="text-base">Удалить чат?</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Чат <span className="font-medium text-foreground">«{selectedChatTitle || 'Без названия'}»</span> будет удалён вместе с сообщениями и медиа. Это действие нельзя отменить.
+              </p>
+            </CardHeader>
+            <CardContent className="flex justify-end gap-2 pt-0">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setDeleteChatConfirmOpen(false)}
+                disabled={deletingChat}
+              >
+                Отмена
+              </Button>
+              <Button
+                type="button"
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => void handleDeleteSelectedChat()}
+                disabled={deletingChat}
+              >
+                {deletingChat ? 'Удаление...' : 'Удалить'}
+              </Button>
             </CardContent>
           </Card>
         </div>

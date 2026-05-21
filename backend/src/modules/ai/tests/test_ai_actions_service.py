@@ -140,6 +140,34 @@ def test_build_document_fallback_action_uses_ui_intent_and_file_type():
     assert payload["prompt"] == "сделай коммерческое предложение для клиента"
 
 
+def test_reject_action_reason_blocks_negated_table_for_document_request():
+    from src.modules.ai.internal.chat_policy import reject_action_reason
+    from src.modules.ai.internal.intent_router import interpret_user_intent
+
+    decision = interpret_user_intent("создай документ, не таблицу, в формате резюме")
+    reason = reject_action_reason(
+        action_payload={"action": "create_table", "name": "Трекер"},
+        user_message="создай документ, не таблицу, в формате резюме",
+        intent_decision=decision,
+        ui_intent=None,
+    )
+    assert reason == "domain_negated_by_user"
+
+
+def test_reject_action_reason_blocks_unsolicited_action_for_greeting():
+    from src.modules.ai.internal.chat_policy import reject_action_reason
+    from src.modules.ai.internal.intent_router import interpret_user_intent
+
+    decision = interpret_user_intent("привет, как дела?")
+    reason = reject_action_reason(
+        action_payload={"action": "create_table", "name": "ShouldNotRun"},
+        user_message="привет, как дела?",
+        intent_decision=decision,
+        ui_intent=None,
+    )
+    assert reason == "action_not_requested"
+
+
 @pytest.mark.asyncio
 async def test_ai_service_can_create_document_job(client: AsyncClient, monkeypatch):
     token, email = await _register_owner(client)
@@ -203,7 +231,7 @@ async def test_ai_service_can_create_document_job(client: AsyncClient, monkeypat
 
 @pytest.mark.asyncio
 async def test_ai_service_can_create_table_columns_records_and_event(client: AsyncClient):
-    token, email = await _register_owner(client)
+    _token, email = await _register_owner(client)
 
     from src.infrastructure.uow import UnitOfWork
     from src.modules.ai.service import (

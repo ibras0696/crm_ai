@@ -2,7 +2,7 @@
 
 import uuid
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from src.common.enums import UserRole
 from src.common.schemas import ApiResponse
@@ -15,12 +15,15 @@ from src.modules.tables.schemas import (
     CreateFolderRequest,
     CreateTableRequest,
     FolderOut,
+    FormulaPreviewOut,
+    FormulaPreviewRequest,
+    RelationOptionOut,
     TableOut,
     UpdateColumnRequest,
     UpdateFolderRequest,
     UpdateTableRequest,
 )
-from src.modules.tables.service import TableServiceError, TablesService
+from src.modules.tables.service import TableRecordsService, TableServiceError, TablesService
 
 router = APIRouter(prefix="/tables", tags=["tables"])
 
@@ -255,3 +258,52 @@ async def delete_column(
             return _error_response(error)
         await uow.commit()
     return ApiResponse(data=None)
+
+
+@router.post("/{table_id}/formula/preview", response_model=ApiResponse[FormulaPreviewOut])
+async def preview_formula(
+    table_id: uuid.UUID,
+    body: FormulaPreviewRequest,
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)
+    ),
+    _: None = Depends(require_access(resource_type="table", permission="can_read", resource_id_param="table_id")),
+):
+    async with UnitOfWork() as uow:
+        service = TablesService(uow.session)
+        try:
+            preview = await service.preview_formula(
+                table_id=table_id,
+                org_id=current_user.org_id,
+                expression=body.expression,
+                sample_row=body.sample_row,
+            )
+        except TableServiceError as error:
+            return _error_response(error)
+    return ApiResponse(data=FormulaPreviewOut.model_validate(preview))
+
+
+@router.get("/{table_id}/columns/{column_id}/relation-options", response_model=ApiResponse[list[RelationOptionOut]])
+async def relation_options(
+    table_id: uuid.UUID,
+    column_id: uuid.UUID,
+    limit: int = Query(default=100, ge=1, le=500),
+    search: str | None = Query(default=None),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY)
+    ),
+    _: None = Depends(require_access(resource_type="table", permission="can_read", resource_id_param="table_id")),
+):
+    async with UnitOfWork() as uow:
+        service = TableRecordsService(uow.session)
+        try:
+            options = await service.get_relation_options(
+                table_id=table_id,
+                column_id=column_id,
+                org_id=current_user.org_id,
+                limit=limit,
+                search=search,
+            )
+        except TableServiceError as error:
+            return _error_response(error)
+    return ApiResponse(data=[RelationOptionOut.model_validate(item) for item in options])

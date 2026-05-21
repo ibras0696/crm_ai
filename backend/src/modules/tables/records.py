@@ -72,6 +72,32 @@ class RecordRepository:
         await self.session.flush()
         return records
 
+    async def list_by_ids_for_table(self, *, table_id: uuid.UUID, record_ids: list[uuid.UUID]) -> list[Record]:
+        if not record_ids:
+            return []
+        stmt = (
+            select(Record)
+            .where(Record.table_id == table_id, Record.id.in_(record_ids))
+            .order_by(Record.position.asc(), Record.created_at.desc())
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def bulk_delete_by_ids(self, *, table_id: uuid.UUID, record_ids: list[uuid.UUID]) -> int:
+        records = await self.list_by_ids_for_table(table_id=table_id, record_ids=record_ids)
+        for rec in records:
+            await self.session.delete(rec)
+        await self.session.flush()
+        return len(records)
+
+    async def delete_by_table(self, *, table_id: uuid.UUID) -> int:
+        stmt = select(Record).where(Record.table_id == table_id)
+        records = list((await self.session.execute(stmt)).scalars().all())
+        for rec in records:
+            await self.session.delete(rec)
+        await self.session.flush()
+        return len(records)
+
     async def get_max_position(self, table_id: uuid.UUID) -> int:
         stmt = select(func.coalesce(func.max(Record.position), -1)).where(Record.table_id == table_id)
         result = await self.session.execute(stmt)

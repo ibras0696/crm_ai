@@ -25,6 +25,7 @@ import SchedulePage from './pages/schedule/SchedulePage'
 import ReportsV2Page from './pages/reports-v2/ReportsV2Page'
 import AIPage from './pages/ai/AIPage'
 import ChatPage from './pages/chat/ChatPage'
+import GuidePage from './pages/guide/GuidePage'
 import AppLayout from './components/layout/AppLayout'
 import { useAuth } from './contexts/AuthContext'
 import { ErrorBoundary } from './components/common/ErrorBoundary'
@@ -71,6 +72,7 @@ export default function App() {
             </ErrorBoundary>
           }
         />
+        <Route path="/guide" element={<GuidePage />} />
         <Route path="/ai" element={<AIPage />} />
         <Route path="/admin" element={<AdminPage />} />
         <Route path="/billing" element={<BillingPage />} />

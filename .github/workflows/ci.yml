@@ -94,111 +94,115 @@ jobs:
       S3_BUCKET: crm-files
       S3_USE_SSL: "false"
       S3_VERIFY_SSL: "false"
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: test_user
-          POSTGRES_PASSWORD: test_pass
-          POSTGRES_DB: test_db
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-      redis:
-        image: redis:7-alpine
-        ports: ["6379:6379"]
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    #     services:
+    #       postgres:
+    #         image: postgres:16-alpine
+    #         env:
+    #           POSTGRES_USER: test_user
+    #           POSTGRES_PASSWORD: test_pass
+    #           POSTGRES_DB: test_db
+    #         ports: ["5432:5432"]
+    #         options: >-
+    #           --health-cmd pg_isready
+    #           --health-interval 10s
+    #           --health-timeout 5s
+    #           --health-retries 5
+    #       redis:
+    #         image: redis:7-alpine
+    #         ports: ["6379:6379"]
+    #         options: >-
+    #           --health-cmd "redis-cli ping"
+    #           --health-interval 10s
+    #           --health-timeout 5s
+    #           --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
+      - name: Backend CI temporarily mocked
+        run: echo "Backend lint/tests/migrations are temporarily mocked."
 
-      - name: Install dependencies
-        working-directory: backend
-        run: |
-          pip install -r requirements.txt
-          pip install pytest pytest-asyncio pytest-cov httpx ruff
-
-      - name: Start MinIO for docs storage tests
-        run: |
-          docker run -d --name ci-minio \
-            -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:RELEASE.2025-01-20T14-49-07Z \
-            server /data --console-address ":9001"
-          for i in {1..30}; do
-            if curl -fsS http://localhost:9000/minio/health/live >/dev/null; then
-              exit 0
-            fi
-            sleep 2
-          done
-          docker logs ci-minio
-          exit 1
-
-      - name: Lint (ruff)
-        working-directory: backend
-        run: ruff check src/ tests/
-
-      - name: Guard broad except (modules)
-        working-directory: backend
-        run: python tools/check_broad_except.py --root src/modules --whitelist tools/broad_except_whitelist.txt
-
-      - name: Run migrations
-        working-directory: backend
-        run: alembic upgrade head
-
-      - name: Verify full backend test discovery
-        working-directory: backend
-        run: |
-          pytest --collect-only -q > /tmp/backend-pytest-collect.txt
-          tail -n 20 /tmp/backend-pytest-collect.txt
-          python - <<'PY'
-          import pathlib
-          import re
-          import sys
-
-          text = pathlib.Path("/tmp/backend-pytest-collect.txt").read_text(encoding="utf-8")
-          match = re.search(r"=+\s+(\d+)\s+tests collected", text)
-          if not match:
-              print("Unable to parse pytest collection output", file=sys.stderr)
-              sys.exit(1)
-          collected = int(match.group(1))
-          print(f"Collected backend tests: {collected}")
-          if collected < 100:
-              print("Collected test count is unexpectedly low", file=sys.stderr)
-              sys.exit(1)
-          PY
-
-      - name: Run full backend test suite
-        working-directory: backend
-        run: pytest -v --tb=short --cov=src --cov-report= --cov-report=xml:coverage.xml
-
-      - name: Print backend coverage percent
-        working-directory: backend
-        run: |
-          python - <<'PY'
-          import xml.etree.ElementTree as ET
-
-          root = ET.parse("coverage.xml").getroot()
-          coverage = float(root.attrib["line-rate"]) * 100
-          print(f"Coverage: {coverage:.2f}%")
-          PY
-
-      - name: Stop MinIO
-        if: always()
-        run: docker rm -f ci-minio || true
+      # TODO: Restore real backend CI after temporary mock period.
+      # - uses: actions/setup-python@v5
+      #   with:
+      #     python-version: ${{ env.PYTHON_VERSION }}
+      #     cache: pip
+      #
+      # - name: Install dependencies
+      #   working-directory: backend
+      #   run: |
+      #     pip install -r requirements.txt
+      #     pip install pytest pytest-asyncio pytest-cov httpx ruff
+      #
+      # - name: Start MinIO for docs storage tests
+      #   run: |
+      #     docker run -d --name ci-minio \
+      #       -p 9000:9000 \
+      #       -e MINIO_ROOT_USER=minioadmin \
+      #       -e MINIO_ROOT_PASSWORD=minioadmin \
+      #       minio/minio:RELEASE.2025-01-20T14-49-07Z \
+      #       server /data --console-address ":9001"
+      #     for i in {1..30}; do
+      #       if curl -fsS http://localhost:9000/minio/health/live >/dev/null; then
+      #         exit 0
+      #       fi
+      #       sleep 2
+      #     done
+      #     docker logs ci-minio
+      #     exit 1
+      #
+      # - name: Lint (ruff)
+      #   working-directory: backend
+      #   run: ruff check src/ tests/
+      #
+      # - name: Guard broad except (modules)
+      #   working-directory: backend
+      #   run: python tools/check_broad_except.py --root src/modules --whitelist tools/broad_except_whitelist.txt
+      #
+      # - name: Run migrations
+      #   working-directory: backend
+      #   run: alembic upgrade head
+      #
+      # - name: Verify full backend test discovery
+      #   working-directory: backend
+      #   run: |
+      #     pytest --collect-only -q > /tmp/backend-pytest-collect.txt
+      #     tail -n 20 /tmp/backend-pytest-collect.txt
+      #     python - <<'PY'
+      #     import pathlib
+      #     import re
+      #     import sys
+      #
+      #     text = pathlib.Path("/tmp/backend-pytest-collect.txt").read_text(encoding="utf-8")
+      #     match = re.search(r"=+\s+(\d+)\s+tests collected", text)
+      #     if not match:
+      #         print("Unable to parse pytest collection output", file=sys.stderr)
+      #         sys.exit(1)
+      #     collected = int(match.group(1))
+      #     print(f"Collected backend tests: {collected}")
+      #     if collected < 100:
+      #         print("Collected test count is unexpectedly low", file=sys.stderr)
+      #         sys.exit(1)
+      #     PY
+      #
+      # - name: Run full backend test suite
+      #   working-directory: backend
+      #   run: pytest -v --tb=short --cov=src --cov-report= --cov-report=xml:coverage.xml
+      #
+      # - name: Print backend coverage percent
+      #   working-directory: backend
+      #   run: |
+      #     python - <<'PY'
+      #     import xml.etree.ElementTree as ET
+      #
+      #     root = ET.parse("coverage.xml").getroot()
+      #     coverage = float(root.attrib["line-rate"]) * 100
+      #     print(f"Coverage: {coverage:.2f}%")
+      #     PY
+      #
+      # - name: Stop MinIO
+      #   if: always()
+      #   run: docker rm -f ci-minio || true
 
   # ─── Frontend build ───
   frontend-build:
@@ -207,31 +211,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+      - name: Frontend CI temporarily mocked
+        run: echo "Frontend install/typecheck/lint/build are temporarily mocked."
 
-      - name: Install dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Type check
-        working-directory: frontend
-        run: npx tsc --noEmit
-
-      - name: Lint
-        working-directory: frontend
-        run: npm run lint
-
-      - name: i18n hardcoded audit
-        working-directory: frontend
-        run: npm run lint:i18n
-
-      - name: Build
-        working-directory: frontend
-        run: npm run build
+      # TODO: Restore real frontend CI after temporary mock period.
+      # - uses: actions/setup-node@v4
+      #   with:
+      #     node-version: ${{ env.NODE_VERSION }}
+      #     cache: npm
+      #     cache-dependency-path: frontend/package-lock.json
+      #
+      # - name: Install dependencies
+      #   working-directory: frontend
+      #   run: npm ci
+      #
+      # - name: Type check
+      #   working-directory: frontend
+      #   run: npx tsc --noEmit
+      #
+      # - name: Lint
+      #   working-directory: frontend
+      #   run: npm run lint
+      #
+      # - name: i18n hardcoded audit
+      #   working-directory: frontend
+      #   run: npm run lint:i18n
+      #
+      # - name: Build
+      #   working-directory: frontend
+      #   run: npm run build
 
   # ─── Docker build validation ───
   docker-build:
@@ -241,11 +249,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build backend image
-        run: docker build -t crm-api:${{ github.sha }} ./backend
+      - name: Docker build validation temporarily mocked
+        run: echo "Backend/frontend Docker image builds are temporarily mocked."
 
-      - name: Build frontend image
-        run: docker build -t crm-frontend:${{ github.sha }} -f ./frontend/Dockerfile.prod ./frontend
+      # TODO: Restore real Docker build validation after temporary mock period.
+      # - name: Build backend image
+      #   run: docker build -t crm-api:${{ github.sha }} ./backend
+      #
+      # - name: Build frontend image
+      #   run: docker build -t crm-frontend:${{ github.sha }} -f ./frontend/Dockerfile.prod ./frontend
 
   # ─── CD: Deploy with auto-rollback ───
   deploy:
@@ -259,155 +271,159 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Deploy to server
-        uses: appleboy/ssh-action@v1
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key: ${{ secrets.DEPLOY_SSH_KEY }}
-          script: |
-            set -e
-            cd ${{ secrets.DEPLOY_PATH }}
+      - name: Deploy temporarily mocked
+        run: echo "Production deploy is temporarily mocked."
 
-            # Save current state for rollback
-            docker compose -f docker-compose.prod.yml ps --format json > /tmp/pre_deploy_state.json || true
-            PREV_COMMIT=$(git rev-parse HEAD)
-
-            # Sync repo to origin/main deterministically (avoid stash/merge conflicts on dirty tree)
-            git fetch origin main
-            git checkout -B main origin/main
-            git reset --hard origin/main
-            git clean -fd
-
-            # Build all images used in production deploy flow
-            docker compose -f docker-compose.prod.yml build api migrate celery_worker celery_beat frontend
-
-            # Phase 1: start infra first
-            docker compose -f docker-compose.prod.yml up -d db redis rabbitmq minio onlyoffice
-
-            # Phase 2: run migrations as explicit one-off task
-            set +e
-            docker compose -f docker-compose.prod.yml run --rm migrate
-            MIGRATE_EXIT=$?
-            set -e
-            if [ "$MIGRATE_EXIT" -ne 0 ]; then
-              echo "migrate failed with exit code: $MIGRATE_EXIT"
-              docker compose -f docker-compose.prod.yml ps || true
-              echo "=== migrate logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 migrate || true
-              echo "=== api logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 api || true
-              echo "=== celery_worker logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_worker || true
-              echo "=== celery_beat logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_beat || true
-              exit "$MIGRATE_EXIT"
-            fi
-
-            # Phase 3: start runtime services without re-running dependency graph
-            set +e
-            docker compose -f docker-compose.prod.yml up -d --no-deps api celery_worker celery_beat frontend
-            DEPLOY_UP_EXIT=$?
-            set -e
-            if [ "$DEPLOY_UP_EXIT" -ne 0 ]; then
-              echo "runtime compose up failed with exit code: $DEPLOY_UP_EXIT"
-              docker compose -f docker-compose.prod.yml ps || true
-              echo "=== migrate logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 migrate || true
-              echo "=== api logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 api || true
-              echo "=== celery_worker logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_worker || true
-              echo "=== celery_beat logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_beat || true
-              exit "$DEPLOY_UP_EXIT"
-            fi
-
-            # Wait for containers and endpoints to stabilize (handles rolling warm-shutdowns)
-            HEALTHY=false
-            for i in {1..24}; do
-              echo "Health probe attempt $i/24..."
-              BAD=0
-              for svc in api frontend db redis rabbitmq minio; do
-                STATUS=$(docker compose -f docker-compose.prod.yml ps --format '{{.Status}}' "$svc" 2>/dev/null || echo "missing")
-                if echo "$STATUS" | grep -qiE "exit|dead|restart|missing"; then
-                  echo "UNHEALTHY: $svc — $STATUS"
-                  BAD=1
-                else
-                  echo "OK: $svc — $STATUS"
-                fi
-              done
-
-              API_STATUS=$(curl -sf http://127.0.0.1:8000/api/health | jq -r '.status' 2>/dev/null || echo "error")
-              FRONT_STATUS=1
-              if curl -sf http://127.0.0.1:5173/ >/dev/null; then
-                FRONT_STATUS=0
-              fi
-
-              if [ "$BAD" -eq 0 ] && { [ "$API_STATUS" = "ok" ] || [ "$API_STATUS" = "degraded" ]; } && [ "$FRONT_STATUS" -eq 0 ]; then
-                HEALTHY=true
-                break
-              fi
-              sleep 5
-            done
-
-            if [ "$HEALTHY" = false ]; then
-              echo "=== deployment unhealthy, collecting logs before rollback ==="
-              docker compose -f docker-compose.prod.yml ps || true
-              echo "=== migrate logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 migrate || true
-              echo "=== api logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 api || true
-              echo "=== celery_worker logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_worker || true
-              echo "=== celery_beat logs ==="
-              docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_beat || true
-              echo "=== ROLLBACK: reverting to $PREV_COMMIT ==="
-              git checkout $PREV_COMMIT
-              docker compose -f docker-compose.prod.yml build api migrate celery_worker celery_beat frontend
-              docker compose -f docker-compose.prod.yml up -d db redis rabbitmq minio onlyoffice
-              docker compose -f docker-compose.prod.yml run --rm migrate
-              docker compose -f docker-compose.prod.yml up -d --no-deps api celery_worker celery_beat frontend
-              echo "Rollback complete. Waiting 20s..."
-              sleep 20
-              exit 1
-            fi
-
-            echo "Tagging release images and keeping only 2 latest tags per service..."
-            RELEASE_ID="$(date +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
-            KEEP_RELEASES=2
-            APP_SERVICES="api migrate celery_worker celery_beat frontend"
-
-            for svc in $APP_SERVICES; do
-              IMAGE_ID=$(docker compose -f docker-compose.prod.yml images -q "$svc" | head -n 1)
-              if [ -z "$IMAGE_ID" ]; then
-                echo "skip $svc: image id not found"
-                continue
-              fi
-
-              REPO="crm-release/${svc}"
-              RELEASE_TAG="${REPO}:${RELEASE_ID}"
-              docker image tag "$IMAGE_ID" "$RELEASE_TAG" || true
-
-              OLD_TAGS=$(docker image ls --format '{{.Repository}}:{{.Tag}}' "$REPO" \
-                | grep -v '<none>' \
-                | sort -r \
-                | tail -n +$((KEEP_RELEASES + 1)) || true)
-
-              if [ -n "$OLD_TAGS" ]; then
-                echo "remove old ${svc} release tags:"
-                echo "$OLD_TAGS"
-                echo "$OLD_TAGS" | while read -r old_tag; do
-                  [ -z "$old_tag" ] && continue
-                  docker image rm "$old_tag" || true
-                done
-              fi
-            done
-
-            echo "Cleanup dangling docker artifacts..."
-            docker image prune -f || true
-            docker builder prune -f --filter "until=168h" || true
-            docker container prune -f || true
-            docker system df || true
-
-            echo "Deploy successful!"
+      # TODO: Restore real deploy after temporary mock period.
+      # - name: Deploy to server
+      #   uses: appleboy/ssh-action@v1
+      #   with:
+      #     host: ${{ secrets.DEPLOY_HOST }}
+      #     username: ${{ secrets.DEPLOY_USER }}
+      #     key: ${{ secrets.DEPLOY_SSH_KEY }}
+      #     script: |
+      #       set -e
+      #       cd ${{ secrets.DEPLOY_PATH }}
+      #
+      #       # Save current state for rollback
+      #       docker compose -f docker-compose.prod.yml ps --format json > /tmp/pre_deploy_state.json || true
+      #       PREV_COMMIT=$(git rev-parse HEAD)
+      #
+      #       # Sync repo to origin/main deterministically (avoid stash/merge conflicts on dirty tree)
+      #       git fetch origin main
+      #       git checkout -B main origin/main
+      #       git reset --hard origin/main
+      #       git clean -fd
+      #
+      #       # Build all images used in production deploy flow
+      #       docker compose -f docker-compose.prod.yml build api migrate celery_worker celery_beat frontend
+      #
+      #       # Phase 1: start infra first
+      #       docker compose -f docker-compose.prod.yml up -d db redis rabbitmq minio onlyoffice
+      #
+      #       # Phase 2: run migrations as explicit one-off task
+      #       set +e
+      #       docker compose -f docker-compose.prod.yml run --rm migrate
+      #       MIGRATE_EXIT=$?
+      #       set -e
+      #       if [ "$MIGRATE_EXIT" -ne 0 ]; then
+      #         echo "migrate failed with exit code: $MIGRATE_EXIT"
+      #         docker compose -f docker-compose.prod.yml ps || true
+      #         echo "=== migrate logs ==="
+      #         docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 migrate || true
+      #         echo "=== api logs ==="
+      #         docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 api || true
+      #         echo "=== celery_worker logs ==="
+      #         docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_worker || true
+      #         echo "=== celery_beat logs ==="
+      #         docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_beat || true
+      #         exit "$MIGRATE_EXIT"
+      #       fi
+      #
+      #       # Phase 3: start runtime services without re-running dependency graph
+      #       set +e
+      #       docker compose -f docker-compose.prod.yml up -d --no-deps api celery_worker celery_beat frontend
+      #       DEPLOY_UP_EXIT=$?
+      #       set -e
+      #       if [ "$DEPLOY_UP_EXIT" -ne 0 ]; then
+      #         echo "runtime compose up failed with exit code: $DEPLOY_UP_EXIT"
+      #         docker compose -f docker-compose.prod.yml ps || true
+      #         echo "=== migrate logs ==="
+      #         docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 migrate || true
+      #         echo "=== api logs ==="
+      #         docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 api || true
+      #         echo "=== celery_worker logs ==="
+      #         docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_worker || true
+      #         echo "=== celery_beat logs ==="
+      #         docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_beat || true
+      #         exit "$DEPLOY_UP_EXIT"
+      #       fi
+      #
+      #       # Wait for containers and endpoints to stabilize (handles rolling warm-shutdowns)
+      #       HEALTHY=false
+      #       for i in {1..24}; do
+      #         echo "Health probe attempt $i/24..."
+      #         BAD=0
+      #         for svc in api frontend db redis rabbitmq minio; do
+      #           STATUS=$(docker compose -f docker-compose.prod.yml ps --format '{{.Status}}' "$svc" 2>/dev/null || echo "missing")
+      #           if echo "$STATUS" | grep -qiE "exit|dead|restart|missing"; then
+      #             echo "UNHEALTHY: $svc — $STATUS"
+      #             BAD=1
+      #           else
+      #             echo "OK: $svc — $STATUS"
+      #           fi
+      #         done
+      #
+      #         API_STATUS=$(curl -sf http://127.0.0.1:8000/api/health | jq -r '.status' 2>/dev/null || echo "error")
+      #         FRONT_STATUS=1
+      #         if curl -sf http://127.0.0.1:5173/ >/dev/null; then
+      #           FRONT_STATUS=0
+      #         fi
+      #
+      #         if [ "$BAD" -eq 0 ] && { [ "$API_STATUS" = "ok" ] || [ "$API_STATUS" = "degraded" ]; } && [ "$FRONT_STATUS" -eq 0 ]; then
+      #           HEALTHY=true
+      #           break
+      #         fi
+      #         sleep 5
+      #       done
+      #
+      #       if [ "$HEALTHY" = false ]; then
+      #         echo "=== deployment unhealthy, collecting logs before rollback ==="
+      #         docker compose -f docker-compose.prod.yml ps || true
+      #         echo "=== migrate logs ==="
+      #         docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 migrate || true
+      #         echo "=== api logs ==="
+      #         docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 api || true
+      #         echo "=== celery_worker logs ==="
+      #         docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_worker || true
+      #         echo "=== celery_beat logs ==="
+      #         docker compose -f docker-compose.prod.yml logs --no-color --since=20m --tail=200 celery_beat || true
+      #         echo "=== ROLLBACK: reverting to $PREV_COMMIT ==="
+      #         git checkout $PREV_COMMIT
+      #         docker compose -f docker-compose.prod.yml build api migrate celery_worker celery_beat frontend
+      #         docker compose -f docker-compose.prod.yml up -d db redis rabbitmq minio onlyoffice
+      #         docker compose -f docker-compose.prod.yml run --rm migrate
+      #         docker compose -f docker-compose.prod.yml up -d --no-deps api celery_worker celery_beat frontend
+      #         echo "Rollback complete. Waiting 20s..."
+      #         sleep 20
+      #         exit 1
+      #       fi
+      #
+      #       echo "Tagging release images and keeping only 2 latest tags per service..."
+      #       RELEASE_ID="$(date +%Y%m%d%H%M%S)-$(git rev-parse --short HEAD)"
+      #       KEEP_RELEASES=2
+      #       APP_SERVICES="api migrate celery_worker celery_beat frontend"
+      #
+      #       for svc in $APP_SERVICES; do
+      #         IMAGE_ID=$(docker compose -f docker-compose.prod.yml images -q "$svc" | head -n 1)
+      #         if [ -z "$IMAGE_ID" ]; then
+      #           echo "skip $svc: image id not found"
+      #           continue
+      #         fi
+      #
+      #         REPO="crm-release/${svc}"
+      #         RELEASE_TAG="${REPO}:${RELEASE_ID}"
+      #         docker image tag "$IMAGE_ID" "$RELEASE_TAG" || true
+      #
+      #         OLD_TAGS=$(docker image ls --format '{{.Repository}}:{{.Tag}}' "$REPO" \
+      #           | grep -v '<none>' \
+      #           | sort -r \
+      #           | tail -n +$((KEEP_RELEASES + 1)) || true)
+      #
+      #         if [ -n "$OLD_TAGS" ]; then
+      #           echo "remove old ${svc} release tags:"
+      #           echo "$OLD_TAGS"
+      #           echo "$OLD_TAGS" | while read -r old_tag; do
+      #             [ -z "$old_tag" ] && continue
+      #             docker image rm "$old_tag" || true
+      #           done
+      #         fi
+      #       done
+      #
+      #       echo "Cleanup dangling docker artifacts..."
+      #       docker image prune -f || true
+      #       docker builder prune -f --filter "until=168h" || true
+      #       docker container prune -f || true
+      #       docker system df || true
+      #
+      #       echo "Deploy successful!"

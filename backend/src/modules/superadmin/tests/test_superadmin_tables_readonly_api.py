@@ -59,7 +59,7 @@ async def test_superadmin_tables_readonly_scoped_to_org(client: AsyncClient):
     sa = await _login_sa(client)
 
     tok1, org1 = await _register_owner(client, org_name="Org One")
-    tok2, org2 = await _register_owner(client, org_name="Org Two")
+    tok2, _org2 = await _register_owner(client, org_name="Org Two")
     table1, _ = await _create_table_with_data(client, tok1, name="Table One")
     table2, _ = await _create_table_with_data(client, tok2, name="Table Two")
 

@@ -20,7 +20,7 @@ class PaginationParams(BaseModel):
         return min(v, 1000)
 
 
-class PaginatedResponse(BaseModel, Generic[T]):
+class PaginatedResponse(BaseModel, Generic[T]):  # noqa: UP046
     """Paginated response with metadata."""
 
     items: list[T]
@@ -47,7 +47,7 @@ class CursorPaginationParams(BaseModel):
         return min(v, 1000)
 
 
-class CursorPaginatedResponse(BaseModel, Generic[T]):
+class CursorPaginatedResponse(BaseModel, Generic[T]):  # noqa: UP046
     """Cursor-based paginated response."""
 
     items: list[T]

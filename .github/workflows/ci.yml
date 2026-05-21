@@ -6,29 +6,13 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      force_ci:
-        description: "Run CI even when SKIP_CI=true"
-        required: false
-        type: boolean
-        default: false
 
 env:
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "20"
 
 jobs:
-  ci-skip-notice:
-    if: ${{ vars.SKIP_CI == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.force_ci) }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: CI is temporarily skipped
-        run: |
-          echo "CI skipped because repository variable SKIP_CI=true"
-          echo "To run anyway, trigger workflow_dispatch with force_ci=true"
-
   dependency-pin-guard:
-    if: ${{ vars.SKIP_CI != 'true' || (github.event_name == 'workflow_dispatch' && inputs.force_ci) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,7 +23,6 @@ jobs:
         run: python scripts/check_dependency_pins.py
 
   infra-compose-smoke:
-    if: ${{ vars.SKIP_CI != 'true' || (github.event_name == 'workflow_dispatch' && inputs.force_ci) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -79,7 +62,6 @@ jobs:
 
   # ─── Backend tests ───
   backend-lint-test:
-    if: ${{ vars.SKIP_CI != 'true' || (github.event_name == 'workflow_dispatch' && inputs.force_ci) }}
     runs-on: ubuntu-latest
     env:
       DATABASE_URL: postgresql+asyncpg://test_user:test_pass@localhost:5432/test_db
@@ -207,7 +189,6 @@ jobs:
 
   # ─── Frontend build ───
   frontend-build:
-    if: ${{ vars.SKIP_CI != 'true' || (github.event_name == 'workflow_dispatch' && inputs.force_ci) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -240,7 +221,6 @@ jobs:
 
   # ─── Docker build validation ───
   docker-build:
-    if: ${{ vars.SKIP_CI != 'true' || (github.event_name == 'workflow_dispatch' && inputs.force_ci) }}
     needs: [dependency-pin-guard, infra-compose-smoke, backend-lint-test, frontend-build]
     runs-on: ubuntu-latest
     steps:
@@ -255,7 +235,7 @@ jobs:
   # ─── CD: Deploy with auto-rollback ───
   deploy:
     needs: [docker-build]
-    if: ${{ (vars.SKIP_CI != 'true' || (github.event_name == 'workflow_dispatch' && inputs.force_ci)) && github.ref == 'refs/heads/main' }}
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     concurrency:
       group: production-deploy

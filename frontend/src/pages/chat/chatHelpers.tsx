@@ -49,6 +49,91 @@ export const CHAT_ATTACHMENT_MAX_BYTES = CHAT_ATTACHMENT_MAX_MB * 1024 * 1024
 export const VOICE_NOTE_MAX_DURATION_MS = 60_000
 export const VOICE_NOTE_TICK_MS = 250
 
+export interface SensitiveTextScan {
+  hasSensitive: boolean
+  maskedText: string
+  labels: string[]
+}
+
+interface SensitivePattern {
+  label: string
+  re: RegExp
+  mask: (value: string) => string
+}
+
+function maskMiddle(value: string, visibleStart = 4, visibleEnd = 4): string {
+  if (value.length <= visibleStart + visibleEnd + 3) return '••••••'
+  return `${value.slice(0, visibleStart)}••••••${value.slice(-visibleEnd)}`
+}
+
+function maskUrlLikeSecret(value: string): string {
+  const schemeMatch = value.match(/^([a-z][a-z0-9+.-]*:\/\/)/i)
+  const scheme = schemeMatch?.[1] || ''
+  const rest = scheme ? value.slice(scheme.length) : value
+  return `${scheme}${maskMiddle(rest, 6, 6)}`
+}
+
+const SENSITIVE_PATTERNS: SensitivePattern[] = [
+  {
+    label: 'конфигурация подключения',
+    re: /\b(?:vless|vmess|trojan|ss|ssr|wireguard):\/\/[^\s<>"'`]+/gi,
+    mask: maskUrlLikeSecret,
+  },
+  {
+    label: 'bearer token',
+    re: /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/g,
+    mask: (value) => value.replace(/^(Bearer\s+)(.+)$/i, (_all, prefix: string, token: string) => `${prefix}${maskMiddle(token, 4, 4)}`),
+  },
+  {
+    label: 'JWT',
+    re: /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+    mask: (value) => maskMiddle(value, 8, 8),
+  },
+  {
+    label: 'API token',
+    re: /\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password|passwd|pwd|token)\s*[:=]\s*[^\s,;]{8,}/gi,
+    mask: (value) => value.replace(/^([^:=]+[:=]\s*)(.+)$/i, (_all, prefix: string, secret: string) => `${prefix}${maskMiddle(secret, 2, 4)}`),
+  },
+  {
+    label: 'OpenAI token',
+    re: /\bsk-[A-Za-z0-9_-]{20,}\b/g,
+    mask: (value) => maskMiddle(value, 6, 4),
+  },
+  {
+    label: 'pairing code',
+    re: /\b(pairing\s+(?:approve|code|telegram|whatsapp|connect)\s+(?:telegram\s+|whatsapp\s+)?)([A-Z0-9]{6,16})\b/gi,
+    mask: (value) => value.replace(
+      /\b(pairing\s+(?:approve|code|telegram|whatsapp|connect)\s+(?:telegram\s+|whatsapp\s+)?)([A-Z0-9]{6,16})\b/i,
+      (_all, prefix: string, code: string) => `${prefix}${maskMiddle(code, 2, 2)}`,
+    ),
+  },
+  {
+    label: 'длинный ключ',
+    re: /\b[A-Za-z0-9+/=_-]{40,}\b/g,
+    mask: (value) => maskMiddle(value, 6, 6),
+  },
+]
+
+export function scanSensitiveText(text: string): SensitiveTextScan {
+  if (!text) return { hasSensitive: false, maskedText: text, labels: [] }
+
+  let maskedText = text
+  const labels = new Set<string>()
+
+  for (const pattern of SENSITIVE_PATTERNS) {
+    maskedText = maskedText.replace(pattern.re, (value) => {
+      labels.add(pattern.label)
+      return pattern.mask(value)
+    })
+  }
+
+  return {
+    hasSensitive: labels.size > 0,
+    maskedText,
+    labels: Array.from(labels),
+  }
+}
+
 export type ComposerAttachmentStatus = 'uploading' | 'ready' | 'error'
 export type ComposerAttachmentSource = 'media' | 'file' | 'paste' | 'voice'
 export type MediaPreviewKind = 'image' | 'video'

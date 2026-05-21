@@ -1,4 +1,5 @@
-import { ArrowDown, Camera, ChevronLeft, ChevronRight, Image, Loader2, MessageSquare, Mic, Paperclip, Plus, Search, SendHorizontal, Square, Trash2, UserPlus, Video, X } from 'lucide-react'
+import { useState } from 'react'
+import { AlertTriangle, ArrowDown, Camera, ChevronLeft, ChevronRight, Image, Loader2, MessageSquare, Mic, Paperclip, Plus, Search, SendHorizontal, Square, Trash2, UserPlus, Video, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -13,10 +14,12 @@ import {
   getInitials,
   getMessageAttachments,
   isVoiceAttachment,
+  scanSensitiveText,
   toDayKey,
 } from '../chatHelpers'
 
 export function ChatDialogsCard(props: Record<string, unknown>) {
+  const [revealedSensitiveMessages, setRevealedSensitiveMessages] = useState<Record<string, boolean>>({})
   const {
     isMobileDialogsOpen,
     setIsMobileDialogsOpen,
@@ -102,6 +105,10 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
 
   const toggleMessageExpanded = (messageId: string) => {
     setExpandedMessages((prev: Record<string, boolean>) => ({ ...prev, [messageId]: !prev[messageId] }))
+  }
+
+  const toggleSensitiveMessageRevealed = (messageId: string) => {
+    setRevealedSensitiveMessages((prev) => ({ ...prev, [messageId]: !prev[messageId] }))
   }
 
   return (
@@ -346,6 +353,11 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                       const shouldRenderBody = hasBody && !syntheticAttachmentBody
                       const expanded = Boolean(expandedMessages[message.id])
                       const expandable = shouldRenderBody && isExpandableMessage(message.body)
+                      const sensitiveScan = scanSensitiveText(message.body)
+                      const sensitiveRevealed = Boolean(revealedSensitiveMessages[message.id])
+                      const displayBody = sensitiveScan.hasSensitive && !sensitiveRevealed
+                        ? sensitiveScan.maskedText
+                        : message.body
                       const metaReplyToId = message.meta?.reply_to_message_id
                       const replyTarget = metaReplyToId ? messages.find((m: any) => m.id === metaReplyToId) || null : null
                       const showMenu = menuOpenMessageId === message.id
@@ -358,6 +370,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                           return (!isSyntheticReplyBody && replyBody) || (replyAttachments.length > 0 ? 'Вложение' : '')
                         })()
                         : ''
+                      const safeReplyPreviewText = scanSensitiveText(replyPreviewText).maskedText
 
                       return (
                         <div key={message.id}>
@@ -398,10 +411,43 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                                   >
                                     <div>Ответ на: {(membersById.get(replyTarget.sender_id) || replyTarget.sender_id)} ·</div>
                                     <div className="mt-0.5 break-all">
-                                      {replyPreviewText.slice(0, 80)}
-                                      {replyPreviewText.length > 80 ? '…' : ''}
+                                      {safeReplyPreviewText.slice(0, 80)}
+                                      {safeReplyPreviewText.length > 80 ? '…' : ''}
                                     </div>
                                   </button>
+                                )}
+
+                                {sensitiveScan.hasSensitive && (
+                                  <div
+                                    className={`mb-2 rounded-lg border px-2 py-1.5 text-[11px] ${
+                                      own
+                                        ? 'border-white/25 bg-white/12 text-primary-foreground/90'
+                                        : 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                                    }`}
+                                  >
+                                    <div className={`flex items-center gap-1.5 ${own ? 'justify-end' : 'justify-start'}`}>
+                                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                                      <span className="truncate">
+                                        Скрыты чувствительные данные: {sensitiveScan.labels.join(', ')}
+                                      </span>
+                                    </div>
+                                    <div className={`mt-1 flex flex-wrap gap-1.5 ${own ? 'justify-end' : 'justify-start'}`}>
+                                      <button
+                                        type="button"
+                                        className="rounded border border-current/25 px-2 py-0.5 hover:bg-current/10"
+                                        onClick={() => toggleSensitiveMessageRevealed(message.id)}
+                                      >
+                                        {sensitiveRevealed ? 'Скрыть' : 'Показать'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="rounded border border-current/25 px-2 py-0.5 hover:bg-current/10"
+                                        onClick={() => void handleCopyMessage(message.body)}
+                                      >
+                                        Скопировать
+                                      </button>
+                                    </div>
+                                  </div>
                                 )}
 
                                 {shouldRenderBody && (
@@ -410,7 +456,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                                       own ? 'text-right' : 'text-left'
                                     }`}
                                   >
-                                    {linkifyTextToNodes(message.body)}
+                                    {linkifyTextToNodes(displayBody)}
                                   </div>
                                 )}
                                 {expandable && (
@@ -508,7 +554,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                   <div className="mb-2 flex items-center justify-between rounded-xl border border-border/60 bg-muted/20 px-2.5 py-1.5 text-xs">
                     <div className="truncate">
                       Ответ на: <span className="text-muted-foreground">{getMessageOwnerLabel(replyToMessage)}</span> ·{' '}
-                      {replyToMessage.body.trim() || (getMessageAttachments(replyToMessage).length > 0 ? 'Вложение' : '')}
+                      {scanSensitiveText(replyToMessage.body.trim()).maskedText || (getMessageAttachments(replyToMessage).length > 0 ? 'Вложение' : '')}
                     </div>
                     <button type="button" onClick={() => setReplyToMessageId(null)} className="ml-2 rounded px-1 hover:bg-muted/50">
                       ×

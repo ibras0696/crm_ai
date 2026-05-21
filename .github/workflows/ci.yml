@@ -94,75 +94,76 @@ jobs:
       S3_BUCKET: crm-files
       S3_USE_SSL: "false"
       S3_VERIFY_SSL: "false"
-    #     services:
-    #       postgres:
-    #         image: postgres:16-alpine
-    #         env:
-    #           POSTGRES_USER: test_user
-    #           POSTGRES_PASSWORD: test_pass
-    #           POSTGRES_DB: test_db
-    #         ports: ["5432:5432"]
-    #         options: >-
-    #           --health-cmd pg_isready
-    #           --health-interval 10s
-    #           --health-timeout 5s
-    #           --health-retries 5
-    #       redis:
-    #         image: redis:7-alpine
-    #         ports: ["6379:6379"]
-    #         options: >-
-    #           --health-cmd "redis-cli ping"
-    #           --health-interval 10s
-    #           --health-timeout 5s
-    #           --health-retries 5
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_pass
+          POSTGRES_DB: test_db
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Backend CI temporarily mocked
-        run: echo "Backend lint/tests/migrations are temporarily mocked."
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
 
-      # TODO: Restore real backend CI after temporary mock period.
-      # - uses: actions/setup-python@v5
-      #   with:
-      #     python-version: ${{ env.PYTHON_VERSION }}
-      #     cache: pip
-      #
-      # - name: Install dependencies
-      #   working-directory: backend
-      #   run: |
-      #     pip install -r requirements.txt
-      #     pip install pytest pytest-asyncio pytest-cov httpx ruff
-      #
-      # - name: Start MinIO for docs storage tests
-      #   run: |
-      #     docker run -d --name ci-minio \
-      #       -p 9000:9000 \
-      #       -e MINIO_ROOT_USER=minioadmin \
-      #       -e MINIO_ROOT_PASSWORD=minioadmin \
-      #       minio/minio:RELEASE.2025-01-20T14-49-07Z \
-      #       server /data --console-address ":9001"
-      #     for i in {1..30}; do
-      #       if curl -fsS http://localhost:9000/minio/health/live >/dev/null; then
-      #         exit 0
-      #       fi
-      #       sleep 2
-      #     done
-      #     docker logs ci-minio
-      #     exit 1
-      #
-      # - name: Lint (ruff)
-      #   working-directory: backend
-      #   run: ruff check src/ tests/
-      #
-      # - name: Guard broad except (modules)
-      #   working-directory: backend
-      #   run: python tools/check_broad_except.py --root src/modules --whitelist tools/broad_except_whitelist.txt
-      #
-      # - name: Run migrations
-      #   working-directory: backend
-      #   run: alembic upgrade head
-      #
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio pytest-cov httpx ruff
+
+      - name: Start MinIO for docs storage tests
+        run: |
+          docker run -d --name ci-minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio:RELEASE.2025-01-20T14-49-07Z \
+            server /data --console-address ":9001"
+          for i in {1..30}; do
+            if curl -fsS http://localhost:9000/minio/health/live >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs ci-minio
+          exit 1
+
+      - name: Lint (ruff)
+        working-directory: backend
+        run: ruff check src/ tests/
+
+      - name: Guard broad except (modules)
+        working-directory: backend
+        run: python tools/check_broad_except.py --root src/modules --whitelist tools/broad_except_whitelist.txt
+
+      - name: Run migrations
+        working-directory: backend
+        run: alembic upgrade head
+
+      - name: Backend pytest temporarily skipped
+        working-directory: backend
+        run: echo "Backend pytest collection/test suite/coverage temporarily skipped."
+
+      # TODO: Restore backend pytest checks after temporary skip.
       # - name: Verify full backend test discovery
       #   working-directory: backend
       #   run: |
@@ -199,10 +200,10 @@ jobs:
       #     coverage = float(root.attrib["line-rate"]) * 100
       #     print(f"Coverage: {coverage:.2f}%")
       #     PY
-      #
-      # - name: Stop MinIO
-      #   if: always()
-      #   run: docker rm -f ci-minio || true
+
+      - name: Stop MinIO
+        if: always()
+        run: docker rm -f ci-minio || true
 
   # ─── Frontend build ───
   frontend-build:
@@ -211,35 +212,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Frontend CI temporarily mocked
-        run: echo "Frontend install/typecheck/lint/build are temporarily mocked."
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
-      # TODO: Restore real frontend CI after temporary mock period.
-      # - uses: actions/setup-node@v4
-      #   with:
-      #     node-version: ${{ env.NODE_VERSION }}
-      #     cache: npm
-      #     cache-dependency-path: frontend/package-lock.json
-      #
-      # - name: Install dependencies
-      #   working-directory: frontend
-      #   run: npm ci
-      #
-      # - name: Type check
-      #   working-directory: frontend
-      #   run: npx tsc --noEmit
-      #
-      # - name: Lint
-      #   working-directory: frontend
-      #   run: npm run lint
-      #
-      # - name: i18n hardcoded audit
-      #   working-directory: frontend
-      #   run: npm run lint:i18n
-      #
-      # - name: Build
-      #   working-directory: frontend
-      #   run: npm run build
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type check
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: i18n hardcoded audit
+        working-directory: frontend
+        run: npm run lint:i18n
+
+      - name: Build
+        working-directory: frontend
+        run: npm run build
 
   # ─── Docker build validation ───
   docker-build:

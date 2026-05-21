@@ -13,7 +13,7 @@ class ErrorDetail(BaseModel):
     correlation_id: str | None = None
 
 
-class ApiResponse(BaseModel, Generic[T]):  # noqa: UP046
+class ApiResponse(BaseModel, Generic[T]):
     ok: bool = True
     data: T | None = None
     error: ErrorDetail | None = None
@@ -27,7 +27,7 @@ class PaginationMeta(BaseModel):
     has_next: bool = False
 
 
-class PaginatedResponse(BaseModel, Generic[T]):  # noqa: UP046
+class PaginatedResponse(BaseModel, Generic[T]):
     ok: bool = True
     data: list[T] = []
     meta: PaginationMeta | None = None

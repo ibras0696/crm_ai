@@ -386,7 +386,7 @@ class TableFormulaEngine:
 
     @staticmethod
     def _to_number(value: object) -> float:
-        if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, int | float) and not isinstance(value, bool):
             return float(value)
         try:
             return float(str(value).strip())
@@ -402,7 +402,7 @@ class TableFormulaEngine:
             return value
         if value is None:
             return False
-        if isinstance(value, (int, float)):
+        if isinstance(value, int | float):
             return float(value) != 0
         s = str(value).strip().lower()
         return s not in {"", "0", "false", "нет", "no", "off", "none", "null"}

@@ -18,6 +18,7 @@ export interface MemberInfo {
   user_email: string | null
   user_first_name: string | null
   user_last_name: string | null
+  user_avatar_url?: string | null
   created_at: string
 }
 

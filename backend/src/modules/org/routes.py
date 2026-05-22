@@ -70,6 +70,7 @@ async def list_members(current_user: CurrentUser = Depends(require_org)):
             user_email=m.user.email if m.user else None,
             user_first_name=m.user.first_name if m.user else None,
             user_last_name=m.user.last_name if m.user else None,
+            user_avatar_url=m.user.avatar_url if m.user else None,
             created_at=m.created_at,
         )
         for m in memberships

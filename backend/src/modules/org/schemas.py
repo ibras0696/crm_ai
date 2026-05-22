@@ -24,6 +24,7 @@ class MemberResponse(BaseModel):
     user_email: str | None = None
     user_first_name: str | None = None
     user_last_name: str | None = None
+    user_avatar_url: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

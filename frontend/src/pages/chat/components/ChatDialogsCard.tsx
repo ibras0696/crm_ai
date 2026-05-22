@@ -3,6 +3,7 @@ import { AlertTriangle, ArrowDown, Camera, ChevronLeft, ChevronRight, Image, Loa
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { linkifyTextToNodes } from '@/lib/linkify'
 import {
   AttachmentPreview,
@@ -51,6 +52,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
     visibleMessages,
     user,
     membersById,
+    getUserAvatarUrl,
     getMessageOwnerLabel,
     getOwnMessageStatus,
     expandedMessages,
@@ -236,13 +238,15 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                         <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
                           <div className="flex -space-x-1">
                             {selectedChatMembers.slice(0, 3).map((member: any) => (
-                              <span
+                              <Avatar
                                 key={member.userId}
-                                className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-border/70 bg-muted/20 text-[9px] font-medium"
-                                title={member.label}
+                                className="h-5 w-5 border border-border/70"
                               >
-                                {member.initials}
-                              </span>
+                                <AvatarImage src={member.avatarUrl || undefined} alt={member.label} />
+                                <AvatarFallback className="bg-muted/20 text-[9px] font-medium" title={member.label}>
+                                  {member.initials}
+                                </AvatarFallback>
+                              </Avatar>
                             ))}
                           </div>
                           <span>{selectedChatMembers.length} участников</span>
@@ -383,9 +387,12 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                           )}
                           <div className={`group flex w-full min-w-0 items-end gap-2 ${own ? 'justify-end' : 'justify-start'}`}>
                             {!own && (
-                              <div className="mb-1 h-7 w-7 shrink-0 rounded-full border border-border/70 bg-muted/30 text-[10px] font-semibold text-muted-foreground flex items-center justify-center">
-                                {getInitials(senderLabel)}
-                              </div>
+                              <Avatar className="mb-1 h-7 w-7 shrink-0 border border-border/70">
+                                <AvatarImage src={getUserAvatarUrl(message.sender_id) || undefined} alt={senderLabel} />
+                                <AvatarFallback className="bg-muted/30 text-[10px] font-semibold text-muted-foreground">
+                                  {getInitials(senderLabel)}
+                                </AvatarFallback>
+                              </Avatar>
                             )}
                             <div className={`min-w-0 ${own ? 'max-w-[86%] sm:max-w-[62%] text-right' : 'max-w-[95%] sm:max-w-[68%] text-left'}`}>
                               {showSender && (

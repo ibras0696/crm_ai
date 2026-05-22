@@ -1,4 +1,5 @@
 import type { ChatInfo } from '@/lib/api'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { chatTypeLabel, getInitials } from '../chatHelpers'
 
 interface ChatListProps {
@@ -7,6 +8,7 @@ interface ChatListProps {
   selectedChatId: string | null
   compact: boolean
   getChatDisplayTitle: (chat: ChatInfo) => string
+  getChatAvatarUrl: (chat: ChatInfo) => string | null
   onSelectChat: (chatId: string) => void
 }
 
@@ -16,6 +18,7 @@ export function ChatList({
   selectedChatId,
   compact,
   getChatDisplayTitle,
+  getChatAvatarUrl,
   onSelectChat,
 }: ChatListProps) {
   const formatChatTime = (iso: string): string => {
@@ -42,6 +45,7 @@ export function ChatList({
   return chats.map((chat) => {
     const isActive = chat.id === selectedChatId
     const title = getChatDisplayTitle(chat)
+    const avatarUrl = getChatAvatarUrl(chat)
 
     if (compact) {
       const compactLabel = getInitials(title).slice(0, 1)
@@ -75,13 +79,16 @@ export function ChatList({
       >
         <div className="flex items-start gap-2.5">
           <div
-            className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-full border text-[11px] font-semibold ${
-              isActive
-                ? 'border-primary/45 bg-primary/15 text-primary'
-                : 'border-border/70 bg-background/60 text-muted-foreground'
+            className={`mt-0.5 h-10 w-10 shrink-0 rounded-full border ${
+              isActive ? 'border-primary/45' : 'border-border/70'
             }`}
           >
-            {getInitials(title).slice(0, 2)}
+            <Avatar className="h-full w-full">
+              <AvatarImage src={avatarUrl || undefined} alt={title} />
+              <AvatarFallback className={`${isActive ? 'bg-primary/15 text-primary' : 'bg-background/60 text-muted-foreground'} text-[11px] font-semibold`}>
+                {getInitials(title).slice(0, 2)}
+              </AvatarFallback>
+            </Avatar>
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-2">

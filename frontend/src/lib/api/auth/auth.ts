@@ -31,6 +31,7 @@ export interface UserInfo {
   email: string
   first_name: string
   last_name: string
+  avatar_url?: string | null
   is_active: boolean
   timezone: string
   locale: 'ru' | 'en'

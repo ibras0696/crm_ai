@@ -142,11 +142,20 @@ export default function ChatPage() {
     return () => document.removeEventListener('keydown', onEsc)
   }, [mediaPreview])
 
-  const membersById = useMemo(() => {
+  const memberMetaById = useMemo(() => {
     return new Map(
-      members.map((m) => [m.user_id, `${m.user_first_name || ''} ${m.user_last_name || ''}`.trim() || m.user_email || m.user_id]),
+      members.map((m) => [
+        m.user_id,
+        {
+          label: `${m.user_first_name || ''} ${m.user_last_name || ''}`.trim() || m.user_email || m.user_id,
+          avatarUrl: m.user_avatar_url || null,
+        },
+      ]),
     )
   }, [members])
+  const memberLabelsById = useMemo(() => {
+    return new Map(members.map((m) => [m.user_id, memberMetaById.get(m.user_id)?.label || m.user_id]))
+  }, [memberMetaById, members])
 
   const selectedChat = useMemo(() => {
     return chats.find((x) => x.id === selectedChatId) || null
@@ -175,10 +184,11 @@ export default function ChatPage() {
   const selectedChatMembers = useMemo(() => {
     if (!selectedChat) return []
     return selectedChat.member_ids.map((id) => {
-      const label = membersById.get(id) || id
-      return { userId: id, label, initials: getInitials(label), online: Boolean(presence[id]) }
+      const memberMeta = memberMetaById.get(id)
+      const label = memberMeta?.label || id
+      return { userId: id, label, initials: getInitials(label), online: Boolean(presence[id]), avatarUrl: memberMeta?.avatarUrl || null }
     })
-  }, [membersById, presence, selectedChat])
+  }, [memberMetaById, presence, selectedChat])
 
   const getChatDisplayTitle = useCallback(
     (chat: ChatInfo): string => {
@@ -186,7 +196,7 @@ export default function ChatPage() {
       if (chat.chat_type === 'direct') {
         const peerIds = chat.member_ids.filter((id) => id !== user?.id)
         if (peerIds.length > 0) {
-          const peerLabels = peerIds.map((id) => membersById.get(id) || id)
+          const peerLabels = peerIds.map((id) => memberMetaById.get(id)?.label || id)
           return peerLabels.join(', ')
         }
         return 'Личный чат'
@@ -194,7 +204,7 @@ export default function ChatPage() {
       if (chat.chat_type === 'group') return 'Группа без названия'
       return 'Канал без названия'
     },
-    [membersById, user?.id],
+    [memberMetaById, user?.id],
   )
 
   const visibleChats = useMemo(() => {
@@ -203,10 +213,10 @@ export default function ChatPage() {
     return chats.filter((chat) => {
       const title = getChatDisplayTitle(chat).toLowerCase()
       const type = String(chat.chat_type || '').toLowerCase()
-      const memberHit = chat.member_ids.some((memberId) => (membersById.get(memberId) || memberId).toLowerCase().includes(q))
+      const memberHit = chat.member_ids.some((memberId) => (memberMetaById.get(memberId)?.label || memberId).toLowerCase().includes(q))
       return title.includes(q) || type.includes(q) || memberHit
     })
-  }, [chats, dialogsQuery, getChatDisplayTitle, membersById])
+  }, [chats, dialogsQuery, getChatDisplayTitle, memberMetaById])
 
   const visibleMessages = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
@@ -223,8 +233,8 @@ export default function ChatPage() {
     const now = Date.now()
     return Object.entries(typingUsers)
       .filter(([, expiresAt]) => expiresAt > now)
-      .map(([userId]) => membersById.get(userId) || userId)
-  }, [membersById, typingUsers])
+      .map(([userId]) => memberMetaById.get(userId)?.label || userId)
+  }, [memberMetaById, typingUsers])
 
   const scrollMessagesToBottom = () => {
     const viewport = messagesViewportRef.current
@@ -241,8 +251,23 @@ export default function ChatPage() {
   }
 
   const getMessageOwnerLabel = (message: ChatMessageInfo): string => {
-    return membersById.get(message.sender_id) || message.sender_id
+    return memberMetaById.get(message.sender_id)?.label || message.sender_id
   }
+
+  const getUserAvatarUrl = useCallback(
+    (userId: string): string | null => memberMetaById.get(userId)?.avatarUrl || null,
+    [memberMetaById],
+  )
+
+  const getChatAvatarUrl = useCallback(
+    (chat: ChatInfo): string | null => {
+      if (chat.chat_type !== 'direct') return null
+      const peerId = chat.member_ids.find((id) => id !== user?.id)
+      if (!peerId) return null
+      return memberMetaById.get(peerId)?.avatarUrl || null
+    },
+    [memberMetaById, user?.id],
+  )
 
   const getOwnMessageStatus = (message: ChatMessageInfo): string => {
     if (!user || message.sender_id !== user.id) return ''
@@ -1362,6 +1387,7 @@ export default function ChatPage() {
       selectedChatId={selectedChatId}
       compact={compact}
       getChatDisplayTitle={getChatDisplayTitle}
+      getChatAvatarUrl={getChatAvatarUrl}
       onSelectChat={handleSelectChat}
     />
   )
@@ -1443,8 +1469,9 @@ export default function ChatPage() {
         messages={messages}
         visibleMessages={visibleMessages}
         user={user}
-        membersById={membersById}
+        membersById={memberLabelsById}
         getMessageOwnerLabel={getMessageOwnerLabel}
+        getUserAvatarUrl={getUserAvatarUrl}
         getOwnMessageStatus={getOwnMessageStatus}
         expandedMessages={expandedMessages}
         isExpandableMessage={isExpandableMessage}

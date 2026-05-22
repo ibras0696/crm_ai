@@ -21,6 +21,7 @@ class User(BaseDBModel):
     hashed_password: Mapped[str] = mapped_column(String(1024), nullable=False)
     first_name: Mapped[str] = mapped_column(String(100), nullable=False)
     last_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    avatar_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))
     timezone: Mapped[str] = mapped_column(String(50), default="UTC", server_default=text("'UTC'"))
     locale: Mapped[str] = mapped_column(String(8), default="ru", server_default=text("'ru'"))

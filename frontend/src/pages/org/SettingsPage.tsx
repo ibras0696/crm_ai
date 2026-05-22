@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState } from 'react'
+﻿import { useEffect, useMemo, useState, type ChangeEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
@@ -7,8 +7,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Building2, User, CreditCard, Globe, Lock, Loader2, Check } from 'lucide-react'
-import api, { orgApi, profileApi } from '@/lib/api'
+import api, { filesApi, orgApi, profileApi } from '@/lib/api'
 import { useTranslation } from 'react-i18next'
 import i18n from '@/i18n'
 import type { AppLocale } from '@/lib/i18n'
@@ -24,10 +25,12 @@ export default function SettingsPage() {
     last_name: user?.last_name ?? '',
     timezone: user?.timezone ?? 'UTC',
     locale: user?.locale ?? 'ru',
+    avatar_url: user?.avatar_url ?? '',
   })
   const [orgName, setOrgName] = useState(org?.name ?? '')
   const [profileLoading, setProfileLoading] = useState(false)
   const [profileSaved, setProfileSaved] = useState(false)
+  const [avatarUploading, setAvatarUploading] = useState(false)
   const [orgLoading, setOrgLoading] = useState(false)
   const [orgSaved, setOrgSaved] = useState(false)
   const [deleteLoading, setDeleteLoading] = useState(false)
@@ -38,8 +41,27 @@ export default function SettingsPage() {
       last_name: user?.last_name ?? '',
       timezone: user?.timezone ?? 'UTC',
       locale: user?.locale ?? 'ru',
+      avatar_url: user?.avatar_url ?? '',
     })
-  }, [user?.first_name, user?.last_name, user?.timezone, user?.locale])
+  }, [user?.first_name, user?.last_name, user?.timezone, user?.locale, user?.avatar_url])
+
+  const handleAvatarUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+    setAvatarUploading(true)
+    try {
+      const uploaded = await filesApi.upload(file)
+      const fileId = uploaded.data.data?.id
+      if (uploaded.data.ok && fileId) {
+        setProfileForm((prev) => ({ ...prev, avatar_url: filesApi.downloadUrl(fileId) }))
+      }
+    } catch {
+      // ignore
+    } finally {
+      setAvatarUploading(false)
+      event.target.value = ''
+    }
+  }
 
   const isOrgOwner = useMemo(() => {
     if (!user) return false
@@ -136,6 +158,26 @@ export default function SettingsPage() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          <div className="flex items-center gap-3">
+            <Avatar className="h-14 w-14 border border-border/60">
+              <AvatarImage src={profileForm.avatar_url || undefined} alt="avatar" />
+              <AvatarFallback>{`${profileForm.first_name || ''} ${profileForm.last_name || ''}`.trim().slice(0, 2).toUpperCase() || 'U'}</AvatarFallback>
+            </Avatar>
+            <div className="space-y-2">
+              <Label htmlFor="profile-avatar-upload">Аватар</Label>
+              <Input
+                id="profile-avatar-upload"
+                type="file"
+                accept="image/png,image/jpeg,image/gif,image/webp"
+                onChange={(e) => void handleAvatarUpload(e)}
+                disabled={avatarUploading}
+                className="bg-secondary/50"
+              />
+              <p className="text-xs text-muted-foreground">
+                {avatarUploading ? 'Загрузка...' : 'PNG/JPG/GIF/WEBP, загрузка в хранилище организации'}
+              </p>
+            </div>
+          </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>{t('settings:fields.firstName')}</Label>

@@ -47,6 +47,7 @@ class UpdateMeRequest(BaseModel):
     last_name: str | None = Field(default=None, min_length=1, max_length=100)
     timezone: str | None = Field(default=None, min_length=1, max_length=50)
     locale: LocaleCode | None = None
+    avatar_url: str | None = Field(default=None, max_length=1000)
 
 
 class TokenResponse(BaseModel):
@@ -61,6 +62,7 @@ class UserResponse(BaseModel):
     email: str
     first_name: str
     last_name: str
+    avatar_url: str | None = None
     is_active: bool
     timezone: str
     locale: LocaleCode

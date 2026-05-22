@@ -408,7 +408,13 @@ async def test_update_me_profile(client: AsyncClient):
 
     upd = await client.patch(
         "/api/v1/auth/me",
-        json={"first_name": "New", "last_name": "User", "timezone": "Europe/Moscow", "locale": "en"},
+        json={
+            "first_name": "New",
+            "last_name": "User",
+            "timezone": "Europe/Moscow",
+            "locale": "en",
+            "avatar_url": "/api/v1/files/fake-avatar-id/download",
+        },
         headers={"Authorization": f"Bearer {token}"},
     )
     assert upd.status_code == 200
@@ -418,6 +424,7 @@ async def test_update_me_profile(client: AsyncClient):
     assert body["data"]["last_name"] == "User"
     assert body["data"]["timezone"] == "Europe/Moscow"
     assert body["data"]["locale"] == "en"
+    assert body["data"]["avatar_url"] == "/api/v1/files/fake-avatar-id/download"
 
 
 @pytest.mark.asyncio

@@ -383,7 +383,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                               <span className="rounded-full border border-border/60 px-2 py-0.5">{formatDayDivider(message.created_at)}</span>
                             </div>
                           )}
-                          <div className={`group flex w-full min-w-0 items-end gap-2 ${own ? 'justify-end' : 'justify-start'}`}>
+                          <div className={`group flex w-full min-w-0 items-end gap-1.5 ${own ? 'justify-end' : 'justify-start'}`}>
                             {!own && (
                               <Avatar className="mb-1 h-7 w-7 shrink-0 border border-border/70">
                                 <AvatarImage src={getUserAvatarUrl(message.sender_id) || undefined} alt={senderLabel} />
@@ -399,8 +399,8 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                               <div
                                 className={`relative max-w-full rounded-2xl px-3 py-2 text-sm shadow-sm ${
                                   own
-                                    ? 'ml-auto rounded-br-md border border-emerald-300/60 bg-emerald-100 text-foreground dark:border-[#2f5f4f] dark:bg-[#21443a] dark:text-emerald-50 text-right'
-                                    : 'mr-auto rounded-bl-md border border-slate-200/90 bg-white text-slate-900 dark:border-[#2a3745] dark:bg-[#1f2c38] dark:text-slate-100 text-left'
+                                    ? 'ml-auto rounded-br-md border border-transparent bg-[#4e84b8] text-white dark:bg-[#4b78a7] text-right'
+                                    : 'mr-auto rounded-bl-md border border-[#d8e4f0] bg-white text-[#1f2f40] dark:border-[#2e4963] dark:bg-[#23384d] dark:text-[#e8f2fb] text-left'
                                 }`}
                               >
                                 {replyTarget && (
@@ -428,7 +428,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                                   <div
                                     className={`mb-2 rounded-lg border px-2 py-1.5 text-[11px] ${
                                       own
-                                        ? 'border-white/25 bg-white/12 text-primary-foreground/90'
+                                        ? 'border-white/25 bg-white/15 text-white'
                                         : 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
                                     }`}
                                   >
@@ -489,6 +489,15 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                                   </div>
                                 )}
 
+                                <div
+                                  className={`mt-1.5 flex items-center gap-1 text-[11px] ${
+                                    own ? 'justify-end text-white/90' : 'justify-end text-[#5f7387] dark:text-[#a4b7c8]'
+                                  }`}
+                                >
+                                  <span>{new Date(message.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span>
+                                  {own && ownStatus && <span>{ownStatus === 'Прочитано' ? '✓✓' : '✓'}</span>}
+                                </div>
+
                                 <button
                                   type="button"
                                   onClick={() => setMenuOpenMessageId((prev: string | null) => (prev === message.id ? null : message.id))}
@@ -534,10 +543,6 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                                     )}
                                   </div>
                                 )}
-                              </div>
-                              <div className={`mt-1 px-1 text-[10px] text-muted-foreground/90 ${own ? 'text-right' : 'text-left'}`}>
-                                #{message.seq_no} · {new Date(message.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
-                                {ownStatus && ` · ${ownStatus}`}
                               </div>
                             </div>
                             {own && (

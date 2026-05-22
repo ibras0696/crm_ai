@@ -55,7 +55,7 @@ interface AuthState {
   members: MemberInfo[]
   isLoading: boolean
   isAuthenticated: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string, rememberMe?: boolean) => Promise<void>
   register: (data: { email: string; password: string; first_name: string; last_name: string; org_name: string; accepted_privacy_policy: true }) => Promise<void>
   logout: () => Promise<void>
   refresh: () => Promise<void>
@@ -87,9 +87,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (o.data.ok) setOrg(o.data.data)
       if (m.data.ok) setMembers(m.data.data ?? [])
     } catch {
-      setUser(null)
-      setOrg(null)
-      setMembers([])
+      try {
+        await authApi.refresh()
+        const [u, o, m] = await Promise.all([
+          authApi.me(),
+          orgApi.getCurrent(),
+          orgApi.getMembers(),
+        ])
+        if (u.data.ok && u.data.data) setUser(u.data.data)
+        if (o.data.ok) setOrg(o.data.data)
+        if (m.data.ok) setMembers(m.data.data ?? [])
+      } catch {
+        setUser(null)
+        setOrg(null)
+        setMembers([])
+      }
     }
   }, [])
 
@@ -97,9 +109,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loadProfile().finally(() => setIsLoading(false))
   }, [loadProfile])
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, rememberMe = false) => {
     try {
-      const resp = await authApi.login({ email, password })
+      const resp = await authApi.login({ email, password, remember_me: rememberMe })
       if (resp.data.ok) {
         await loadProfile()
         return

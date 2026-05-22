@@ -24,11 +24,16 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _auth_service = AuthService()
 
 
-def _set_auth_cookies(response: Response, tokens: TokenResponse) -> None:
+def _set_auth_cookies(response: Response, tokens: TokenResponse, *, remember_me: bool = False) -> None:
     secure = bool(settings.AUTH_COOKIE_SECURE)
     samesite = settings.AUTH_COOKIE_SAMESITE
     domain = settings.AUTH_COOKIE_DOMAIN or None
     path = settings.AUTH_COOKIE_PATH or "/"
+    refresh_days = (
+        int(settings.REFRESH_TOKEN_REMEMBER_ME_EXPIRE_DAYS)
+        if remember_me
+        else int(settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    )
 
     response.set_cookie(
         key=settings.AUTH_ACCESS_COOKIE_NAME,
@@ -46,7 +51,7 @@ def _set_auth_cookies(response: Response, tokens: TokenResponse) -> None:
         httponly=True,
         secure=secure,
         samesite=samesite,  # type: ignore[arg-type]
-        max_age=int(settings.REFRESH_TOKEN_EXPIRE_DAYS) * 24 * 3600,
+        max_age=refresh_days * 24 * 3600,
         path=path,
         domain=domain,
     )
@@ -92,7 +97,7 @@ async def login(body: LoginRequest, request: Request, response: Response):
     ip = request.client.host if request.client else None
     ua = request.headers.get("user-agent")
     _, tokens = await _auth_service.login(body.email, body.password, ip_address=ip, user_agent=ua)
-    _set_auth_cookies(response, tokens)
+    _set_auth_cookies(response, tokens, remember_me=bool(body.remember_me))
     return ApiResponse(data=tokens)
 
 

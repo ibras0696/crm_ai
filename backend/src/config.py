@@ -118,6 +118,7 @@ class Settings(BaseSettings):
     JWT_AUDIENCE_SUPERADMIN: str = "crm-api-superadmin"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    REFRESH_TOKEN_REMEMBER_ME_EXPIRE_DAYS: int = 30
 
     # S3 / MinIO
     S3_ENDPOINT: str = "http://localhost:9000"

@@ -17,6 +17,7 @@ export interface RegisterConfirmPayload {
 export interface LoginPayload {
   email: string
   password: string
+  remember_me?: boolean
 }
 
 export interface TokenResponse {

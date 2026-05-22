@@ -29,6 +29,7 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [rememberMe, setRememberMe] = useState(true)
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
   const [loading, setLoading] = useState(false)
 
@@ -56,7 +57,7 @@ export default function LoginPage() {
     if (!validate()) return
     setLoading(true)
     try {
-      await login(email, password)
+      await login(email, password, rememberMe)
       navigate('/dashboard')
     } catch (err: unknown) {
       if (err instanceof AuthError) {
@@ -177,6 +178,15 @@ export default function LoginPage() {
               {fieldErrors.password && <p className="text-xs text-red-400">{fieldErrors.password}</p>}
             </div>
             <div className="flex justify-end">
+              <label className="mr-auto flex cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="h-4 w-4 rounded border-input bg-secondary/50 accent-primary"
+                />
+                <span>Запомнить меня</span>
+              </label>
               <Link to="/auth/forgot-password" className="text-sm text-primary hover:underline font-medium">
                 {t('auth:links.forgotPassword')}
               </Link>

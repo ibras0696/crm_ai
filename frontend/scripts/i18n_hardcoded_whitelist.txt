@@ -10,5 +10,6 @@ src/pages/docs/DocxEditorPanel.tsx
 src/pages/knowledge/KnowledgePage.tsx
 src/pages/reports-v2/ReportsV2Page.tsx
 src/pages/schedule/SchedulePage.tsx
+src/pages/org/SettingsPage.tsx
 src/pages/tables/TableDetailPage.tsx
 src/pages/tables/TablesPage.tsx

@@ -396,13 +396,13 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                               {showSender && (
                                 <div className={`mb-1 truncate px-1 text-[11px] ${own ? 'text-primary/80' : 'text-muted-foreground'}`}>{senderLabel}</div>
                               )}
-                              <div
-                                className={`relative max-w-full rounded-2xl px-3 py-2 text-sm shadow-sm ${
-                                  own
-                                    ? 'ml-auto rounded-br-md border border-transparent bg-[#4e84b8] text-white dark:bg-[#4b78a7] text-right'
-                                    : 'mr-auto rounded-bl-md border border-[#d8e4f0] bg-white text-[#1f2f40] dark:border-[#2e4963] dark:bg-[#23384d] dark:text-[#e8f2fb] text-left'
-                                }`}
-                              >
+                             <div
+  className={`relative max-w-full rounded-2xl px-3 py-2 text-sm shadow-sm ${
+    own
+      ? 'ml-auto rounded-br-md border border-transparent bg-[#EEFFDE] text-black dark:bg-[#2B5278] dark:text-white text-right'
+      : 'mr-auto rounded-bl-md border border-transparent bg-white text-black dark:bg-[#182533] dark:text-white text-left'
+  }`}
+>
                                 {replyTarget && (
                                   <button
                                     type="button"

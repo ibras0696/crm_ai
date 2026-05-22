@@ -167,7 +167,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
             </div>
           </CardHeader>
         )}
-        <CardContent className="relative h-[76vh] min-h-[480px] max-h-[860px] p-0 sm:min-h-[560px]">
+        <CardContent className="relative h-[80vh] min-h-[520px] max-h-[900px] p-0 sm:min-h-[600px]">
           <div className="relative flex h-full min-h-0">
             {isDesktopSidebarCollapsed ? (
               null
@@ -260,8 +260,10 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                               </span>
                             ))}
                           </div>
-                          <div className="mt-1 text-[11px] text-muted-foreground">
-                            Онлайн: {selectedChatMembers.filter((member: any) => member.online).length}/{selectedChatMembers.length}
+                          <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                            <span>Онлайн: {selectedChatMembers.filter((member: any) => member.online).length}/{selectedChatMembers.length}</span>
+                            <span>Источник: Telegram</span>
+                            <span>Сделка: В работе</span>
                           </div>
                         </>
                       )
@@ -318,7 +320,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
               <div
                 ref={messagesViewportRef}
                 onScroll={handleMessagesScroll}
-                className="min-h-0 flex-1 space-y-2 overflow-x-hidden overflow-y-auto bg-background/20 px-3 py-3 sm:px-4"
+                className="min-h-0 flex-1 space-y-2 overflow-x-hidden overflow-y-auto bg-background/20 px-3 py-3 sm:px-5"
               >
                 {loadingOlderMessages && (
                   <div className="pb-1 text-center text-xs text-muted-foreground">Загрузка предыдущих сообщений...</div>
@@ -385,7 +387,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                                 {getInitials(senderLabel)}
                               </div>
                             )}
-                            <div className={`min-w-0 ${own ? 'max-w-[84%] sm:max-w-[64%] text-right' : 'max-w-[94%] sm:max-w-[72%] text-left'}`}>
+                            <div className={`min-w-0 ${own ? 'max-w-[86%] sm:max-w-[62%] text-right' : 'max-w-[95%] sm:max-w-[68%] text-left'}`}>
                               {showSender && (
                                 <div className="mb-1 truncate px-1 text-[11px] text-muted-foreground">{senderLabel}</div>
                               )}
@@ -768,6 +770,47 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                 )}
               </div>
             </div>
+            <aside className="hidden w-[340px] shrink-0 border-l border-border/60 bg-background/95 p-3 xl:block">
+              <div className="space-y-3">
+                <div className="rounded-xl border border-border/70 bg-muted/10 p-3">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+                    <MessageSquare className="h-3.5 w-3.5" />
+                    Клиент
+                  </div>
+                  <div className="text-sm font-semibold">{selectedChat ? getChatDisplayTitle(selectedChat) : 'Не выбран'}</div>
+                  <div className="mt-2 space-y-1.5 text-xs text-muted-foreground">
+                    <div>Канал: Telegram</div>
+                    <div>Ответственный: Ибрагим</div>
+                    <div>Статус: Новый лид</div>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border/70 bg-muted/10 p-3">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+                    <UserPlus className="h-3.5 w-3.5" />
+                    Сделка
+                  </div>
+                  <div className="space-y-1.5 text-xs text-muted-foreground">
+                    <div>Этап: Переговоры</div>
+                    <div>Сумма: 120 000 ₽</div>
+                    <div className="flex items-center gap-1">
+                      <Plus className="h-3.5 w-3.5" />
+                      Следующее действие: Позвонить завтра
+                    </div>
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border/70 bg-muted/10 p-3">
+                  <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.06em] text-muted-foreground">
+                    <Search className="h-3.5 w-3.5" />
+                    Задачи
+                  </div>
+                  <div className="space-y-2 text-xs">
+                    <div className="rounded-lg border border-border/60 bg-background/70 px-2 py-1.5">Проверить оплату</div>
+                    <div className="rounded-lg border border-border/60 bg-background/70 px-2 py-1.5">Отправить инструкцию</div>
+                    <div className="rounded-lg border border-border/60 bg-background/70 px-2 py-1.5">Подтвердить подключение</div>
+                  </div>
+                </div>
+              </div>
+            </aside>
           </div>
 
           {mediaPreview && (

@@ -346,8 +346,8 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                       const own = message.sender_id === user?.id
                       const prev = visibleMessages[index - 1]
                       const showDayDivider = !prev || toDayKey(prev.created_at) !== toDayKey(message.created_at)
-                      const showSender = !own && (!prev || prev.sender_id !== message.sender_id || showDayDivider)
-                      const senderLabel = getMessageOwnerLabel(message)
+                      const showSender = !prev || prev.sender_id !== message.sender_id || showDayDivider
+                      const senderLabel = own ? 'Вы' : getMessageOwnerLabel(message)
                       const ownStatus = getOwnMessageStatus(message)
                       const attachments = getMessageAttachments(message)
                       const hasAttachments = attachments.length > 0
@@ -394,13 +394,13 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                             )}
                             <div className={`min-w-0 ${own ? 'max-w-[86%] sm:max-w-[62%] text-right' : 'max-w-[95%] sm:max-w-[68%] text-left'}`}>
                               {showSender && (
-                                <div className="mb-1 truncate px-1 text-[11px] text-muted-foreground">{senderLabel}</div>
+                                <div className={`mb-1 truncate px-1 text-[11px] ${own ? 'text-primary/80' : 'text-muted-foreground'}`}>{senderLabel}</div>
                               )}
                               <div
                                 className={`relative max-w-full rounded-2xl px-3 py-2 text-sm shadow-sm ${
                                   own
-                                    ? 'ml-auto rounded-br-md border border-primary/25 bg-primary text-primary-foreground text-right'
-                                    : 'mr-auto rounded-bl-md border border-border/60 bg-muted/[0.22] text-left'
+                                    ? 'ml-auto rounded-br-md border border-emerald-300/60 bg-emerald-100 text-foreground dark:border-[#2f5f4f] dark:bg-[#21443a] dark:text-emerald-50 text-right'
+                                    : 'mr-auto rounded-bl-md border border-slate-200/90 bg-white text-slate-900 dark:border-[#2a3745] dark:bg-[#1f2c38] dark:text-slate-100 text-left'
                                 }`}
                               >
                                 {replyTarget && (
@@ -540,6 +540,14 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                                 {ownStatus && ` · ${ownStatus}`}
                               </div>
                             </div>
+                            {own && (
+                              <Avatar className="mb-1 h-7 w-7 shrink-0 border border-border/70">
+                                <AvatarImage src={getUserAvatarUrl(message.sender_id) || undefined} alt={senderLabel} />
+                                <AvatarFallback className="bg-emerald-100 text-[10px] font-semibold text-emerald-700 dark:bg-[#2f5f4f] dark:text-emerald-100">
+                                  {getInitials(senderLabel)}
+                                </AvatarFallback>
+                              </Avatar>
+                            )}
                           </div>
                         </div>
                       )

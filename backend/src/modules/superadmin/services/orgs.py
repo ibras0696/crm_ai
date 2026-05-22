@@ -59,6 +59,7 @@ class SuperadminOrgsService:
                 requested_by=requested_by_email,
             )
             await uow.commit()
+            await uow.session.refresh(job)
             return self._serialize_org_deletion_job(job)
 
     async def set_org_deletion_job_task_id(self, *, job_id: str, task_id: str) -> dict:
@@ -72,6 +73,7 @@ class SuperadminOrgsService:
                 raise LookupError("NOT_FOUND")
             job.task_id = safe_task_id or None
             await uow.commit()
+            await uow.session.refresh(job)
             return self._serialize_org_deletion_job(job)
 
     async def get_org_deletion_job(self, *, job_id: str) -> dict:

@@ -488,3 +488,33 @@ async def test_superadmin_delete_org_creates_background_job_when_broker_unavaila
     assert job_status.status_code == 200
     assert job_status.json()["ok"] is True
     assert job_status.json()["data"]["status"] == "queued"
+
+
+@pytest.mark.asyncio
+async def test_superadmin_delete_org_sets_task_id_when_broker_available(
+    client: AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    sa = await _login_sa(client)
+    _, org_id = await _register_owner(client, org_name="Delete Me Async Org")
+
+    from src.modules.superadmin import routes as superadmin_routes
+
+    class _TaskResult:
+        id = "task-123"
+
+    class _TaskAsync:
+        @staticmethod
+        def delay(_job_id: str):
+            return _TaskResult()
+
+    monkeypatch.setattr(superadmin_routes, "superadmin_delete_org_background", _TaskAsync())
+
+    delete_resp = await client.post(f"/api/v1/superadmin/orgs/{org_id}/delete", headers=_h(sa))
+    assert delete_resp.status_code == 200
+    payload = delete_resp.json()
+    assert payload["ok"] is True
+    job = payload["data"]
+    assert job["status"] == "queued"
+    assert job["org_id"] == org_id
+    assert job["task_id"] == "task-123"

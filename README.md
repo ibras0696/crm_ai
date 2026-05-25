@@ -1,18 +1,47 @@
-# CRM Platform
+# CRM AI
 
-Мультитенантная CRM-платформа: таблицы, база знаний, документы, отчёты, AI, billing.
+Мультитенантная CRM-платформа с модулями: auth/org, tables, docs, knowledge, chat, reports, AI, schedule, billing, superadmin.
 
-## Быстрый старт
+## 1. Архитектура (кратко)
 
-1. Скопируй `secrets.yml.example` в `secrets.yml`
-2. Заполни значения для локальной разработки
-3. Запусти:
+- Backend: FastAPI (`backend/src`), PostgreSQL, Redis, RabbitMQ, Celery, MinIO, OnlyOffice.
+- Frontend: React + TypeScript + Vite (`frontend/src`).
+- API: REST `/api/v1/*` + WebSocket `/api/v1/ws/notifications`.
+- Контуры: dev/prod docker-compose, мониторинг через Prometheus/Grafana.
+
+Подробный анализ модулей, API-контрактов и схем логики:
+- [docs/PROJECT_ANALYSIS_BACKEND_FRONTEND_API.md](docs/PROJECT_ANALYSIS_BACKEND_FRONTEND_API.md)
+
+ТЗ по task tracker:
+- [docs/task_trek/TZ_TASK_TRACKER_PRODUCTION.md](docs/task_trek/TZ_TASK_TRACKER_PRODUCTION.md)
+
+## 2. Структура репозитория
+
+- `backend/` — FastAPI backend + Alembic + tests
+- `frontend/` — React frontend
+- `scripts/` — утилиты запуска/бэкапа/инициализации
+- `monitoring/` — Prometheus/Grafana конфиги
+- `nginx/` — ingress-конфигурация
+- `docs/` — проектная документация
+
+## 3. Быстрый старт (dev)
+
+1. Скопировать `secrets.yml.example` в `secrets.yml`.
+2. Заполнить локальные значения (без реальных production секретов).
+3. Запустить стек:
 
 ```bash
-./scripts/compose-dev.sh up -d --build
+make init
+make up
 ```
 
-## Полезные URL
+Остановка:
+
+```bash
+make down
+```
+
+## 4. Основные URL (dev)
 
 - frontend: `http://localhost:5173`
 - api: `http://localhost:8000`
@@ -20,26 +49,74 @@
 - health: `http://localhost:8000/api/health`
 - readiness: `http://localhost:8000/api/readiness`
 
-## Полезные команды
+## 5. Ключевые команды
 
 ```bash
-./scripts/compose-dev.sh ps
-./scripts/compose-dev.sh logs -f api
-./scripts/compose-dev.sh up -d --build
-./scripts/compose-prod.sh up -d --build
+make ps
+make logs
+make logs-api
+make migrate
+make test
+make lint
 ```
 
-## Важно про секреты
+Frontend локальные проверки:
 
-- `secrets.yml` нужен только для локального dev
-- production secrets должны идти через env или `*_FILE`
+```bash
+cd frontend
+npm run lint
+npx tsc --noEmit
+npm run build
+```
 
-## i18n rollout (frontend)
+Backend локальные проверки:
 
-Для безопасного выката RU/EN есть frontend feature-flags:
+```bash
+cd backend
+ruff check src/ tests/
+pytest -v --tb=short
+```
 
-- `VITE_I18N_ENABLED` - глобальный переключатель (`true/false`, по умолчанию `true`)
-- `VITE_I18N_ROLLOUT_PERCENT` - процент пользователей с включенным i18n (`0..100`, по умолчанию `100`)
+## 6. API-контракты
+
+Базовые префиксы:
+- `/api/v1/auth`
+- `/api/v1/orgs`
+- `/api/v1/tables`
+- `/api/v1/docs`
+- `/api/v1/chat`
+- `/api/v1/reports`, `/api/v1/reports/v2`
+- `/api/v1/ai`
+- `/api/v1/billing`
+- `/api/v1/superadmin`
+- `/api/v1/ws/notifications`
+
+Все доменные карты endpoints и backend/frontend соответствие:
+- [docs/PROJECT_ANALYSIS_BACKEND_FRONTEND_API.md](docs/PROJECT_ANALYSIS_BACKEND_FRONTEND_API.md)
+
+## 7. Безопасность и секреты
+
+- `secrets.yml` — только для локальной разработки.
+- В production использовать env и `*_FILE` переменные.
+- Не коммитить реальные ключи, токены и пароли.
+- Для `auth/superadmin` используются отдельные cookie-контуры.
+
+## 8. CI/CD
+
+Пайплайн: `.github/workflows/ci.yml`
+
+Проверяет:
+- policy pinning зависимостей
+- compose smoke
+- backend lint + migration
+- frontend typecheck/lint/build
+- docker image build
+- deploy (main branch)
+
+## 9. i18n rollout (frontend)
+
+- `VITE_I18N_ENABLED` — глобальный toggle (`true/false`)
+- `VITE_I18N_ROLLOUT_PERCENT` — процент rollout (`0..100`)
 
 Пример:
 
@@ -47,7 +124,3 @@
 VITE_I18N_ENABLED=true
 VITE_I18N_ROLLOUT_PERCENT=25
 ```
-
-Подробности:
-- [docs/README.md](docs/README.md)
-- [docs/config/CONFIG_CONTRACT.md](docs/config/CONFIG_CONTRACT.md)

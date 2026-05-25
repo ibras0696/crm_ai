@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 
 import pytest
@@ -120,6 +121,17 @@ async def test_chat_core_flow_with_members_messages_and_read_cursor(client: Asyn
     assert len(payload) == 2
     assert payload[0]["seq_no"] == 1
     assert payload[1]["seq_no"] == 2
+    assert payload[0]["client_message_id"] is None
+    assert payload[1]["client_message_id"] is None
+
+    delta = await client.get(
+        f"/api/v1/chat/chats/{chat_id}/messages?limit=50&after_seq_no=1",
+        headers=_headers(token),
+    )
+    assert delta.status_code == 200, f"Delta list failed: {delta.text}"
+    assert delta.json()["ok"] is True
+    delta_payload = delta.json()["data"]
+    assert [row["seq_no"] for row in delta_payload] == [2]
 
     read_cursor = await client.post(
         f"/api/v1/chat/chats/{chat_id}/read-cursor",
@@ -176,6 +188,96 @@ async def test_chat_message_length_and_empty_validation(client: AsyncClient):
     payload = only_spaces.json()
     assert payload["ok"] is False
     assert payload["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_chat_send_message_idempotency_by_client_message_id(client: AsyncClient):
+    token = await _register_owner(client, org_name="Chat Idempotency Org")
+
+    created = await client.post(
+        "/api/v1/chat/chats",
+        json={
+            "chat_type": "group",
+            "title": "Idempotency Chat",
+            "member_ids": [],
+        },
+        headers=_headers(token),
+    )
+    assert created.status_code == 200, f"Create chat failed: {created.text}"
+    chat_id = created.json()["data"]["id"]
+
+    client_message_id = f"cmid-{uuid.uuid4().hex}"
+    first = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/messages",
+        json={"body": "hello once", "client_message_id": client_message_id},
+        headers=_headers(token),
+    )
+    second = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/messages",
+        json={"body": "hello once", "client_message_id": client_message_id},
+        headers=_headers(token),
+    )
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    first_data = first.json()["data"]
+    second_data = second.json()["data"]
+    assert first_data["id"] == second_data["id"]
+    assert first_data["seq_no"] == second_data["seq_no"]
+    assert first_data["client_message_id"] == client_message_id
+
+    listed = await client.get(
+        f"/api/v1/chat/chats/{chat_id}/messages?limit=100&offset=0",
+        headers=_headers(token),
+    )
+    assert listed.status_code == 200, listed.text
+    payload = listed.json()["data"]
+    assert len(payload) == 1
+    assert payload[0]["client_message_id"] == client_message_id
+
+
+@pytest.mark.asyncio
+async def test_chat_concurrent_send_assigns_unique_contiguous_seq_no(client: AsyncClient):
+    token = await _register_owner(client, org_name="Chat Seq Concurrency Org")
+
+    created = await client.post(
+        "/api/v1/chat/chats",
+        json={
+            "chat_type": "group",
+            "title": "Concurrency Chat",
+            "member_ids": [],
+        },
+        headers=_headers(token),
+    )
+    assert created.status_code == 200, f"Create chat failed: {created.text}"
+    chat_id = created.json()["data"]["id"]
+
+    count = 30
+
+    async def _send(index: int):
+        return await client.post(
+            f"/api/v1/chat/chats/{chat_id}/messages",
+            json={
+                "body": f"m-{index}",
+                "client_message_id": f"concurrent-{index}-{uuid.uuid4().hex[:8]}",
+            },
+            headers=_headers(token),
+        )
+
+    responses = await asyncio.gather(*[_send(i) for i in range(count)])
+    for response in responses:
+        assert response.status_code == 200, response.text
+        assert response.json()["ok"] is True
+
+    listed = await client.get(
+        f"/api/v1/chat/chats/{chat_id}/messages?limit=200&offset=0",
+        headers=_headers(token),
+    )
+    assert listed.status_code == 200, listed.text
+    payload = listed.json()["data"]
+    assert len(payload) == count
+    seq_nos = [row["seq_no"] for row in payload]
+    assert seq_nos == list(range(1, count + 1))
+    assert len(set(seq_nos)) == count
 
 
 @pytest.mark.asyncio
@@ -663,3 +765,62 @@ async def test_chat_cleanup_task_removes_orphan_chat_attachments(client: AsyncCl
     assert result["deleted"] + result["skipped"] == 1
     if result["deleted"] == 1:
         assert len(deleted_from_s3) == 1
+
+
+@pytest.mark.asyncio
+async def test_chat_client_config_rollout_flags(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    from src.config import settings
+
+    token = await _register_owner(client, org_name="Chat Client Config Org")
+
+    monkeypatch.setattr(settings, "CHAT_REALTIME_ROLLOUT_ENABLED", True)
+    monkeypatch.setattr(settings, "CHAT_REALTIME_ROLLOUT_PERCENT", 0)
+    monkeypatch.setattr(settings, "CHAT_TELEMETRY_ENABLED", False)
+
+    response = await client.get("/api/v1/chat/client-config", headers=_headers(token))
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["data"]["realtime_enabled"] is False
+    assert payload["data"]["realtime_rollout_percent"] == 0
+    assert payload["data"]["telemetry_enabled"] is False
+
+    monkeypatch.setattr(settings, "CHAT_REALTIME_ROLLOUT_PERCENT", 100)
+    monkeypatch.setattr(settings, "CHAT_TELEMETRY_ENABLED", True)
+
+    response2 = await client.get("/api/v1/chat/client-config", headers=_headers(token))
+    assert response2.status_code == 200, response2.text
+    payload2 = response2.json()
+    assert payload2["ok"] is True
+    assert payload2["data"]["realtime_enabled"] is True
+    assert payload2["data"]["realtime_rollout_percent"] == 100
+    assert payload2["data"]["telemetry_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_chat_telemetry_endpoint_accepts_events(client: AsyncClient, monkeypatch: pytest.MonkeyPatch):
+    from src.config import settings
+
+    token = await _register_owner(client, org_name="Chat Telemetry Org")
+    monkeypatch.setattr(settings, "CHAT_TELEMETRY_ENABLED", True)
+
+    response = await client.post(
+        "/api/v1/chat/telemetry",
+        json={
+            "event": "message_lag",
+            "value": 1.25,
+            "meta": {"source": "integration-test"},
+        },
+        headers=_headers(token),
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["ok"] is True
+
+    monkeypatch.setattr(settings, "CHAT_TELEMETRY_ENABLED", False)
+    response2 = await client.post(
+        "/api/v1/chat/telemetry",
+        json={"event": "ws_reconnect", "value": 0.3},
+        headers=_headers(token),
+    )
+    assert response2.status_code == 200, response2.text
+    assert response2.json()["ok"] is True

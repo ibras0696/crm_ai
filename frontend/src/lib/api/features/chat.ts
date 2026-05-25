@@ -78,6 +78,18 @@ export interface ChatMemberInfo {
   created_at: string
 }
 
+export interface ChatClientConfigInfo {
+  realtime_enabled: boolean
+  realtime_rollout_percent: number
+  telemetry_enabled: boolean
+}
+
+export interface ChatTelemetryPayload {
+  event: 'ws_reconnect' | 'message_lag' | 'attachment_fetch'
+  value?: number
+  meta?: Record<string, unknown>
+}
+
 export const chatApi = {
   listChats: (limit = 50, offset = 0) =>
     api.get<ApiResponse<ChatInfo[]>>(`/chat/chats?limit=${limit}&offset=${offset}`),
@@ -97,16 +109,17 @@ export const chatApi = {
     api.post<ApiResponse<null>>(`/chat/chats/${chatId}/typing`, { is_typing }),
   listMessages: (
     chatId: string,
-    params: { limit?: number; offset?: number; before_seq_no?: number; latest?: boolean } = {},
+    params: { limit?: number; offset?: number; before_seq_no?: number; after_seq_no?: number; latest?: boolean } = {},
   ) => {
     const query = new URLSearchParams()
     query.set('limit', String(params.limit ?? 100))
     query.set('offset', String(params.offset ?? 0))
     if (typeof params.before_seq_no === 'number') query.set('before_seq_no', String(params.before_seq_no))
+    if (typeof params.after_seq_no === 'number') query.set('after_seq_no', String(params.after_seq_no))
     if (params.latest) query.set('latest', 'true')
     return api.get<ApiResponse<ChatMessageInfo[]>>(`/chat/chats/${chatId}/messages?${query.toString()}`)
   },
-  sendMessage: (chatId: string, data: { body: string; body_type?: string; meta?: ChatMessageMeta }) =>
+  sendMessage: (chatId: string, data: { body: string; body_type?: string; client_message_id?: string; meta?: ChatMessageMeta }) =>
     api.post<ApiResponse<ChatMessageInfo>>(`/chat/chats/${chatId}/messages`, data),
   deleteMessage: (messageId: string) =>
     api.delete<ApiResponse<null>>(`/chat/messages/${messageId}`),
@@ -123,4 +136,8 @@ export const chatApi = {
     api.post<ApiResponse<null>>(`/chat/chats/${chatId}/attachments/${fileId}/abort-upload`, {}),
   getAttachmentDownloadUrl: (chatId: string, fileId: string) =>
     api.get<ApiResponse<{ url: string; expires_in: number }>>(`/chat/chats/${chatId}/attachments/${fileId}/download-url`),
+  getClientConfig: () =>
+    api.get<ApiResponse<ChatClientConfigInfo>>('/chat/client-config'),
+  sendTelemetry: (payload: ChatTelemetryPayload) =>
+    api.post<ApiResponse<null>>('/chat/telemetry', payload),
 }

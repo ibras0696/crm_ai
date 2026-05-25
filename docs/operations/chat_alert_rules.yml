@@ -1,0 +1,42 @@
+groups:
+  - name: chat-production-alerts
+    rules:
+      - alert: ChatWsReconnectSpike
+        expr: sum(rate(chat_ws_reconnects_total[5m])) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          service: chat
+        annotations:
+          summary: "Chat WS reconnect rate is elevated"
+          description: "Reconnect events exceed 0.5/sec over 10 minutes. Check network edge and websocket stability."
+
+      - alert: ChatMessageLagHighP95
+        expr: histogram_quantile(0.95, sum by (le) (rate(chat_message_lag_seconds_bucket[10m]))) > 3
+        for: 10m
+        labels:
+          severity: warning
+          service: chat
+        annotations:
+          summary: "Chat message lag P95 is high"
+          description: "P95 message lag is above 3s for 10 minutes."
+
+      - alert: ChatAttachmentDownloadUrlErrors
+        expr: sum(rate(chat_attachment_download_url_requests_total{status="error"}[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: critical
+          service: chat
+        annotations:
+          summary: "Chat attachment download-url errors"
+          description: "Attachment download-url endpoint errors exceed threshold."
+
+      - alert: ChatBusinessErrorsSpike
+        expr: sum(rate(chat_errors_total[5m])) > 1
+        for: 15m
+        labels:
+          severity: warning
+          service: chat
+        annotations:
+          summary: "Chat business errors spike"
+          description: "Chat business errors exceed 1/sec. Check recent deploy and auth/access rules."

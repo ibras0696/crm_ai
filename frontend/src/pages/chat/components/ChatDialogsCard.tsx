@@ -1,27 +1,17 @@
-import { useState } from 'react'
-import { AlertTriangle, ArrowDown, Camera, ChevronLeft, ChevronRight, Image, Loader2, MessageSquare, Mic, Paperclip, Plus, Search, SendHorizontal, Square, Trash2, UserPlus, Video, X } from 'lucide-react'
+import { ChevronLeft, Loader2, MessageSquare, Plus, Search, Trash2, UserPlus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { linkifyTextToNodes } from '@/lib/linkify'
-import {
-  AttachmentPreview,
-  CHAT_ATTACHMENT_MAX_MB,
-  MESSAGE_MAX_CHARS,
-  formatDayDivider,
-  formatDurationLabel,
-  formatFileSize,
-  getInitials,
-  getMessageAttachments,
-  isVoiceAttachment,
-  scanSensitiveText,
-  toDayKey,
-} from '../chatHelpers'
+import { getInitials } from '../chatHelpers'
+import { MessageViewport } from './messages/MessageViewport'
+import { ChatComposerSection } from './composer/ChatComposerSection'
+import { MediaPreviewOverlay } from './composer/MediaPreviewOverlay'
 
 export function ChatDialogsCard(props: Record<string, unknown>) {
-  const [revealedSensitiveMessages, setRevealedSensitiveMessages] = useState<Record<string, boolean>>({})
   const {
+    chatRealtimeEnabled,
+    chatTelemetryEnabled,
     isMobileDialogsOpen,
     setIsMobileDialogsOpen,
     isDesktopSidebarCollapsed,
@@ -105,42 +95,23 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
     onOpenCreateChat,
   } = props as any
 
-  const toggleMessageExpanded = (messageId: string) => {
-    setExpandedMessages((prev: Record<string, boolean>) => ({ ...prev, [messageId]: !prev[messageId] }))
-  }
-
-  const toggleSensitiveMessageRevealed = (messageId: string) => {
-    setRevealedSensitiveMessages((prev) => ({ ...prev, [messageId]: !prev[messageId] }))
-  }
-
   return (
       <Card className="overflow-hidden rounded-2xl border border-border/70 bg-background/55 shadow-[0_18px_45px_rgba(0,0,0,0.28)]">
         {(isDesktopSidebarCollapsed || isMobileViewport) && (
           <CardHeader className="flex flex-row items-center justify-between border-b border-border/60 px-3 py-2 sm:px-4">
             <div className="flex min-w-0 items-center gap-2">
               {isDesktopSidebarCollapsed && (
-                <div className="hidden items-center gap-1 rounded-full border border-border/70 bg-background/90 p-1 shadow-sm backdrop-blur lg:flex">
+                <div className="hidden items-center lg:flex">
                   <Button
                     type="button"
-                    size="icon"
                     variant="ghost"
-                    className="h-8 w-8 rounded-full border border-border/60"
+                    className="h-7 rounded-full border border-border/60 bg-background px-2.5 text-[11px] text-foreground hover:bg-muted/40"
                     onClick={() => setIsDesktopSidebarCollapsed(false)}
                     aria-label="Открыть панель чатов"
                     title="Показать диалоги"
                   >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="h-8 w-8 rounded-full border border-primary/35 bg-primary/15 text-primary hover:bg-primary/25"
-                    onClick={onOpenCreateChat}
-                    aria-label="Создать чат"
-                    title="Новый чат"
-                  >
-                    <Plus className="h-4 w-4" />
+                    <MessageSquare className="mr-1 h-3 w-3" />
+                    Чаты
                   </Button>
                 </div>
               )}
@@ -319,513 +290,81 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                 )}
               </div>
 
-              <div
-                ref={messagesViewportRef}
-                onScroll={handleMessagesScroll}
-                className="min-h-0 flex-1 space-y-2 overflow-x-hidden overflow-y-auto bg-background/20 px-3 py-3 sm:px-5"
-              >
-                {loadingOlderMessages && (
-                  <div className="pb-1 text-center text-xs text-muted-foreground">Загрузка предыдущих сообщений...</div>
-                )}
-                {!selectedChat ? (
-                  <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-muted-foreground">
-                    {isMobileViewport ? 'Откройте список через кнопку "Чаты"' : 'Выберите диалог слева'}
-                  </div>
-                ) : loadingMessages ? (
-                  <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-muted-foreground">Загрузка сообщений...</div>
-                ) : messages.length === 0 ? (
-                  <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-muted-foreground">Сообщений пока нет</div>
-                ) : visibleMessages.length === 0 ? (
-                  <div className="flex h-full min-h-[220px] items-center justify-center text-sm text-muted-foreground">Поиск не дал результатов</div>
-                ) : (
-                  <>
-                    {!hasMoreMessages && (
-                      <div className="pb-1 text-center text-xs text-muted-foreground">Начало переписки</div>
-                    )}
-                    {visibleMessages.map((message: any, index: number) => {
-                      const own = message.sender_id === user?.id
-                      const prev = visibleMessages[index - 1]
-                      const showDayDivider = !prev || toDayKey(prev.created_at) !== toDayKey(message.created_at)
-                      const showSender = !prev || prev.sender_id !== message.sender_id || showDayDivider
-                      const senderLabel = own ? 'Вы' : getMessageOwnerLabel(message)
-                      const ownStatus = getOwnMessageStatus(message)
-                      const attachments = getMessageAttachments(message)
-                      const hasAttachments = attachments.length > 0
-                      const bodyText = message.body.trim()
-                      const hasBody = bodyText.length > 0
-                      const syntheticAttachmentBody = hasAttachments && attachments.length === 1 && bodyText === attachments[0]?.original_name
-                      const shouldRenderBody = hasBody && !syntheticAttachmentBody
-                      const expanded = Boolean(expandedMessages[message.id])
-                      const expandable = shouldRenderBody && isExpandableMessage(message.body)
-                      const sensitiveScan = scanSensitiveText(message.body)
-                      const sensitiveRevealed = Boolean(revealedSensitiveMessages[message.id])
-                      const displayBody = sensitiveScan.hasSensitive && !sensitiveRevealed
-                        ? sensitiveScan.maskedText
-                        : message.body
-                      const metaReplyToId = message.meta?.reply_to_message_id
-                      const replyTarget = metaReplyToId ? messages.find((m: any) => m.id === metaReplyToId) || null : null
-                      const showMenu = menuOpenMessageId === message.id
-                      const replyPreviewText = replyTarget
-                        ? (() => {
-                          const replyAttachments = getMessageAttachments(replyTarget)
-                          const replyBody = replyTarget.body.trim()
-                          const isSyntheticReplyBody =
-                              replyAttachments.length === 1 && replyBody === replyAttachments[0]?.original_name
-                          return (!isSyntheticReplyBody && replyBody) || (replyAttachments.length > 0 ? 'Вложение' : '')
-                        })()
-                        : ''
-                      const safeReplyPreviewText = scanSensitiveText(replyPreviewText).maskedText
+              <MessageViewport
+                chatRealtimeEnabled={chatRealtimeEnabled}
+                chatTelemetryEnabled={chatTelemetryEnabled}
+                messagesViewportRef={messagesViewportRef}
+                handleMessagesScroll={handleMessagesScroll}
+                loadingOlderMessages={loadingOlderMessages}
+                selectedChat={selectedChat}
+                isMobileViewport={isMobileViewport}
+                loadingMessages={loadingMessages}
+                messages={messages}
+                visibleMessages={visibleMessages}
+                hasMoreMessages={hasMoreMessages}
+                user={user}
+                getMessageOwnerLabel={getMessageOwnerLabel}
+                getOwnMessageStatus={getOwnMessageStatus}
+                expandedMessages={expandedMessages}
+                isExpandableMessage={isExpandableMessage}
+                setExpandedMessages={setExpandedMessages}
+                menuOpenMessageId={menuOpenMessageId}
+                setMenuOpenMessageId={setMenuOpenMessageId}
+                handleCopyMessage={handleCopyMessage}
+                setReplyToMessageId={setReplyToMessageId}
+                composerRef={composerRef}
+                handleDeleteMessage={handleDeleteMessage}
+                getUserAvatarUrl={getUserAvatarUrl}
+                membersById={membersById}
+                setMediaPreview={setMediaPreview}
+                newMessagesCount={newMessagesCount}
+                isNearBottom={isNearBottom}
+                scrollToLatest={scrollToLatest}
+              />
 
-                      return (
-                        <div key={message.id}>
-                          {showDayDivider && (
-                            <div className="my-2 text-center text-[11px] text-muted-foreground">
-                              <span className="rounded-full border border-border/60 px-2 py-0.5">{formatDayDivider(message.created_at)}</span>
-                            </div>
-                          )}
-                          <div className={`group flex w-full min-w-0 items-end gap-1.5 ${own ? 'justify-end' : 'justify-start'}`}>
-                            {!own && (
-                              <Avatar className="mb-1 h-7 w-7 shrink-0 border border-border/70">
-                                <AvatarImage src={getUserAvatarUrl(message.sender_id) || undefined} alt={senderLabel} />
-                                <AvatarFallback className="bg-muted/30 text-[10px] font-semibold text-muted-foreground">
-                                  {getInitials(senderLabel)}
-                                </AvatarFallback>
-                              </Avatar>
-                            )}
-                            <div className={`min-w-0 ${own ? 'max-w-[86%] sm:max-w-[62%] text-right' : 'max-w-[95%] sm:max-w-[68%] text-left'}`}>
-                              {showSender && (
-                                <div className={`mb-1 truncate px-1 text-[11px] ${own ? 'text-primary/80' : 'text-muted-foreground'}`}>{senderLabel}</div>
-                              )}
-                             <div
-  className={`relative max-w-full rounded-2xl px-3 py-2 text-sm shadow-sm ${
-    own
-      ? 'ml-auto rounded-br-md border border-transparent bg-[#EEFFDE] text-black dark:bg-[#2B5278] dark:text-white text-right'
-      : 'mr-auto rounded-bl-md border border-transparent bg-white text-black dark:bg-[#182533] dark:text-white text-left'
-  }`}
->
-                                {replyTarget && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const indexInFull = messages.findIndex((m: any) => m.id === replyTarget.id)
-                                      if (indexInFull >= 0) {
-                                        setExpandedMessages((prev: Record<string, boolean>) => ({ ...prev, [replyTarget.id]: true }))
-                                      }
-                                    }}
-                                    className={`mb-2 block w-full overflow-hidden rounded-lg border border-border/60 bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground ${
-                                      own ? 'text-right' : 'text-left'
-                                    }`}
-                                  >
-                                    <div>Ответ на: {(membersById.get(replyTarget.sender_id) || replyTarget.sender_id)} ·</div>
-                                    <div className="mt-0.5 break-all">
-                                      {safeReplyPreviewText.slice(0, 80)}
-                                      {safeReplyPreviewText.length > 80 ? '…' : ''}
-                                    </div>
-                                  </button>
-                                )}
-
-                                {sensitiveScan.hasSensitive && (
-                                  <div
-                                    className={`mb-2 rounded-lg border px-2 py-1.5 text-[11px] ${
-                                      own
-                                        ? 'border-white/25 bg-white/15 text-white'
-                                        : 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
-                                    }`}
-                                  >
-                                    <div className={`flex items-center gap-1.5 ${own ? 'justify-end' : 'justify-start'}`}>
-                                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                                      <span className="truncate">
-                                        Скрыты чувствительные данные: {sensitiveScan.labels.join(', ')}
-                                      </span>
-                                    </div>
-                                    <div className={`mt-1 flex flex-wrap gap-1.5 ${own ? 'justify-end' : 'justify-start'}`}>
-                                      <button
-                                        type="button"
-                                        className="rounded border border-current/25 px-2 py-0.5 hover:bg-current/10"
-                                        onClick={() => toggleSensitiveMessageRevealed(message.id)}
-                                      >
-                                        {sensitiveRevealed ? 'Скрыть' : 'Показать'}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="rounded border border-current/25 px-2 py-0.5 hover:bg-current/10"
-                                        onClick={() => void handleCopyMessage(message.body)}
-                                      >
-                                        Скопировать
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {shouldRenderBody && (
-                                  <div
-                                    className={`min-w-0 whitespace-pre-wrap break-words ${expandable && !expanded ? 'max-h-28 overflow-hidden' : ''} ${
-                                      own ? 'text-right' : 'text-left'
-                                    }`}
-                                  >
-                                    {linkifyTextToNodes(displayBody)}
-                                  </div>
-                                )}
-                                {expandable && (
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleMessageExpanded(message.id)}
-                                    className={`mt-1 text-[11px] text-primary hover:underline ${own ? 'ml-auto block text-right' : ''}`}
-                                  >
-                                    {expanded ? 'Свернуть' : 'Развернуть'}
-                                  </button>
-                                )}
-
-                                {hasAttachments && (
-                                  <div className={`mt-2 space-y-2 ${own ? 'text-right' : 'text-left'}`}>
-                                    {attachments.map((attachment: any) => (
-                                      <AttachmentPreview
-                                        key={attachment.file_id}
-                                        chatId={message.chat_id}
-                                        attachment={attachment}
-                                        onOpenMediaPreview={setMediaPreview}
-                                      />
-                                    ))}
-                                  </div>
-                                )}
-
-                                <div
-                                  className={`mt-1.5 flex items-center gap-1 text-[11px] ${
-                                    own ? 'justify-end text-white/90' : 'justify-end text-[#5f7387] dark:text-[#a4b7c8]'
-                                  }`}
-                                >
-                                  <span>{new Date(message.created_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}</span>
-                                  {own && ownStatus && <span>{ownStatus === 'Прочитано' ? '✓✓' : '✓'}</span>}
-                                </div>
-
-                                <button
-                                  type="button"
-                                  onClick={() => setMenuOpenMessageId((prev: string | null) => (prev === message.id ? null : message.id))}
-                                  className={`absolute top-1 hidden rounded px-1 py-0.5 text-[12px] text-muted-foreground hover:bg-background/70 group-hover:block ${
-                                    own ? 'right-1' : 'left-1'
-                                  }`}
-                                  aria-label="Действия с сообщением"
-                                >
-                                  ⋯
-                                </button>
-                                {showMenu && (
-                                  <div
-                                    className={`absolute top-7 z-20 min-w-[150px] rounded-md border border-border/70 bg-background p-1 shadow-lg ${
-                                      own ? 'right-1' : 'left-1'
-                                    }`}
-                                  >
-                                    <button
-                                      type="button"
-                                      onClick={() => void handleCopyMessage(message.body)}
-                                      className="w-full rounded px-2 py-1 text-left text-xs hover:bg-muted/40"
-                                    >
-                                      Копировать
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        setReplyToMessageId(message.id)
-                                        setMenuOpenMessageId(null)
-                                        composerRef.current?.focus()
-                                      }}
-                                      className="w-full rounded px-2 py-1 text-left text-xs hover:bg-muted/40"
-                                    >
-                                      Ответить
-                                    </button>
-                                    {own && (
-                                      <button
-                                        type="button"
-                                        onClick={() => void handleDeleteMessage(message.id)}
-                                        className="w-full rounded px-2 py-1 text-left text-xs text-destructive hover:bg-destructive/10"
-                                      >
-                                        Удалить
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                            {own && (
-                              <Avatar className="mb-1 h-7 w-7 shrink-0 border border-border/70">
-                                <AvatarImage src={getUserAvatarUrl(message.sender_id) || undefined} alt={senderLabel} />
-                                <AvatarFallback className="bg-emerald-100 text-[10px] font-semibold text-emerald-700 dark:bg-[#2f5f4f] dark:text-emerald-100">
-                                  {getInitials(senderLabel)}
-                                </AvatarFallback>
-                              </Avatar>
-                            )}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </>
-                )}
-                {newMessagesCount > 0 && !isNearBottom && (
-                  <div className="sticky bottom-2 mt-2 flex justify-center">
-                    <Button type="button" size="sm" onClick={scrollToLatest} className="h-8 rounded-full px-3">
-                      <ArrowDown className="mr-1 h-3.5 w-3.5" />
-                      {newMessagesCount} новых
-                    </Button>
-                  </div>
-                )}
-              </div>
-
-              <div className="sticky bottom-0 border-t border-border/60 bg-background/92 px-3 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:px-4">
-                {replyToMessage && (
-                  <div className="mb-2 flex items-center justify-between rounded-xl border border-border/60 bg-muted/20 px-2.5 py-1.5 text-xs">
-                    <div className="truncate">
-                      Ответ на: <span className="text-muted-foreground">{getMessageOwnerLabel(replyToMessage)}</span> ·{' '}
-                      {scanSensitiveText(replyToMessage.body.trim()).maskedText || (getMessageAttachments(replyToMessage).length > 0 ? 'Вложение' : '')}
-                    </div>
-                    <button type="button" onClick={() => setReplyToMessageId(null)} className="ml-2 rounded px-1 hover:bg-muted/50">
-                      ×
-                    </button>
-                  </div>
-                )}
-
-                {composerAttachments.length > 0 && (
-                  <div className="mb-2 flex flex-wrap gap-2">
-                    {composerAttachments.map((attachment: any) => {
-                      const isUploading = attachment.status === 'uploading'
-                      const isReady = attachment.status === 'ready'
-                      const isError = attachment.status === 'error'
-                      const isVoice = isVoiceAttachment(attachment.contentType)
-                      return (
-                        <div
-                          key={attachment.clientId}
-                          className={`inline-flex max-w-full items-center gap-2 rounded-full border px-3 py-1 text-xs ${
-                            isReady
-                              ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600'
-                              : isError
-                                ? 'border-destructive/30 bg-destructive/10 text-destructive'
-                                : 'border-primary/30 bg-primary/10 text-primary'
-                          }`}
-                        >
-                          {isUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
-                            <div className="min-w-0">
-                            <div className="max-w-[220px] truncate">
-                              {isVoice ? 'Голосовое сообщение' : attachment.originalName}
-                            </div>
-                            <div className="text-[10px] opacity-80">
-                              {isUploading
-                                ? 'Загрузка...'
-                                : isReady
-                                  ? isVoice
-                                    ? `${formatDurationLabel(attachment.durationMs || 0)} · ${formatFileSize(attachment.size)}`
-                                    : formatFileSize(attachment.size)
-                                  : attachment.error || 'Ошибка'}
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => void handleRemoveComposerAttachment(attachment.clientId)}
-                            className="ml-1 rounded-full p-0.5 hover:bg-black/10"
-                            aria-label={`Удалить вложение ${attachment.originalName}`}
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-                <div className="mb-2 hidden text-[11px] text-muted-foreground sm:block">
-                  До {CHAT_ATTACHMENT_MAX_MB} MB, 1 вложение на сообщение. Голосовое до 1 минуты.
-                </div>
-                {isRecordingVoice && (
-                  <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-400">
-                    <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
-                    Идет запись: {formatDurationLabel(voiceRecordingElapsedMs)} / 01:00
-                  </div>
-                )}
-
-                <input
-                  ref={mediaAttachmentInputRef}
-                  type="file"
-                  accept="image/*,video/*"
-                  className="hidden"
-                  onChange={(event) => void handleMediaInputChange(event)}
-                />
-                <input
-                  ref={cameraPhotoAttachmentInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={(event) => void handleCameraPhotoInputChange(event)}
-                />
-                <input
-                  ref={cameraVideoAttachmentInputRef}
-                  type="file"
-                  accept="video/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={(event) => void handleCameraVideoInputChange(event)}
-                />
-                <input
-                  ref={fileAttachmentInputRef}
-                  type="file"
-                  className="hidden"
-                  onChange={(event) => void handleFileInputChange(event)}
-                />
-
-                <div className="relative flex items-end gap-2 rounded-3xl border border-border/70 bg-background/95 p-2 shadow-sm" ref={attachMenuRef}>
-                  <div className="relative shrink-0">
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="h-10 w-10 rounded-full border border-border/70 bg-background/80"
-                      onClick={() => setIsAttachMenuOpen((prev: boolean) => !prev)}
-                      disabled={!selectedChatId || sending || isRecordingVoice || composerAttachments.length >= 1 || hasUploadingAttachments}
-                      aria-label="Открыть меню вложений"
-                      title="Вложения"
-                    >
-                      <Plus className="h-5 w-5" />
-                    </Button>
-                    {isAttachMenuOpen && (
-                      <div className="absolute bottom-12 left-0 z-40 w-[min(280px,calc(100vw-4rem))] rounded-xl border border-border/70 bg-background/95 p-2 shadow-2xl backdrop-blur">
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <button
-                            type="button"
-                            className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-2 text-left text-xs hover:bg-muted/30"
-                            onClick={openMediaPicker}
-                          >
-                            <Image className="h-4 w-4" />
-                            Фото/Видео
-                          </button>
-                          <button
-                            type="button"
-                            className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-2 text-left text-xs hover:bg-muted/30"
-                            onClick={openCameraPhotoPicker}
-                          >
-                            <Camera className="h-4 w-4" />
-                            Камера
-                          </button>
-                          <button
-                            type="button"
-                            className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-2 text-left text-xs hover:bg-muted/30"
-                            onClick={openCameraVideoPicker}
-                          >
-                            <Video className="h-4 w-4" />
-                            Видео
-                          </button>
-                          <button
-                            type="button"
-                            className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-2 text-left text-xs hover:bg-muted/30"
-                            onClick={openFilePicker}
-                          >
-                            <Paperclip className="h-4 w-4" />
-                            Файл
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <textarea
-                    ref={composerRef}
-                    value={draft}
-                    onChange={(e) => {
-                      setDraft(e.target.value)
-                      touchTypingActivity()
-                    }}
-                    maxLength={MESSAGE_MAX_CHARS}
-                    rows={1}
-                    placeholder={selectedChat ? 'Напишите сообщение...' : 'Выберите чат'}
-                    disabled={!selectedChat || sending || isRecordingVoice}
-                    className="max-h-40 min-h-[40px] flex-1 resize-none rounded-2xl border border-transparent bg-transparent px-2 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    onBlur={() => stopTyping()}
-                    onPaste={handleComposerPaste}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey && (draft.trim().length > 0 || readyComposerAttachments.length > 0)) {
-                        e.preventDefault()
-                        void handleSend()
-                      }
-                    }}
-                  />
-                  {isRecordingVoice ? (
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="destructive"
-                      className="h-10 w-10 rounded-full shadow-sm"
-                      onClick={() => stopVoiceRecording(true)}
-                      aria-label="Остановить запись голосового"
-                      title="Стоп запись"
-                    >
-                      <Square className="h-4 w-4" />
-                    </Button>
-                  ) : canSendMessage ? (
-                    <Button
-                      type="button"
-                      size="icon"
-                      className="h-10 w-10 rounded-full bg-primary shadow-sm hover:bg-primary/90"
-                      onClick={() => void handleSend()}
-                      disabled={sending || draft.trim().length > MESSAGE_MAX_CHARS || hasUploadingAttachments}
-                      aria-label="Отправить сообщение"
-                      title="Отправить"
-                    >
-                      <SendHorizontal className="h-4 w-4" />
-                    </Button>
-                  ) : (
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="h-10 w-10 rounded-full border border-border/70"
-                      onClick={() => void startVoiceRecording()}
-                      disabled={!selectedChatId || sending || composerAttachments.length >= 1 || hasUploadingAttachments}
-                      aria-label="Записать голосовое сообщение"
-                      title="Голосовое"
-                    >
-                      <Mic className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-                {selectedChat && (
-                  <div className="mt-2 text-right text-xs text-muted-foreground">
-                    {draft.trim().length}/{MESSAGE_MAX_CHARS}
-                  </div>
-                )}
-              </div>
+              <ChatComposerSection
+                replyToMessage={replyToMessage}
+                getMessageOwnerLabel={getMessageOwnerLabel}
+                setReplyToMessageId={setReplyToMessageId}
+                composerAttachments={composerAttachments}
+                handleRemoveComposerAttachment={handleRemoveComposerAttachment}
+                isRecordingVoice={isRecordingVoice}
+                voiceRecordingElapsedMs={voiceRecordingElapsedMs}
+                mediaAttachmentInputRef={mediaAttachmentInputRef}
+                handleMediaInputChange={handleMediaInputChange}
+                cameraPhotoAttachmentInputRef={cameraPhotoAttachmentInputRef}
+                handleCameraPhotoInputChange={handleCameraPhotoInputChange}
+                cameraVideoAttachmentInputRef={cameraVideoAttachmentInputRef}
+                handleCameraVideoInputChange={handleCameraVideoInputChange}
+                fileAttachmentInputRef={fileAttachmentInputRef}
+                handleFileInputChange={handleFileInputChange}
+                attachMenuRef={attachMenuRef}
+                isAttachMenuOpen={isAttachMenuOpen}
+                setIsAttachMenuOpen={setIsAttachMenuOpen}
+                selectedChatId={selectedChatId}
+                sending={sending}
+                hasUploadingAttachments={hasUploadingAttachments}
+                openMediaPicker={openMediaPicker}
+                openCameraPhotoPicker={openCameraPhotoPicker}
+                openCameraVideoPicker={openCameraVideoPicker}
+                openFilePicker={openFilePicker}
+                composerRef={composerRef}
+                draft={draft}
+                setDraft={setDraft}
+                touchTypingActivity={touchTypingActivity}
+                stopTyping={stopTyping}
+                handleComposerPaste={handleComposerPaste}
+                readyComposerAttachments={readyComposerAttachments}
+                selectedChat={selectedChat}
+                canSendMessage={canSendMessage}
+                handleSend={handleSend}
+                startVoiceRecording={startVoiceRecording}
+                stopVoiceRecording={stopVoiceRecording}
+              />
             </div>
           </div>
 
-          {mediaPreview && (
-            <div
-              className="fixed inset-0 z-[80] flex items-center justify-center bg-black/75 p-4"
-              onClick={() => setMediaPreview(null)}
-            >
-              <div
-                className="relative w-full max-w-6xl rounded-xl border border-white/20 bg-black/40 p-3"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <button
-                  type="button"
-                  className="absolute right-3 top-3 inline-flex h-9 w-9 items-center justify-center rounded-full bg-black/60 text-white hover:bg-black/80"
-                  onClick={() => setMediaPreview(null)}
-                  aria-label="Закрыть просмотр"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-                {mediaPreview.kind === 'image' ? (
-                  <img
-                    src={mediaPreview.url}
-                    alt={mediaPreview.originalName}
-                    className="mx-auto max-h-[82vh] max-w-full rounded-lg object-contain"
-                  />
-                ) : (
-                  <video
-                    src={mediaPreview.url}
-                    controls
-                    autoPlay
-                    className="mx-auto max-h-[82vh] max-w-full rounded-lg"
-                  >
-                    Ваш браузер не поддерживает видео.
-                  </video>
-                )}
-              </div>
-            </div>
-          )}
+          <MediaPreviewOverlay mediaPreview={mediaPreview} setMediaPreview={setMediaPreview} />
 
           {isMobileDialogsOpen && (
             <div

@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     CHAT_ATTACHMENT_MAX_FILES_PER_MESSAGE: int = 1
     CHAT_ATTACHMENT_PRESIGNED_TTL_S: int = 900
     CHAT_ATTACHMENT_ALLOWED_MIME_TYPES: list[str] = []
+    CHAT_REALTIME_ROLLOUT_ENABLED: bool = True
+    CHAT_REALTIME_ROLLOUT_PERCENT: int = 100
+    CHAT_TELEMETRY_ENABLED: bool = True
     # --------------------------------------------------------------------------
     # Docs Module Security & Pipeline
     # --------------------------------------------------------------------------
@@ -242,6 +245,15 @@ class Settings(BaseSettings):
             if s in {"debug", "dev", "development"}:
                 return True
         return v
+
+    @field_validator("CHAT_REALTIME_ROLLOUT_PERCENT", mode="before")
+    @classmethod
+    def _normalize_chat_rollout_percent(cls, v: Any) -> int:
+        try:
+            value = int(v)
+        except (TypeError, ValueError):
+            value = 100
+        return max(0, min(100, value))
 
     # SMTP / Email
     SMTP_HOST: str = "smtp.gmail.com"

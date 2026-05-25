@@ -25,6 +25,7 @@ class AddChatMemberRequest(BaseModel):
 class SendChatMessageRequest(BaseModel):
     body: str = Field(default="", max_length=CHAT_MESSAGE_MAX_CHARS)
     body_type: str = Field(default="text_markdown", max_length=40)
+    client_message_id: str | None = Field(default=None, min_length=1, max_length=64)
     meta: dict | None = None
 
 
@@ -89,6 +90,7 @@ class ChatMessageOut(BaseModel):
     chat_id: uuid.UUID
     sender_id: uuid.UUID
     seq_no: int
+    client_message_id: str | None = None
     body: str
     body_type: str
     meta: dict | None
@@ -99,3 +101,15 @@ class ReadCursorOut(BaseModel):
     chat_id: uuid.UUID
     user_id: uuid.UUID
     last_read_seq_no: int
+
+
+class ChatClientConfigOut(BaseModel):
+    realtime_enabled: bool
+    realtime_rollout_percent: int = Field(ge=0, le=100)
+    telemetry_enabled: bool
+
+
+class ChatTelemetryRequest(BaseModel):
+    event: Literal["ws_reconnect", "message_lag", "attachment_fetch"]
+    value: float | None = Field(default=None, ge=0)
+    meta: dict | None = None

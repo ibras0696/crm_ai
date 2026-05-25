@@ -159,12 +159,26 @@ class ChatService:
         self._validate_voice_note_meta(meta=body.meta, attachments=attachments)
         message_meta = self._normalize_message_meta(meta=body.meta, attachments=attachments)
 
-        seq_no = await self.repo.next_seq_no(chat_id=chat.id)
+        client_message_id = (body.client_message_id or "").strip() or None
+        if client_message_id is not None:
+            await self.repo.acquire_message_idempotency_lock(
+                chat_id=chat.id,
+                client_message_id=client_message_id,
+            )
+            existing = await self.repo.get_message_by_client_message_id(
+                chat_id=chat.id,
+                client_message_id=client_message_id,
+            )
+            if existing is not None:
+                return existing
+
+        seq_no = await self.repo.allocate_next_seq_no(chat_id=chat.id)
         message = ChatMessage(
             org_id=chat.org_id,
             chat_id=chat.id,
             sender_id=actor_id,
             seq_no=seq_no,
+            client_message_id=client_message_id,
             body=trimmed_body,
             body_type=(body.body_type or "text_markdown").strip(),
             meta=message_meta,
@@ -387,6 +401,7 @@ class ChatService:
         user_id: uuid.UUID,
         limit: int,
         offset: int,
+        after_seq_no: int | None = None,
         before_seq_no: int | None = None,
         latest: bool = False,
     ) -> list[ChatMessage]:
@@ -397,6 +412,7 @@ class ChatService:
             chat_id=chat.id,
             limit=limit,
             offset=offset,
+            after_seq_no=after_seq_no,
             before_seq_no=before_seq_no,
             latest=latest,
         )

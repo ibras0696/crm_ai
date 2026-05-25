@@ -1,6 +1,7 @@
 const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on'])
 const FALSE_VALUES = new Set(['0', 'false', 'no', 'off'])
 const I18N_ROLLOUT_SEED_STORAGE_KEY = 'crm.i18n.rollout-seed'
+const CHAT_ROLLOUT_SEED_STORAGE_KEY = 'crm.chat.rollout-seed'
 
 function parseBooleanFlag(raw: string | undefined, fallback: boolean): boolean {
   if (typeof raw !== 'string') return fallback
@@ -18,12 +19,16 @@ function parseRolloutPercent(raw: string | undefined, fallback: number): number 
 }
 
 function readRolloutSeed(): string {
+  return readRolloutSeedByKey(I18N_ROLLOUT_SEED_STORAGE_KEY)
+}
+
+function readRolloutSeedByKey(storageKey: string): string {
   if (typeof window === 'undefined') return 'server'
   try {
-    const existing = window.localStorage.getItem(I18N_ROLLOUT_SEED_STORAGE_KEY)
+    const existing = window.localStorage.getItem(storageKey)
     if (existing && existing.trim()) return existing
     const created = (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2)).trim()
-    window.localStorage.setItem(I18N_ROLLOUT_SEED_STORAGE_KEY, created)
+    window.localStorage.setItem(storageKey, created)
     return created
   } catch {
     return 'fallback'
@@ -48,4 +53,18 @@ export function isI18nEnabled(): boolean {
 
   const bucket = hashStringToBucket(readRolloutSeed())
   return bucket < rolloutPercent
+}
+
+export function isChatRolloutEnabledByEnv(): boolean {
+  const enabled = parseBooleanFlag(import.meta.env.VITE_CHAT_REALTIME_ROLLOUT_ENABLED, true)
+  if (!enabled) return false
+  const rolloutPercent = parseRolloutPercent(import.meta.env.VITE_CHAT_REALTIME_ROLLOUT_PERCENT, 100)
+  if (rolloutPercent >= 100) return true
+  if (rolloutPercent <= 0) return false
+  const bucket = hashStringToBucket(readRolloutSeedByKey(CHAT_ROLLOUT_SEED_STORAGE_KEY))
+  return bucket < rolloutPercent
+}
+
+export function isChatTelemetryEnabledByEnv(): boolean {
+  return parseBooleanFlag(import.meta.env.VITE_CHAT_TELEMETRY_ENABLED, true)
 }

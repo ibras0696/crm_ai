@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import logging
 import uuid
 
@@ -8,6 +9,13 @@ from pydantic import BaseModel
 
 from src.common.enums import UserRole
 from src.common.schemas import ApiResponse
+from src.config import settings
+from src.infrastructure.metrics_custom import (
+    CHAT_ATTACHMENT_DOWNLOAD_URL_REQUESTS_TOTAL,
+    CHAT_ERRORS_TOTAL,
+    CHAT_MESSAGE_LAG_SECONDS,
+    CHAT_TELEMETRY_EVENTS_TOTAL,
+)
 from src.infrastructure.uow import UnitOfWork
 from src.modules.access.dependencies import require_access
 from src.modules.auth.dependencies import CurrentUser, require_roles
@@ -19,9 +27,11 @@ from src.modules.chat.schemas import (
     ChatAttachmentInitOut,
     ChatAttachmentInitRequest,
     ChatAttachmentOut,
+    ChatClientConfigOut,
     ChatMemberOut,
     ChatMessageOut,
     ChatOut,
+    ChatTelemetryRequest,
     CreateChatRequest,
     ReadCursorOut,
     SendChatMessageRequest,
@@ -44,7 +54,23 @@ class TypingEventRequest(BaseModel):
 
 
 def _service_error(error: ChatServiceError) -> ApiResponse[None]:
+    CHAT_ERRORS_TOTAL.labels(operation="chat_api", code=error.code).inc()
+    logger.warning(
+        "chat_service_error",
+        extra={"code": error.code, "message": error.message, "status_code": error.status_code},
+    )
     return ApiResponse(ok=False, data=None, error={"code": error.code, "message": error.message})
+
+
+def _is_user_in_rollout(*, user_id: uuid.UUID, percent: int) -> bool:
+    rollout_percent = max(0, min(100, int(percent)))
+    if rollout_percent >= 100:
+        return True
+    if rollout_percent <= 0:
+        return False
+    digest = hashlib.sha256(str(user_id).encode("utf-8")).hexdigest()
+    bucket = int(digest[:8], 16) % 100
+    return bucket < rollout_percent
 
 
 async def _chat_out(service: ChatService, chat) -> ChatOut:
@@ -275,6 +301,7 @@ async def list_messages(
     chat_id: uuid.UUID,
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
+    after_seq_no: int | None = Query(default=None, ge=0),
     before_seq_no: int | None = Query(default=None, ge=1),
     latest: bool = Query(default=False),
     current_user: CurrentUser = Depends(
@@ -292,11 +319,21 @@ async def list_messages(
         if chat is None:
             return ApiResponse(ok=False, data=None, error={"code": "NOT_FOUND", "message": CHAT_NOT_FOUND_MESSAGE})
         try:
+            if after_seq_no is not None and (before_seq_no is not None or latest or offset > 0):
+                return ApiResponse(
+                    ok=False,
+                    data=None,
+                    error={
+                        "code": "VALIDATION_ERROR",
+                        "message": "after_seq_no нельзя комбинировать с before_seq_no/latest/offset",
+                    },
+                )
             messages = await service.list_messages_for_user(
                 chat=chat,
                 user_id=current_user.user_id,
                 limit=limit,
                 offset=offset,
+                after_seq_no=after_seq_no,
                 before_seq_no=before_seq_no,
                 latest=latest,
             )
@@ -308,6 +345,7 @@ async def list_messages(
                 chat_id=message.chat_id,
                 sender_id=message.sender_id,
                 seq_no=message.seq_no,
+                client_message_id=message.client_message_id,
                 body=message.body,
                 body_type=message.body_type,
                 meta=message.meta,
@@ -403,6 +441,7 @@ async def send_message(
             chat_id=message.chat_id,
             sender_id=message.sender_id,
             seq_no=message.seq_no,
+            client_message_id=message.client_message_id,
             body=message.body,
             body_type=message.body_type,
             meta=message.meta,
@@ -538,9 +577,60 @@ async def get_attachment_download_url(
                 expires_in=600,
             )
         except ChatServiceError as error:
+            CHAT_ATTACHMENT_DOWNLOAD_URL_REQUESTS_TOTAL.labels(status="error").inc()
             return _service_error(error)
+        CHAT_ATTACHMENT_DOWNLOAD_URL_REQUESTS_TOTAL.labels(status="ok").inc()
         item = ChatAttachmentDownloadOut(url=url, expires_in=600)
     return ApiResponse(data=item)
+
+
+@router.get("/client-config", response_model=ApiResponse[ChatClientConfigOut])
+async def get_chat_client_config(
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY),
+    ),
+    _: None = Depends(require_access(resource_type="chat", permission="can_read")),
+):
+    rollout_percent = int(settings.CHAT_REALTIME_ROLLOUT_PERCENT or 0)
+    realtime_enabled = bool(settings.CHAT_REALTIME_ROLLOUT_ENABLED) and _is_user_in_rollout(
+        user_id=current_user.user_id,
+        percent=rollout_percent,
+    )
+    return ApiResponse(
+        data=ChatClientConfigOut(
+            realtime_enabled=realtime_enabled,
+            realtime_rollout_percent=rollout_percent,
+            telemetry_enabled=bool(settings.CHAT_TELEMETRY_ENABLED),
+        )
+    )
+
+
+@router.post("/telemetry", response_model=ApiResponse[None])
+async def post_chat_telemetry(
+    body: ChatTelemetryRequest,
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY),
+    ),
+    _: None = Depends(require_access(resource_type="chat", permission="can_read")),
+):
+    if not settings.CHAT_TELEMETRY_ENABLED:
+        CHAT_TELEMETRY_EVENTS_TOTAL.labels(event=body.event, status="disabled").inc()
+        return ApiResponse(data=None)
+
+    CHAT_TELEMETRY_EVENTS_TOTAL.labels(event=body.event, status="accepted").inc()
+    if body.event == "message_lag" and body.value is not None:
+        CHAT_MESSAGE_LAG_SECONDS.observe(float(body.value))
+    logger.info(
+        "chat_telemetry_event",
+        extra={
+            "event": body.event,
+            "value": body.value,
+            "meta": body.meta or {},
+            "user_id": str(current_user.user_id),
+            "org_id": str(current_user.org_id),
+        },
+    )
+    return ApiResponse(data=None)
 
 
 @router.delete("/messages/{message_id}", response_model=ApiResponse[None])

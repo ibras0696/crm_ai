@@ -1,4 +1,4 @@
-from prometheus_client import Counter
+from prometheus_client import Counter, Histogram
 
 AI_REQUESTS_TOTAL = Counter(
     "crm_ai_requests_total",
@@ -82,4 +82,40 @@ DOCS_RETENTION_CLEANUP_TOTAL = Counter(
     "docs_retention_cleanup_total",
     "Docs retention cleanup task runs by status",
     ["status"],
+)
+
+CHAT_WS_CONNECTIONS_TOTAL = Counter(
+    "chat_ws_connections_total",
+    "Chat websocket connection lifecycle events",
+    ["event"],
+)
+
+CHAT_WS_RECONNECTS_TOTAL = Counter(
+    "chat_ws_reconnects_total",
+    "Chat websocket quick reconnects by detected window",
+    ["window"],
+)
+
+CHAT_MESSAGE_LAG_SECONDS = Histogram(
+    "chat_message_lag_seconds",
+    "Observed lag between message creation and client receipt",
+    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60),
+)
+
+CHAT_ATTACHMENT_DOWNLOAD_URL_REQUESTS_TOTAL = Counter(
+    "chat_attachment_download_url_requests_total",
+    "Requests for chat attachment download URLs",
+    ["status"],
+)
+
+CHAT_ERRORS_TOTAL = Counter(
+    "chat_errors_total",
+    "Chat module business errors by operation and error code",
+    ["operation", "code"],
+)
+
+CHAT_TELEMETRY_EVENTS_TOTAL = Counter(
+    "chat_telemetry_events_total",
+    "Frontend telemetry events accepted by chat backend",
+    ["event", "status"],
 )

@@ -1,9 +1,11 @@
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import jwt
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
 from src.config import settings
+from src.infrastructure.metrics_custom import CHAT_WS_CONNECTIONS_TOTAL, CHAT_WS_RECONNECTS_TOTAL
 from src.modules.auth.security import decode_user_access_token
 
 router = APIRouter(prefix="/ws", tags=["websockets"])
@@ -13,18 +15,30 @@ class ConnectionManager:
     def __init__(self):
         # user_id -> set of active WebSockets
         self.active_connections: dict[uuid.UUID, set[WebSocket]] = {}
+        self.last_disconnect_at: dict[uuid.UUID, datetime] = {}
 
     async def connect(self, websocket: WebSocket, user_id: uuid.UUID):
         await websocket.accept()
         if user_id not in self.active_connections:
             self.active_connections[user_id] = set()
         self.active_connections[user_id].add(websocket)
+        CHAT_WS_CONNECTIONS_TOTAL.labels(event="connected").inc()
+        now = datetime.now(UTC)
+        last_disconnected = self.last_disconnect_at.get(user_id)
+        if last_disconnected is not None:
+            reconnect_delay = now - last_disconnected
+            if reconnect_delay <= timedelta(seconds=30):
+                CHAT_WS_RECONNECTS_TOTAL.labels(window="lt_30s").inc()
+            elif reconnect_delay <= timedelta(minutes=5):
+                CHAT_WS_RECONNECTS_TOTAL.labels(window="lt_5m").inc()
 
     def disconnect(self, websocket: WebSocket, user_id: uuid.UUID):
         if user_id in self.active_connections:
             self.active_connections[user_id].discard(websocket)
             if not self.active_connections[user_id]:
                 self.active_connections.pop(user_id, None)
+        self.last_disconnect_at[user_id] = datetime.now(UTC)
+        CHAT_WS_CONNECTIONS_TOTAL.labels(event="disconnected").inc()
 
     async def send_personal_message(self, message: dict, user_id: uuid.UUID):
         if user_id in self.active_connections:
@@ -78,6 +92,7 @@ async def websocket_endpoint(
     user_id = extract_user_id(actual_token)
 
     if not user_id:
+        CHAT_WS_CONNECTIONS_TOTAL.labels(event="unauthorized").inc()
         await websocket.close(code=1008)
         return
 

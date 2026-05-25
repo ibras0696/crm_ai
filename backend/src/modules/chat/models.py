@@ -23,6 +23,7 @@ class Chat(BaseDBModel):
     )
     chat_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default=text("'group'"))
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_seq_no: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"), default=0)
 
 
 class ChatMember(BaseDBModel):
@@ -50,6 +51,7 @@ class ChatMessage(BaseDBModel):
     __tablename__ = "chat_messages"
     __table_args__ = (
         UniqueConstraint("chat_id", "seq_no", name="uq_chat_messages_chat_seq"),
+        UniqueConstraint("chat_id", "client_message_id", name="uq_chat_messages_chat_client_message"),
         CheckConstraint("seq_no > 0", name="ck_chat_messages_seq_no_positive"),
     )
 
@@ -63,6 +65,7 @@ class ChatMessage(BaseDBModel):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     seq_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    client_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     body_type: Mapped[str] = mapped_column(String(40), nullable=False, server_default=text("'text_markdown'"))
     meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)

@@ -1,6 +1,7 @@
+import hashlib
 import uuid
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.modules.chat.models import Chat, ChatMember, ChatMessage, ChatUploadSession
@@ -63,10 +64,34 @@ class ChatRepository:
         stmt = select(Membership.id).where(Membership.org_id == org_id, Membership.user_id == user_id).limit(1)
         return (await self.session.execute(stmt)).scalar_one_or_none() is not None
 
-    async def next_seq_no(self, *, chat_id: uuid.UUID) -> int:
-        stmt = select(func.coalesce(func.max(ChatMessage.seq_no), 0)).where(ChatMessage.chat_id == chat_id)
-        current = int((await self.session.execute(stmt)).scalar_one())
-        return current + 1
+    async def allocate_next_seq_no(self, *, chat_id: uuid.UUID) -> int:
+        stmt = (
+            update(Chat)
+            .where(Chat.id == chat_id)
+            .values(last_seq_no=Chat.last_seq_no + 1)
+            .returning(Chat.last_seq_no)
+        )
+        allocated = (await self.session.execute(stmt)).scalar_one_or_none()
+        if allocated is None:
+            raise RuntimeError("chat_not_found_for_seq_allocation")
+        return int(allocated)
+
+    async def get_message_by_client_message_id(
+        self, *, chat_id: uuid.UUID, client_message_id: str
+    ) -> ChatMessage | None:
+        stmt = (
+            select(ChatMessage)
+            .where(ChatMessage.chat_id == chat_id, ChatMessage.client_message_id == client_message_id)
+            .limit(1)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def acquire_message_idempotency_lock(self, *, chat_id: uuid.UUID, client_message_id: str) -> None:
+        lock_key_raw = f"{chat_id}:{client_message_id}".encode()
+        lock_key = int.from_bytes(hashlib.sha1(lock_key_raw).digest()[:8], byteorder="big", signed=False)
+        if lock_key > 0x7FFF_FFFF_FFFF_FFFF:
+            lock_key -= 0x1_0000_0000_0000_0000
+        await self.session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": lock_key})
 
     async def list_messages(
         self,
@@ -74,9 +99,19 @@ class ChatRepository:
         chat_id: uuid.UUID,
         limit: int,
         offset: int,
+        after_seq_no: int | None = None,
         before_seq_no: int | None = None,
         latest: bool = False,
     ) -> list[ChatMessage]:
+        if after_seq_no is not None:
+            stmt = (
+                select(ChatMessage)
+                .where(ChatMessage.chat_id == chat_id, ChatMessage.seq_no > after_seq_no)
+                .order_by(ChatMessage.seq_no.asc())
+                .limit(limit)
+            )
+            return list((await self.session.execute(stmt)).scalars().all())
+
         if before_seq_no is not None:
             stmt = (
                 select(ChatMessage)
@@ -111,6 +146,7 @@ class ChatRepository:
     async def create_message(self, message: ChatMessage) -> ChatMessage:
         self.session.add(message)
         await self.session.flush()
+        await self.session.execute(update(Chat).where(Chat.id == message.chat_id).values(updated_at=func.now()))
         return message
 
     async def create_upload_session(self, upload: ChatUploadSession) -> ChatUploadSession:

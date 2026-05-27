@@ -177,7 +177,9 @@ async def update_chat(
 @router.delete("/chats/{chat_id}", response_model=ApiResponse[None])
 async def delete_chat(
     chat_id: uuid.UUID,
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE),
+    ),
     _: None = Depends(require_access(resource_type="chat", permission="can_delete", resource_id_param="chat_id")),
 ):
     cleanup_file_ids: list[uuid.UUID] = []
@@ -222,7 +224,9 @@ async def delete_chat(
 async def add_member(
     chat_id: uuid.UUID,
     body: AddChatMemberRequest,
-    current_user: CurrentUser = Depends(require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER)),
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE),
+    ),
     _: None = Depends(require_access(resource_type="chat", permission="can_write", resource_id_param="chat_id")),
 ):
     member_ids: list[uuid.UUID] = []

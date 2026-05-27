@@ -9,6 +9,8 @@ interface ChatListProps {
   compact: boolean
   getChatDisplayTitle: (chat: ChatInfo) => string
   getChatAvatarUrl: (chat: ChatInfo) => string | null
+  getChatAvatarUserId: (chat: ChatInfo) => string | null
+  onOpenUserProfile: (userId: string) => void
   onSelectChat: (chatId: string) => void
 }
 
@@ -19,6 +21,8 @@ export function ChatList({
   compact,
   getChatDisplayTitle,
   getChatAvatarUrl,
+  getChatAvatarUserId,
+  onOpenUserProfile,
   onSelectChat,
 }: ChatListProps) {
   const formatChatTime = (iso: string): string => {
@@ -46,6 +50,7 @@ export function ChatList({
     const isActive = chat.id === selectedChatId
     const title = getChatDisplayTitle(chat)
     const avatarUrl = getChatAvatarUrl(chat)
+    const avatarUserId = getChatAvatarUserId(chat)
 
     if (compact) {
       const compactLabel = getInitials(title).slice(0, 1)
@@ -78,18 +83,39 @@ export function ChatList({
         }`}
       >
         <div className="flex items-start gap-2.5">
-          <div
-            className={`mt-0.5 h-10 w-10 shrink-0 rounded-full border ${
-              isActive ? 'border-primary/45' : 'border-border/70'
-            }`}
-          >
-            <Avatar className="h-full w-full">
-              <AvatarImage src={avatarUrl || undefined} alt={title} />
-              <AvatarFallback className={`${isActive ? 'bg-primary/15 text-primary' : 'bg-background/60 text-muted-foreground'} text-[11px] font-semibold`}>
-                {getInitials(title).slice(0, 2)}
-              </AvatarFallback>
-            </Avatar>
-          </div>
+          {avatarUserId ? (
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation()
+                onOpenUserProfile(avatarUserId)
+              }}
+              className={`mt-0.5 h-10 w-10 shrink-0 rounded-full border ${
+                isActive ? 'border-primary/45' : 'border-border/70'
+              }`}
+              aria-label={`Открыть профиль ${title}`}
+            >
+              <Avatar className="h-full w-full">
+                <AvatarImage src={avatarUrl || undefined} alt={title} />
+                <AvatarFallback className={`${isActive ? 'bg-primary/15 text-primary' : 'bg-background/60 text-muted-foreground'} text-[11px] font-semibold`}>
+                  {getInitials(title).slice(0, 2)}
+                </AvatarFallback>
+              </Avatar>
+            </button>
+          ) : (
+            <div
+              className={`mt-0.5 h-10 w-10 shrink-0 rounded-full border ${
+                isActive ? 'border-primary/45' : 'border-border/70'
+              }`}
+            >
+              <Avatar className="h-full w-full">
+                <AvatarImage src={avatarUrl || undefined} alt={title} />
+                <AvatarFallback className={`${isActive ? 'bg-primary/15 text-primary' : 'bg-background/60 text-muted-foreground'} text-[11px] font-semibold`}>
+                  {getInitials(title).slice(0, 2)}
+                </AvatarFallback>
+              </Avatar>
+            </div>
+          )}
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-2">
               <div className={`truncate text-sm font-medium ${isActive ? 'text-primary' : 'text-foreground'}`}>

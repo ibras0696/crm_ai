@@ -50,6 +50,9 @@ export default function ChatPage() {
   const [addingMember, setAddingMember] = useState(false)
   const [deleteChatConfirmOpen, setDeleteChatConfirmOpen] = useState(false)
   const [deletingChat, setDeletingChat] = useState(false)
+  const [profileModalOpen, setProfileModalOpen] = useState(false)
+  const [profileUserId, setProfileUserId] = useState<string | null>(null)
+  const [groupCardOpen, setGroupCardOpen] = useState(false)
 
   const [isDesktopSidebarCollapsed, setIsDesktopSidebarCollapsed] = useState(() => {
     if (typeof window === 'undefined') return false
@@ -191,6 +194,9 @@ export default function ChatPage() {
     setAddMemberOpen(false)
     setDeleteChatConfirmOpen(false)
     setAddingMemberUserId('')
+    setProfileModalOpen(false)
+    setProfileUserId(null)
+    setGroupCardOpen(false)
   }, [selectedChatId])
 
   useEffect(() => {
@@ -222,27 +228,25 @@ export default function ChatPage() {
     )
   }, [members])
 
+  const orgMemberByUserId = useMemo(() => {
+    return new Map(members.map((member) => [member.user_id, member]))
+  }, [members])
+
   const memberLabelsById = useMemo(() => {
     return new Map(members.map((member) => [member.user_id, memberMetaById.get(member.user_id)?.label || member.user_id]))
   }, [memberMetaById, members])
 
   const selectedChat = useMemo(() => chats.find((chat) => chat.id === selectedChatId) || null, [chats, selectedChatId])
 
-  const currentOrgMember = useMemo(
-    () => members.find((member) => member.user_id === user?.id) || null,
-    [members, user?.id],
-  )
-  const currentOrgRole = String(currentOrgMember?.role || '').toLowerCase()
-  const canManageOrgChats = currentOrgRole === 'owner' || currentOrgRole === 'admin' || currentOrgRole === 'manager'
-
   const currentChatMemberRole = useMemo(() => {
     if (!user?.id) return ''
     return String(chatMembers.find((member) => member.user_id === user.id)?.role || '').toLowerCase()
   }, [chatMembers, user?.id])
 
-  const canManageSelectedChat = canManageOrgChats && (currentChatMemberRole === 'owner' || currentChatMemberRole === 'admin')
+  const canManageSelectedChat = currentChatMemberRole === 'owner' || currentChatMemberRole === 'admin'
   const canManageMembers = canManageSelectedChat && selectedChat?.chat_type !== 'direct'
-  const canDeleteSelectedChat = canManageSelectedChat && selectedChat?.chat_type !== 'direct'
+  const canDeleteSelectedChat = canManageSelectedChat
+  const canOpenGroupCard = Boolean(selectedChat && selectedChat.chat_type !== 'direct')
 
   const selectedChatMemberIdsSet = useMemo(() => new Set(chatMembers.map((member) => member.user_id)), [chatMembers])
 
@@ -265,6 +269,23 @@ export default function ChatPage() {
       }
     })
   }, [memberMetaById, presence, selectedChat])
+
+  const selectedChatAdmins = useMemo(() => {
+    const adminIds = new Set(
+      chatMembers
+        .filter((member) => {
+          const role = String(member.role || '').toLowerCase()
+          return role === 'owner' || role === 'admin'
+        })
+        .map((member) => member.user_id),
+    )
+    return selectedChatMembers.filter((member) => adminIds.has(member.userId))
+  }, [chatMembers, selectedChatMembers])
+
+  const selectedChatCreatedByLabel = useMemo(() => {
+    if (!selectedChat) return ''
+    return memberMetaById.get(selectedChat.created_by)?.label || selectedChat.created_by
+  }, [memberMetaById, selectedChat])
 
   const getChatDisplayTitle = useCallback(
     (chat: ChatInfo): string => {
@@ -321,15 +342,50 @@ export default function ChatPage() {
     [memberMetaById],
   )
 
-  const getChatAvatarUrl = useCallback(
+  const getChatAvatarUserId = useCallback(
     (chat: ChatInfo): string | null => {
       if (chat.chat_type !== 'direct') return null
-      const peerId = chat.member_ids.find((id) => id !== user?.id)
+      return chat.member_ids.find((id) => id !== user?.id) || null
+    },
+    [user?.id],
+  )
+
+  const getChatAvatarUrl = useCallback(
+    (chat: ChatInfo): string | null => {
+      const peerId = getChatAvatarUserId(chat)
       if (!peerId) return null
       return memberMetaById.get(peerId)?.avatarUrl || null
     },
-    [memberMetaById, user?.id],
+    [getChatAvatarUserId, memberMetaById],
   )
+
+  const handleOpenUserProfile = useCallback(
+    (targetUserId: string) => {
+      if (!targetUserId || !orgMemberByUserId.has(targetUserId)) return
+      setProfileUserId(targetUserId)
+      setProfileModalOpen(true)
+    },
+    [orgMemberByUserId],
+  )
+
+  const selectedProfileUser = useMemo(() => {
+    if (!profileUserId) return null
+    const member = orgMemberByUserId.get(profileUserId)
+    if (!member) return null
+    const label = memberMetaById.get(profileUserId)?.label || profileUserId
+    const orgRoleRaw = String(member.role || '').toLowerCase()
+    const orgRoleLabel = orgRoleRaw
+      ? orgRoleRaw.charAt(0).toUpperCase() + orgRoleRaw.slice(1)
+      : 'Не указана'
+    return {
+      userId: profileUserId,
+      label,
+      avatarUrl: member.user_avatar_url || null,
+      email: member.user_email || '',
+      orgRoleLabel,
+      online: Boolean(presence[profileUserId]),
+    }
+  }, [memberMetaById, orgMemberByUserId, presence, profileUserId])
 
   const getOwnMessageStatus = (message: ChatMessageInfo): string => {
     if (!user || message.sender_id !== user.id) return ''
@@ -360,6 +416,8 @@ export default function ChatPage() {
       compact={compact}
       getChatDisplayTitle={getChatDisplayTitle}
       getChatAvatarUrl={getChatAvatarUrl}
+      getChatAvatarUserId={getChatAvatarUserId}
+      onOpenUserProfile={handleOpenUserProfile}
       onSelectChat={handleSelectChat}
     />
   )
@@ -522,6 +580,15 @@ export default function ChatPage() {
         deletingChat={deletingChat}
         selectedChatTitle={selectedChat ? getChatDisplayTitle(selectedChat) : ''}
         handleDeleteSelectedChat={handleDeleteSelectedChat}
+        profileModalOpen={profileModalOpen}
+        setProfileModalOpen={setProfileModalOpen}
+        selectedProfileUser={selectedProfileUser}
+        groupCardOpen={groupCardOpen}
+        setGroupCardOpen={setGroupCardOpen}
+        canOpenGroupCard={canOpenGroupCard}
+        selectedChatMembers={selectedChatMembers}
+        selectedChatAdmins={selectedChatAdmins}
+        selectedChatCreatedByLabel={selectedChatCreatedByLabel}
       />
 
       <ChatDialogsCard
@@ -536,10 +603,15 @@ export default function ChatPage() {
         setDialogsQuery={setDialogsQuery}
         selectedChat={selectedChat}
         getChatDisplayTitle={getChatDisplayTitle}
+        getChatAvatarUrl={getChatAvatarUrl}
+        getChatAvatarUserId={getChatAvatarUserId}
         selectedChatMembers={selectedChatMembers}
         isMobileViewport={isMobileViewport}
         typingLabels={typingLabels}
         canManageMembers={canManageMembers}
+        canOpenGroupCard={canOpenGroupCard}
+        onOpenGroupCard={() => setGroupCardOpen(true)}
+        onOpenUserProfile={handleOpenUserProfile}
         setAddMemberOpen={setAddMemberOpen}
         setSearchOpen={setSearchOpen}
         searchOpen={searchOpen}

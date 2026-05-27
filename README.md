@@ -51,3 +51,9 @@ VITE_I18N_ROLLOUT_PERCENT=25
 Подробности:
 - [docs/README.md](docs/README.md)
 - [docs/config/CONFIG_CONTRACT.md](docs/config/CONFIG_CONTRACT.md)
+
+## Chat delivery tracker
+
+- [docs/chat/CHAT_SPRINT_TRACKER.md](docs/chat/CHAT_SPRINT_TRACKER.md)
+- [docs/chat/CHAT_MANUAL_QA.md](docs/chat/CHAT_MANUAL_QA.md)
+- [docs/chat/CHAT_TEST_RUN_GUIDE.md](docs/chat/CHAT_TEST_RUN_GUIDE.md)

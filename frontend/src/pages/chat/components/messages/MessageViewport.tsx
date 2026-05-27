@@ -45,6 +45,7 @@ export function MessageViewport(props: Record<string, unknown>) {
     composerRef,
     handleDeleteMessage,
     getUserAvatarUrl,
+    onOpenUserProfile,
     membersById,
     setMediaPreview,
     newMessagesCount,
@@ -157,12 +158,19 @@ export function MessageViewport(props: Record<string, unknown>) {
                   )}
                   <div className={`group flex w-full min-w-0 items-end gap-1.5 ${own ? 'justify-end' : 'justify-start'}`}>
                     {!own && (
-                      <Avatar className="mb-1 h-7 w-7 shrink-0 border border-border/70">
-                        <AvatarImage src={getUserAvatarUrl(message.sender_id) || undefined} alt={senderLabel} />
-                        <AvatarFallback className="bg-muted/30 text-[10px] font-semibold text-muted-foreground">
-                          {getInitials(senderLabel)}
-                        </AvatarFallback>
-                      </Avatar>
+                      <button
+                        type="button"
+                        onClick={() => onOpenUserProfile(message.sender_id)}
+                        className="mb-1 h-7 w-7 shrink-0 rounded-full border border-border/70"
+                        aria-label={`Открыть профиль ${senderLabel}`}
+                      >
+                        <Avatar className="h-full w-full">
+                          <AvatarImage src={getUserAvatarUrl(message.sender_id) || undefined} alt={senderLabel} />
+                          <AvatarFallback className="bg-muted/30 text-[10px] font-semibold text-muted-foreground">
+                            {getInitials(senderLabel)}
+                          </AvatarFallback>
+                        </Avatar>
+                      </button>
                     )}
                     <div className={`min-w-0 ${own ? 'max-w-[86%] sm:max-w-[62%] text-right' : 'max-w-[95%] sm:max-w-[68%] text-left'}`}>
                       {showSender && (
@@ -319,12 +327,19 @@ export function MessageViewport(props: Record<string, unknown>) {
                       </div>
                     </div>
                     {own && (
-                      <Avatar className="mb-1 h-7 w-7 shrink-0 border border-border/70">
-                        <AvatarImage src={getUserAvatarUrl(message.sender_id) || undefined} alt={senderLabel} />
-                        <AvatarFallback className="bg-emerald-100 text-[10px] font-semibold text-emerald-700 dark:bg-[#2f5f4f] dark:text-emerald-100">
-                          {getInitials(senderLabel)}
-                        </AvatarFallback>
-                      </Avatar>
+                      <button
+                        type="button"
+                        onClick={() => onOpenUserProfile(message.sender_id)}
+                        className="mb-1 h-7 w-7 shrink-0 rounded-full border border-border/70"
+                        aria-label={`Открыть профиль ${senderLabel}`}
+                      >
+                        <Avatar className="h-full w-full">
+                          <AvatarImage src={getUserAvatarUrl(message.sender_id) || undefined} alt={senderLabel} />
+                          <AvatarFallback className="bg-emerald-100 text-[10px] font-semibold text-emerald-700 dark:bg-[#2f5f4f] dark:text-emerald-100">
+                            {getInitials(senderLabel)}
+                          </AvatarFallback>
+                        </Avatar>
+                      </button>
                     )}
                   </div>
                 </div>

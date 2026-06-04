@@ -236,7 +236,7 @@ export function ChatModals(props: Record<string, unknown>) {
         </div>
       )}
 
-      {profileModalOpen && selectedProfileUser && (
+      {profileModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setProfileModalOpen(false)}>
           <Card
             role="dialog"
@@ -261,33 +261,39 @@ export function ChatModals(props: Record<string, unknown>) {
               </Button>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="flex items-center gap-3">
-                <Avatar className="h-12 w-12 border border-border/70">
-                  <AvatarImage src={selectedProfileUser.avatarUrl || undefined} alt={selectedProfileUser.label} />
-                  <AvatarFallback className="bg-muted/25 text-xs font-semibold">
-                    {getInitials(selectedProfileUser.label).slice(0, 2)}
-                  </AvatarFallback>
-                </Avatar>
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold">{selectedProfileUser.label}</div>
-                  <div className="truncate text-xs text-muted-foreground">{selectedProfileUser.email || 'Email не указан'}</div>
-                </div>
-              </div>
+              {!selectedProfileUser ? (
+                <div className="py-4 text-center text-sm text-muted-foreground">Данные участника недоступны</div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-12 w-12 border border-border/70">
+                      <AvatarImage src={selectedProfileUser.avatarUrl || undefined} alt={selectedProfileUser.label} />
+                      <AvatarFallback className="bg-muted/25 text-xs font-semibold">
+                        {getInitials(selectedProfileUser.label).slice(0, 2)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold">{selectedProfileUser.label}</div>
+                      <div className="truncate text-xs text-muted-foreground">{selectedProfileUser.email || 'Email не указан'}</div>
+                    </div>
+                  </div>
 
-              <div className="grid grid-cols-1 gap-2 text-sm">
-                <div className="rounded-md border border-border/60 bg-background/40 px-3 py-2">
-                  <div className="text-[11px] text-muted-foreground">Роль в организации</div>
-                  <div className="mt-0.5 font-medium">{selectedProfileUser.orgRoleLabel}</div>
-                </div>
-                <div className="rounded-md border border-border/60 bg-background/40 px-3 py-2">
-                  <div className="text-[11px] text-muted-foreground">Статус в чате</div>
-                  <div className="mt-0.5 font-medium">{selectedProfileUser.online ? 'Онлайн' : 'Оффлайн'}</div>
-                </div>
-                <div className="rounded-md border border-border/60 bg-background/40 px-3 py-2">
-                  <div className="text-[11px] text-muted-foreground">ID пользователя</div>
-                  <div className="mt-0.5 break-all text-xs">{selectedProfileUser.userId}</div>
-                </div>
-              </div>
+                  <div className="grid grid-cols-1 gap-2 text-sm">
+                    <div className="rounded-md border border-border/60 bg-background/40 px-3 py-2">
+                      <div className="text-[11px] text-muted-foreground">Роль в организации</div>
+                      <div className="mt-0.5 font-medium">{selectedProfileUser.orgRoleLabel}</div>
+                    </div>
+                    <div className="rounded-md border border-border/60 bg-background/40 px-3 py-2">
+                      <div className="text-[11px] text-muted-foreground">Статус в чате</div>
+                      <div className="mt-0.5 font-medium">{selectedProfileUser.online ? 'Онлайн' : 'Оффлайн'}</div>
+                    </div>
+                    <div className="rounded-md border border-border/60 bg-background/40 px-3 py-2">
+                      <div className="text-[11px] text-muted-foreground">ID пользователя</div>
+                      <div className="mt-0.5 break-all text-xs">{selectedProfileUser.userId}</div>
+                    </div>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>

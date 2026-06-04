@@ -203,7 +203,7 @@ async def test_employee_chat_owner_can_manage_members_and_delete_chat(client: As
         json={"user_id": target_emp_id, "role": "member"},
         headers=_headers(member_emp_token),
     )
-    assert add_member_by_regular_member.status_code == 200, add_member_by_regular_member.text
+    assert add_member_by_regular_member.status_code == 403, add_member_by_regular_member.text
     assert add_member_by_regular_member.json()["ok"] is False
     assert add_member_by_regular_member.json()["error"]["code"] == "FORBIDDEN"
 
@@ -211,7 +211,7 @@ async def test_employee_chat_owner_can_manage_members_and_delete_chat(client: As
         f"/api/v1/chat/chats/{chat_id}",
         headers=_headers(member_emp_token),
     )
-    assert delete_by_regular_member.status_code == 200, delete_by_regular_member.text
+    assert delete_by_regular_member.status_code == 403, delete_by_regular_member.text
     assert delete_by_regular_member.json()["ok"] is False
     assert delete_by_regular_member.json()["error"]["code"] == "FORBIDDEN"
 

@@ -1,11 +1,11 @@
 ﻿import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LogOut, Bell, Sun, Moon, Menu, BellOff, CheckCheck } from 'lucide-react'
+import { LogOut, Bell, Menu, BellOff, CheckCheck } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
-import { useTheme } from '@/contexts/ThemeContext'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { ThemeSwitcher } from '@/components/ui/ThemeSwitcher'
 import { notificationsApi, NotificationInfo } from '@/lib/api'
 import { useTranslation } from 'react-i18next'
 
@@ -15,7 +15,6 @@ interface HeaderProps {
 
 export default function Header({ onMenuToggle }: HeaderProps) {
   const { user, org, logout } = useAuth()
-  const { theme, toggleTheme } = useTheme()
   const { t } = useTranslation('common')
   const navigate = useNavigate()
   const [notifOpen, setNotifOpen] = useState(false)
@@ -115,9 +114,7 @@ export default function Header({ onMenuToggle }: HeaderProps) {
 
       <div className="flex-1" />
 
-      <Button variant="ghost" size="icon" onClick={toggleTheme} className="text-muted-foreground hover:text-foreground">
-        {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
-      </Button>
+      <ThemeSwitcher />
 
       <div className="relative" ref={notifRef}>
         <Button variant="ghost" size="icon" className="relative text-muted-foreground hover:text-foreground" onClick={() => setNotifOpen(!notifOpen)}>

@@ -1,4 +1,5 @@
 export * from './ai'
+export * from './appearance'
 export * from './chat'
 export * from './knowledge'
 export * from './schedule'

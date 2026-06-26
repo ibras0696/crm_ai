@@ -3,6 +3,7 @@
 from fastapi import APIRouter
 
 from src.modules.access.routes import router as access_router
+from src.modules.appearance.routes import router as appearance_router
 from src.modules.ai.routes import router as ai_router
 from src.modules.audit.routes import router as audit_router
 from src.modules.auth.routes import router as auth_router
@@ -38,3 +39,4 @@ router.include_router(ai_router)
 router.include_router(schedule_router)
 router.include_router(access_router)
 router.include_router(superadmin_router)
+router.include_router(appearance_router)

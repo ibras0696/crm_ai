@@ -83,10 +83,10 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-screen">
-      <div className="hidden lg:flex lg:w-1/2 flex-col justify-between p-12 relative overflow-hidden">
-        <div className="absolute inset-0 gradient-primary opacity-10" />
-        <div className="absolute -bottom-32 -left-32 h-96 w-96 rounded-full bg-primary/20 blur-3xl" />
-        <div className="absolute -top-32 -right-32 h-96 w-96 rounded-full bg-purple-500/20 blur-3xl" />
+      <div className="hidden lg:flex lg:w-1/2 flex-col justify-between p-12 relative overflow-hidden bg-secondary/30">
+        <div className="absolute inset-0 gradient-mesh opacity-60" />
+        <div className="absolute -bottom-32 -left-32 h-96 w-96 rounded-full bg-primary/15 blur-[120px]" />
+        <div className="absolute -top-32 -right-32 h-96 w-96 rounded-full bg-primary/10 blur-[100px]" />
 
         <div className="relative flex items-center justify-between">
           <div className="flex items-center gap-3 mb-2">
@@ -102,7 +102,7 @@ export default function LoginPage() {
           <h1 className="text-4xl font-bold leading-tight">
             {t('auth:hero.loginTitleTop')}
             <br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">
+            <span className="text-hero-gradient">
               {t('auth:hero.loginTitleAccent')}
             </span>
           </h1>

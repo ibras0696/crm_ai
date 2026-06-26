@@ -500,7 +500,7 @@ export default function AIPage() {
               )}
             </div>
 
-            <div className="pt-3 flex gap-2 items-end">
+            <div className="pt-3 flex gap-2 items-end pb-[env(safe-area-inset-bottom,0px)]">
               <div className="flex-1">
                 {uiIntent && (
                   <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-border bg-card px-3 py-2">

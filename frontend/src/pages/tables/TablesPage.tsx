@@ -149,7 +149,7 @@ function TableCard({
           <div className={`rounded-lg p-2.5 ${bgCls}`}>
             <FileText className={`h-5 w-5 ${iconCls ?? 'text-blue-400'}`} />
           </div>
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 max-md:opacity-100 transition-opacity">
             {folders.length > 0 && (
               <div className="relative">
                 <button
@@ -371,7 +371,7 @@ function FolderNode({
           {isDropActive && <span className="text-xs text-primary">Отпустите для перемещения</span>}
         </button>
 
-        <div className="flex items-center gap-1 opacity-0 group-hover/folder:opacity-100 transition-opacity">
+        <div className="flex items-center gap-1 opacity-0 group-hover/folder:opacity-100 max-md:opacity-100 transition-opacity">
           {canCreateSubFolder && (
             <button
               onClick={() => onCreateSubFolder(folder.id)}
@@ -734,17 +734,19 @@ export default function TablesPage() {
           <h1 className="text-2xl font-bold tracking-tight">Таблицы</h1>
           <p className="text-muted-foreground mt-1">Конструктор таблиц с папками и вложенностью до 2 уровней</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={() => setShowCreateFolder(v => !v)}>
-            {showCreateFolder ? <X className="h-4 w-4 mr-2" /> : <FolderPlus className="h-4 w-4 mr-2" />}
-            {showCreateFolder ? 'Отмена' : 'Папка'}
+        <div className="flex items-center gap-2 shrink-0">
+          <Button variant="outline" size="sm" onClick={() => setShowCreateFolder(v => !v)} title={showCreateFolder ? 'Отмена' : 'Папка'}>
+            {showCreateFolder ? <X className="h-4 w-4 sm:mr-2" /> : <FolderPlus className="h-4 w-4 sm:mr-2" />}
+            <span className="hidden sm:inline">{showCreateFolder ? 'Отмена' : 'Папка'}</span>
           </Button>
           <Button
+            size="sm"
             onClick={() => { setCreateFolderId(null); setShowCreate(v => !v) }}
             className="gradient-primary border-0 text-white"
+            title={showCreate ? 'Отмена' : 'Новая таблица'}
           >
-            {showCreate ? <X className="h-4 w-4 mr-2" /> : <Plus className="h-4 w-4 mr-2" />}
-            {showCreate ? 'Отмена' : 'Новая таблица'}
+            {showCreate ? <X className="h-4 w-4 sm:mr-2" /> : <Plus className="h-4 w-4 sm:mr-2" />}
+            <span className="hidden sm:inline">{showCreate ? 'Отмена' : 'Новая таблица'}</span>
           </Button>
         </div>
       </div>

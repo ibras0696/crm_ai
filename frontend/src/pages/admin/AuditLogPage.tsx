@@ -245,7 +245,7 @@ export default function AuditLogPage() {
                     <span className="text-sm text-muted-foreground">{entityLabels[log.entity_type] || log.entity_type}</span>
                   </div>
                   <div className="md:col-span-2">
-                    <span className="text-xs text-muted-foreground font-mono truncate block max-w-[120px]">
+                    <span className="text-xs text-muted-foreground font-mono truncate block max-w-[120px]" title={log.entity_id || '—'}>
                       {log.entity_id || '—'}
                     </span>
                   </div>

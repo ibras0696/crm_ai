@@ -66,3 +66,6 @@ celerybeat.pid
 
 AGENTS*
 NO_READ_IGNORE
+
+VPN
+CLAUDE.md

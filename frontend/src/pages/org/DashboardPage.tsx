@@ -225,7 +225,7 @@ export default function DashboardPage() {
       </div>
 
       {/* Main Content Grid */}
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 lg:gap-6 lg:grid-cols-3">
         {/* Team Members */}
         <Card className="lg:col-span-2 border-border/50">
           <CardHeader className="flex flex-row items-center justify-between">

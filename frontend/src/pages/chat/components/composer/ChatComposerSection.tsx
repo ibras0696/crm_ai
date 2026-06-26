@@ -1,4 +1,16 @@
-import { Camera, Image, Loader2, Mic, Paperclip, Plus, SendHorizontal, Square, Video, X } from 'lucide-react'
+import {
+  Camera,
+  FilePlus,
+  Image,
+  Microphone,
+  PaperclipHorizontal,
+  PaperPlaneTilt,
+  Plus,
+  Square,
+  SpinnerGap,
+  VideoCamera,
+  X,
+} from '@phosphor-icons/react'
 
 import { Button } from '@/components/ui/button'
 
@@ -53,7 +65,7 @@ export function ChatComposerSection(props: Record<string, unknown>) {
   } = props as any
 
   return (
-    <div className="sticky bottom-0 border-t border-border/60 bg-background/92 px-3 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:px-4">
+    <div className="sticky bottom-0 border-t border-border/60 bg-background/92 px-3 py-3 pb-[calc(env(safe-area-inset-bottom)+3.25rem)] backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:px-4 md:pb-3">
       {replyToMessage && (
         <div className="mb-2 flex items-center justify-between rounded-xl border border-border/60 bg-muted/20 px-2.5 py-1.5 text-xs">
           <div className="truncate">
@@ -84,7 +96,7 @@ export function ChatComposerSection(props: Record<string, unknown>) {
                       : 'border-primary/30 bg-primary/10 text-primary'
                 }`}
               >
-                {isUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Paperclip className="h-3.5 w-3.5" />}
+                {isUploading ? <SpinnerGap size={14} className="animate-spin" /> : <PaperclipHorizontal size={14} />}
                 <div className="min-w-0">
                   <div className="max-w-[220px] truncate">
                     {isVoice ? 'Голосовое сообщение' : attachment.originalName}
@@ -105,7 +117,7 @@ export function ChatComposerSection(props: Record<string, unknown>) {
                   className="ml-1 rounded-full p-0.5 hover:bg-black/10"
                   aria-label={`Удалить вложение ${attachment.originalName}`}
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <X size={14} />
                 </button>
               </div>
             )
@@ -161,7 +173,7 @@ export function ChatComposerSection(props: Record<string, unknown>) {
             aria-label="Открыть меню вложений"
             title="Вложения"
           >
-            <Plus className="h-5 w-5" />
+            <Plus size={20} />
           </Button>
           {isAttachMenuOpen && (
             <div className="absolute bottom-12 left-0 z-40 w-[min(280px,calc(100vw-4rem))] rounded-xl border border-border/70 bg-background/95 p-2 shadow-2xl backdrop-blur">
@@ -171,7 +183,7 @@ export function ChatComposerSection(props: Record<string, unknown>) {
                   className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-2 text-left text-xs hover:bg-muted/30"
                   onClick={openMediaPicker}
                 >
-                  <Image className="h-4 w-4" />
+                  <Image size={16} />
                   Фото/Видео
                 </button>
                 <button
@@ -179,7 +191,7 @@ export function ChatComposerSection(props: Record<string, unknown>) {
                   className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-2 text-left text-xs hover:bg-muted/30"
                   onClick={openCameraPhotoPicker}
                 >
-                  <Camera className="h-4 w-4" />
+                  <Camera size={16} />
                   Камера
                 </button>
                 <button
@@ -187,7 +199,7 @@ export function ChatComposerSection(props: Record<string, unknown>) {
                   className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-2 text-left text-xs hover:bg-muted/30"
                   onClick={openCameraVideoPicker}
                 >
-                  <Video className="h-4 w-4" />
+                  <VideoCamera size={16} />
                   Видео
                 </button>
                 <button
@@ -195,7 +207,7 @@ export function ChatComposerSection(props: Record<string, unknown>) {
                   className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-2 text-left text-xs hover:bg-muted/30"
                   onClick={openFilePicker}
                 >
-                  <Paperclip className="h-4 w-4" />
+                  <FilePlus size={16} />
                   Файл
                 </button>
               </div>
@@ -233,7 +245,7 @@ export function ChatComposerSection(props: Record<string, unknown>) {
             aria-label="Остановить запись голосового"
             title="Стоп запись"
           >
-            <Square className="h-4 w-4" />
+            <Square size={16} />
           </Button>
         ) : canSendMessage ? (
           <Button
@@ -245,7 +257,7 @@ export function ChatComposerSection(props: Record<string, unknown>) {
             aria-label="Отправить сообщение"
             title="Отправить"
           >
-            <SendHorizontal className="h-4 w-4" />
+            <PaperPlaneTilt size={16} weight="fill" />
           </Button>
         ) : (
           <Button
@@ -258,7 +270,7 @@ export function ChatComposerSection(props: Record<string, unknown>) {
             aria-label="Записать голосовое сообщение"
             title="Голосовое"
           >
-            <Mic className="h-4 w-4" />
+            <Microphone size={16} />
           </Button>
         )}
       </div>

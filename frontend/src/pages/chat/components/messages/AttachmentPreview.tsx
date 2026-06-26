@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 
-import { Pause, Play } from 'lucide-react'
+import { Pause, Play } from '@phosphor-icons/react'
 
 import type { ChatAttachmentInfo } from '@/lib/api'
 
@@ -15,6 +15,20 @@ import {
 import { useAttachmentDownloadUrl } from '../../hooks/useAttachmentDownloadUrl'
 
 const ATTACHMENT_PRELOAD_ROOT_MARGIN = '240px'
+const WAVEFORM_BARS = 40
+
+function generateWaveformBars(seed: string, count: number): number[] {
+  let hash = 5381
+  for (let i = 0; i < seed.length; i++) {
+    hash = ((hash << 5) + hash) + seed.charCodeAt(i)
+    hash |= 0
+  }
+  return Array.from({ length: count }, (_, i) => {
+    const x = Math.sin(hash * 9301 + i * 49297 + 233) * 0.5 + 0.5
+    const envelope = 1 - Math.abs((i / count) - 0.5) * 0.4
+    return Math.max(0.15, x * envelope)
+  })
+}
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
@@ -344,33 +358,39 @@ export function AttachmentPreview({
           {downloadUrl && <source src={downloadUrl} />}
         </audio>
         {!audioFailed ? (
-          <div className="flex w-full min-w-0 max-w-full items-center gap-2">
+          <div className="flex w-full min-w-0 max-w-full items-center gap-2.5">
+            {/* Circular play/pause */}
             <button
               type="button"
               onClick={() => void toggleAudioPlayback()}
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/85 text-primary-foreground transition-colors hover:bg-primary"
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 active:scale-95"
               aria-label={isAudioPlaying ? 'Пауза' : 'Воспроизвести'}
             >
-              {isAudioPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4 fill-current" />}
+              {isAudioPlaying
+                ? <Pause size={18} weight="fill" />
+                : <Play size={18} weight="fill" className="translate-x-px" />}
             </button>
+
+            {/* Waveform + time */}
             <div className="min-w-0 flex-1">
               <button
                 type="button"
                 onClick={handleAudioTrackSeek}
-                className="relative mt-0.5 block h-4 w-full cursor-pointer rounded-full"
+                className="flex h-8 w-full cursor-pointer items-center gap-px"
                 aria-label="Перемотать голосовое сообщение"
               >
-                <span className="absolute left-0 right-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-background/70" />
-                <span
-                  className="absolute left-0 top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-primary/80"
-                  style={{ width: `${audioProgressPercent}%` }}
-                />
-                <span
-                  className="pointer-events-none absolute top-1/2 h-3.5 w-3.5 -translate-y-1/2 rounded-full border border-primary/80 bg-primary shadow-[0_0_0_2px_rgba(2,6,23,0.45)] transition-[left] duration-100 ease-linear"
-                  style={{ left: `calc(${audioProgressPercent}% - 0.4375rem)` }}
-                />
+                {generateWaveformBars(attachment.file_id, WAVEFORM_BARS).map((height, i) => {
+                  const played = i / WAVEFORM_BARS < audioProgressPercent / 100
+                  return (
+                    <span
+                      key={i}
+                      className={`flex-1 rounded-full transition-colors ${played ? 'bg-primary' : 'bg-muted-foreground/30'}`}
+                      style={{ height: `${Math.round(height * 24)}px`, minHeight: '3px' }}
+                    />
+                  )
+                })}
               </button>
-              <div className="mt-1 flex items-center justify-between text-[11px] text-muted-foreground">
+              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
                 <span>{formatClockSeconds(audioCurrentTime)}</span>
                 <span>{formatClockSeconds(audioDuration)}</span>
               </div>

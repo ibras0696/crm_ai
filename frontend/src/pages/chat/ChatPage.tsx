@@ -6,7 +6,6 @@ import { useAuth } from '@/contexts/AuthContext'
 import { extractApiError, getInitials, type MediaPreviewState } from './chatHelpers'
 import { ChatModals } from './components/ChatModals'
 import { ChatDialogsCard } from './components/ChatDialogsCard'
-import { ChatList } from './components/ChatList'
 import { useChatComposer } from './hooks/useChatComposer'
 import { useChatMessages } from './hooks/useChatMessages'
 import { useChatConnection } from './hooks/useChatConnection'
@@ -62,7 +61,6 @@ export default function ChatPage() {
     if (typeof window === 'undefined') return false
     return window.matchMedia('(max-width: 1023px)').matches
   })
-  const [isMobileDialogsOpen, setIsMobileDialogsOpen] = useState(false)
 
   const selectedChatIdRef = useRef<string | null>(null)
   const messagesViewportRef = useRef<HTMLDivElement | null>(null)
@@ -204,7 +202,6 @@ export default function ChatPage() {
     const media = window.matchMedia('(max-width: 1023px)')
     const onChange = (event: MediaQueryListEvent) => {
       setIsMobileViewport(event.matches)
-      if (!event.matches) setIsMobileDialogsOpen(false)
     }
     setIsMobileViewport(media.matches)
     media.addEventListener('change', onChange)
@@ -405,22 +402,7 @@ export default function ChatPage() {
 
   const handleSelectChat = (chatId: string) => {
     setSelectedChatId(chatId)
-    setIsMobileDialogsOpen(false)
   }
-
-  const renderChatList = (compact: boolean) => (
-    <ChatList
-      loadingChats={loadingChats}
-      chats={visibleChats}
-      selectedChatId={selectedChatId}
-      compact={compact}
-      getChatDisplayTitle={getChatDisplayTitle}
-      getChatAvatarUrl={getChatAvatarUrl}
-      getChatAvatarUserId={getChatAvatarUserId}
-      onOpenUserProfile={handleOpenUserProfile}
-      onSelectChat={handleSelectChat}
-    />
-  )
 
   const handleToggleMember = (memberId: string) => {
     setSelectedMemberIds((prev) => {
@@ -537,8 +519,9 @@ export default function ChatPage() {
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-end justify-between gap-3">
+    <>
+      {/* Title visible only on desktop */}
+      <div className="hidden md:flex mb-4 items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold">Мессенджер</h1>
           <p className="text-sm text-muted-foreground">Диалоги, группы и вложения в одном окне</p>
@@ -546,7 +529,7 @@ export default function ChatPage() {
       </div>
 
       {errorText && (
-        <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+        <div className="mb-3 rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
           {errorText}
         </div>
       )}
@@ -591,96 +574,100 @@ export default function ChatPage() {
         selectedChatCreatedByLabel={selectedChatCreatedByLabel}
       />
 
-      <ChatDialogsCard
-        chatRealtimeEnabled={chatRuntimeConfig.realtimeEnabled}
-        chatTelemetryEnabled={chatRuntimeConfig.telemetryEnabled}
-        isMobileDialogsOpen={isMobileDialogsOpen}
-        setIsMobileDialogsOpen={setIsMobileDialogsOpen}
-        isDesktopSidebarCollapsed={isDesktopSidebarCollapsed}
-        setIsDesktopSidebarCollapsed={setIsDesktopSidebarCollapsed}
-        renderChatList={renderChatList}
-        dialogsQuery={dialogsQuery}
-        setDialogsQuery={setDialogsQuery}
-        selectedChat={selectedChat}
-        getChatDisplayTitle={getChatDisplayTitle}
-        getChatAvatarUrl={getChatAvatarUrl}
-        getChatAvatarUserId={getChatAvatarUserId}
-        selectedChatMembers={selectedChatMembers}
-        isMobileViewport={isMobileViewport}
-        typingLabels={typingLabels}
-        canManageMembers={canManageMembers}
-        canOpenGroupCard={canOpenGroupCard}
-        onOpenGroupCard={() => setGroupCardOpen(true)}
-        onOpenUserProfile={handleOpenUserProfile}
-        setAddMemberOpen={setAddMemberOpen}
-        setSearchOpen={setSearchOpen}
-        searchOpen={searchOpen}
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        canDeleteSelectedChat={canDeleteSelectedChat}
-        onRequestDeleteSelectedChat={() => setDeleteChatConfirmOpen(true)}
-        deletingChat={deletingChat}
-        messagesViewportRef={messagesViewportRef}
-        handleMessagesScroll={handleMessagesScroll}
-        loadingOlderMessages={loadingOlderMessages}
-        hasMoreMessages={hasMoreMessages}
-        loadingMessages={loadingMessages}
-        messages={messages}
-        visibleMessages={visibleMessages}
-        user={user}
-        membersById={memberLabelsById}
-        getMessageOwnerLabel={getMessageOwnerLabel}
-        getUserAvatarUrl={getUserAvatarUrl}
-        getOwnMessageStatus={getOwnMessageStatus}
-        expandedMessages={expandedMessages}
-        isExpandableMessage={isExpandableMessage}
-        setExpandedMessages={setExpandedMessages}
-        menuOpenMessageId={menuOpenMessageId}
-        setMenuOpenMessageId={setMenuOpenMessageId}
-        handleCopyMessage={handleCopyMessage}
-        setReplyToMessageId={setReplyToMessageId}
-        composerRef={composerRef}
-        handleDeleteMessage={handleDeleteMessage}
-        newMessagesCount={newMessagesCount}
-        isNearBottom={isNearBottom}
-        scrollToLatest={scrollToLatest}
-        replyToMessage={replyToMessage}
-        composerAttachments={composerAttachments}
-        handleRemoveComposerAttachment={handleRemoveComposerAttachment}
-        isRecordingVoice={isRecordingVoice}
-        voiceRecordingElapsedMs={voiceRecordingElapsedMs}
-        mediaAttachmentInputRef={mediaAttachmentInputRef}
-        handleMediaInputChange={handleMediaInputChange}
-        cameraPhotoAttachmentInputRef={cameraPhotoAttachmentInputRef}
-        handleCameraPhotoInputChange={handleCameraPhotoInputChange}
-        cameraVideoAttachmentInputRef={cameraVideoAttachmentInputRef}
-        handleCameraVideoInputChange={handleCameraVideoInputChange}
-        fileAttachmentInputRef={fileAttachmentInputRef}
-        handleFileInputChange={handleFileInputChange}
-        attachMenuRef={attachMenuRef}
-        isAttachMenuOpen={isAttachMenuOpen}
-        setIsAttachMenuOpen={setIsAttachMenuOpen}
-        selectedChatId={selectedChatId}
-        sending={sending}
-        hasUploadingAttachments={hasUploadingAttachments}
-        openMediaPicker={openMediaPicker}
-        openCameraPhotoPicker={openCameraPhotoPicker}
-        openCameraVideoPicker={openCameraVideoPicker}
-        openFilePicker={openFilePicker}
-        draft={draft}
-        setDraft={setDraft}
-        touchTypingActivity={touchTypingActivity}
-        stopTyping={stopTyping}
-        handleComposerPaste={handleComposerPaste}
-        canSendMessage={canSendMessage}
-        readyComposerAttachments={readyComposerAttachments}
-        handleSend={handleSend}
-        startVoiceRecording={startVoiceRecording}
-        stopVoiceRecording={stopVoiceRecording}
-        mediaPreview={mediaPreview as MediaPreviewState | null}
-        setMediaPreview={setMediaPreview}
-        onOpenCreateChat={() => setCreateChatOpen(true)}
-      />
-    </div>
+      {/* Chat container: fixed full-screen on mobile, card on desktop */}
+      <div className="fixed inset-x-0 top-14 bottom-0 z-20 md:static md:inset-auto md:bottom-auto md:z-auto md:h-[75vh] md:min-h-[550px] md:overflow-hidden md:rounded-2xl md:border md:border-border/60 md:shadow-xl">
+        <ChatDialogsCard
+          chatRealtimeEnabled={chatRuntimeConfig.realtimeEnabled}
+          chatTelemetryEnabled={chatRuntimeConfig.telemetryEnabled}
+          isDesktopSidebarCollapsed={isDesktopSidebarCollapsed}
+          setIsDesktopSidebarCollapsed={setIsDesktopSidebarCollapsed}
+          dialogsQuery={dialogsQuery}
+          setDialogsQuery={setDialogsQuery}
+          selectedChat={selectedChat}
+          getChatDisplayTitle={getChatDisplayTitle}
+          getChatAvatarUrl={getChatAvatarUrl}
+          getChatAvatarUserId={getChatAvatarUserId}
+          selectedChatMembers={selectedChatMembers}
+          isMobileViewport={isMobileViewport}
+          typingLabels={typingLabels}
+          canManageMembers={canManageMembers}
+          canOpenGroupCard={canOpenGroupCard}
+          onOpenGroupCard={() => setGroupCardOpen(true)}
+          onOpenUserProfile={handleOpenUserProfile}
+          setAddMemberOpen={setAddMemberOpen}
+          setSearchOpen={setSearchOpen}
+          searchOpen={searchOpen}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          canDeleteSelectedChat={canDeleteSelectedChat}
+          onRequestDeleteSelectedChat={() => setDeleteChatConfirmOpen(true)}
+          deletingChat={deletingChat}
+          messagesViewportRef={messagesViewportRef}
+          handleMessagesScroll={handleMessagesScroll}
+          loadingOlderMessages={loadingOlderMessages}
+          hasMoreMessages={hasMoreMessages}
+          loadingMessages={loadingMessages}
+          messages={messages}
+          visibleMessages={visibleMessages}
+          user={user}
+          membersById={memberLabelsById}
+          getMessageOwnerLabel={getMessageOwnerLabel}
+          getUserAvatarUrl={getUserAvatarUrl}
+          getOwnMessageStatus={getOwnMessageStatus}
+          expandedMessages={expandedMessages}
+          isExpandableMessage={isExpandableMessage}
+          setExpandedMessages={setExpandedMessages}
+          menuOpenMessageId={menuOpenMessageId}
+          setMenuOpenMessageId={setMenuOpenMessageId}
+          handleCopyMessage={handleCopyMessage}
+          setReplyToMessageId={setReplyToMessageId}
+          composerRef={composerRef}
+          handleDeleteMessage={handleDeleteMessage}
+          newMessagesCount={newMessagesCount}
+          isNearBottom={isNearBottom}
+          scrollToLatest={scrollToLatest}
+          replyToMessage={replyToMessage}
+          composerAttachments={composerAttachments}
+          handleRemoveComposerAttachment={handleRemoveComposerAttachment}
+          isRecordingVoice={isRecordingVoice}
+          voiceRecordingElapsedMs={voiceRecordingElapsedMs}
+          mediaAttachmentInputRef={mediaAttachmentInputRef}
+          handleMediaInputChange={handleMediaInputChange}
+          cameraPhotoAttachmentInputRef={cameraPhotoAttachmentInputRef}
+          handleCameraPhotoInputChange={handleCameraPhotoInputChange}
+          cameraVideoAttachmentInputRef={cameraVideoAttachmentInputRef}
+          handleCameraVideoInputChange={handleCameraVideoInputChange}
+          fileAttachmentInputRef={fileAttachmentInputRef}
+          handleFileInputChange={handleFileInputChange}
+          attachMenuRef={attachMenuRef}
+          isAttachMenuOpen={isAttachMenuOpen}
+          setIsAttachMenuOpen={setIsAttachMenuOpen}
+          selectedChatId={selectedChatId}
+          sending={sending}
+          hasUploadingAttachments={hasUploadingAttachments}
+          openMediaPicker={openMediaPicker}
+          openCameraPhotoPicker={openCameraPhotoPicker}
+          openCameraVideoPicker={openCameraVideoPicker}
+          openFilePicker={openFilePicker}
+          draft={draft}
+          setDraft={setDraft}
+          touchTypingActivity={touchTypingActivity}
+          stopTyping={stopTyping}
+          handleComposerPaste={handleComposerPaste}
+          canSendMessage={canSendMessage}
+          readyComposerAttachments={readyComposerAttachments}
+          handleSend={handleSend}
+          startVoiceRecording={startVoiceRecording}
+          stopVoiceRecording={stopVoiceRecording}
+          mediaPreview={mediaPreview as MediaPreviewState | null}
+          setMediaPreview={setMediaPreview}
+          onOpenCreateChat={() => setCreateChatOpen(true)}
+          visibleChats={visibleChats}
+          loadingChats={loadingChats}
+          onSelectChat={handleSelectChat}
+          onDeselectChat={() => setSelectedChatId(null)}
+        />
+      </div>
+    </>
   )
 }

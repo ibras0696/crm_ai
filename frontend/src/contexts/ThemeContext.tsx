@@ -72,9 +72,16 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     root.setAttribute('data-accent', accent)
 
     if (customEnabled) {
-      root.style.setProperty('--primary', `${customPrimary.h} ${customPrimary.s}% ${customPrimary.l}%`)
+      const v = `${customPrimary.h} ${customPrimary.s}% ${customPrimary.l}%`
+      root.style.setProperty('--primary', v)
+      root.style.setProperty('--ring', v)
+      root.style.setProperty('--sidebar-primary', v)
+      root.style.setProperty('--sidebar-ring', v)
+      root.style.setProperty('--chart-1', v)
     } else {
-      root.style.removeProperty('--primary')
+      for (const p of ['--primary', '--ring', '--sidebar-primary', '--sidebar-ring', '--chart-1']) {
+        root.style.removeProperty(p)
+      }
     }
     root.style.setProperty('--radius', `${radius}rem`)
 

@@ -93,14 +93,58 @@
     --chart-1:                    37 90% 44%;
   }
 
+  /* ── VIOLET ACCENT ─────────────────────────────────────────────── */
+  [data-accent="violet"] {
+    --primary:                    262 83% 58%;
+    --primary-foreground:         0 0% 100%;
+    --ring:                       262 83% 58%;
+    --sidebar-primary:            262 83% 58%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-ring:               262 83% 58%;
+    --chart-1:                    262 83% 58%;
+  }
+
+  /* ── ROSE ACCENT ────────────────────────────────────────────────── */
+  [data-accent="rose"] {
+    --primary:                    346 77% 50%;
+    --primary-foreground:         0 0% 100%;
+    --ring:                       346 77% 50%;
+    --sidebar-primary:            346 77% 50%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-ring:               346 77% 50%;
+    --chart-1:                    346 77% 50%;
+  }
+
+  /* ── SKY ACCENT ─────────────────────────────────────────────────── */
+  [data-accent="sky"] {
+    --primary:                    199 89% 48%;
+    --primary-foreground:         0 0% 100%;
+    --ring:                       199 89% 48%;
+    --sidebar-primary:            199 89% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-ring:               199 89% 48%;
+    --chart-1:                    199 89% 48%;
+  }
+
+  /* ── LIME ACCENT ────────────────────────────────────────────────── */
+  [data-accent="lime"] {
+    --primary:                    84 70% 38%;
+    --primary-foreground:         0 0% 100%;
+    --ring:                       84 70% 38%;
+    --sidebar-primary:            84 70% 38%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-ring:               84 70% 38%;
+    --chart-1:                    84 70% 38%;
+  }
+
   /* ── SIDEBAR ACCENT: режим × акцент ───────────────────────────── */
-  .dark[data-accent="teal"] {
-    --sidebar-accent: 174 25% 11%;
-  }
-  .dark[data-accent="amber"] {
-    --sidebar-accent: 37 20% 11%;
-    --accent:         37 14% 14%;
-  }
+  .dark[data-accent="teal"]   { --sidebar-accent: 174 25% 11%; }
+  .dark[data-accent="amber"]  { --sidebar-accent: 37 20% 11%;  --accent: 37 14% 14%; }
+  .dark[data-accent="violet"] { --sidebar-accent: 262 30% 12%; }
+  .dark[data-accent="rose"]   { --sidebar-accent: 346 30% 11%; }
+  .dark[data-accent="sky"]    { --sidebar-accent: 199 35% 11%; }
+  .dark[data-accent="lime"]   { --sidebar-accent: 84 25% 11%;  }
+
   .light[data-accent="teal"] {
     --sidebar-background: 174 15% 96%;
     --sidebar-accent:     174 20% 90%;
@@ -113,6 +157,26 @@
   .light[data-accent="amber"] {
     --sidebar-background: 40 28% 95%;
     --sidebar-accent:     40 25% 88%;
+  }
+  .light[data-accent="violet"] {
+    --sidebar-background: 262 20% 96%;
+    --sidebar-accent:     262 20% 90%;
+    --accent:             262 15% 90%;
+  }
+  .light[data-accent="rose"] {
+    --sidebar-background: 346 20% 96%;
+    --sidebar-accent:     346 20% 90%;
+    --accent:             346 15% 90%;
+  }
+  .light[data-accent="sky"] {
+    --sidebar-background: 199 25% 96%;
+    --sidebar-accent:     199 25% 90%;
+    --accent:             199 15% 90%;
+  }
+  .light[data-accent="lime"] {
+    --sidebar-background: 84 20% 96%;
+    --sidebar-accent:     84 20% 90%;
+    --accent:             84 15% 90%;
   }
 }
 

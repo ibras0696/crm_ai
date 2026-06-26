@@ -268,8 +268,8 @@ const PremiumCursor = () => {
 // ─── Logo ─────────────────────────────────────────────────────────────────────
 
 const Logo = () => (
-  <div className="flex items-center gap-3 group cursor-pointer">
-    <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary transition-all duration-500 group-hover:scale-105 group-hover:bg-primary group-hover:text-white group-hover:shadow-[0_0_24px_rgba(37,99,235,0.4)]">
+  <div className="logo-group flex items-center gap-3 group cursor-pointer">
+    <div className="logo-icon-wrap relative flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary transition-all duration-500 group-hover:scale-105 group-hover:bg-primary group-hover:text-white">
       <Stack className="h-4.5 w-4.5" weight="duotone" />
     </div>
     <div className="flex flex-col justify-center">
@@ -896,8 +896,8 @@ export default function LandingPage() {
       <div className="fixed inset-0 gradient-mesh opacity-70 dark:opacity-50" />
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute -top-[20%] -left-[10%] w-[55%] h-[55%] bg-primary/8 rounded-full blur-[180px] animate-pulse-glow" />
-        <div className="absolute -bottom-[20%] -right-[10%] w-[55%] h-[55%] bg-purple-500/8 rounded-full blur-[180px] animate-pulse-glow" style={{ animationDelay: '3s' }} />
-        <div className="absolute top-[40%] left-[60%] w-[30%] h-[30%] bg-cyan-500/5 rounded-full blur-[120px] animate-pulse-glow" style={{ animationDelay: '1.5s' }} />
+        <div className="absolute -bottom-[20%] -right-[10%] w-[55%] h-[55%] bg-primary/5 rounded-full blur-[180px] animate-pulse-glow" style={{ animationDelay: '3s' }} />
+        <div className="absolute top-[40%] left-[60%] w-[30%] h-[30%] bg-primary/4 rounded-full blur-[120px] animate-pulse-glow" style={{ animationDelay: '1.5s' }} />
       </div>
 
       <GrainOverlay />
@@ -1041,7 +1041,7 @@ export default function LandingPage() {
                   transition={{ delay: 0.36, duration: 0.7, ease: EXPO_OUT }}
                 >
                   <Link to="/register">
-                    <button className="group inline-flex items-center gap-3 rounded-full bg-primary px-7 py-4 text-base font-bold text-white shadow-[0_20px_48px_-12px_rgba(37,99,235,0.55)] hover:bg-primary/90 hover:shadow-[0_24px_56px_-12px_rgba(37,99,235,0.65)] active:scale-[0.98] transition-all duration-300">
+                    <button className="cta-btn group inline-flex items-center gap-3 rounded-full bg-primary px-7 py-4 text-base font-bold text-white hover:bg-primary/90 active:scale-[0.98] transition-all duration-300">
                       {content.hero.cta}
                       <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform duration-300">
                         <ArrowRight className="h-4 w-4" weight="bold" />
@@ -1154,7 +1154,7 @@ export default function LandingPage() {
 
                 <motion.div initial={{ opacity: 0, scale: 0.92 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.42, duration: 0.7, ease: EXPO_OUT }}>
                   <Link to="/register">
-                    <button className="group inline-flex items-center gap-3 rounded-full bg-primary px-8 py-4 text-base font-bold text-white shadow-[0_16px_40px_-12px_rgba(37,99,235,0.5)] active:scale-[0.98] transition-all duration-300">
+                    <button className="cta-btn-sm group inline-flex items-center gap-3 rounded-full bg-primary px-8 py-4 text-base font-bold text-white hover:bg-primary/90 active:scale-[0.98] transition-all duration-300">
                       {content.hero.cta}
                       <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20 group-hover:translate-x-0.5 transition-transform duration-300">
                         <ArrowRight className="h-4 w-4" weight="bold" />
@@ -1343,7 +1343,7 @@ export default function LandingPage() {
                   </h2>
                   <div className="pt-4">
                     <Link to="/register">
-                      <button className="group inline-flex items-center gap-3 rounded-full bg-primary px-8 py-5 text-lg font-bold text-white shadow-[0_24px_56px_-12px_rgba(37,99,235,0.6)] hover:bg-primary/90 hover:shadow-[0_28px_64px_-12px_rgba(37,99,235,0.7)] active:scale-[0.98] transition-all duration-300">
+                      <button className="cta-btn-lg group inline-flex items-center gap-3 rounded-full bg-primary px-8 py-5 text-lg font-bold text-white hover:bg-primary/90 active:scale-[0.98] transition-all duration-300">
                         {content.cta.button}
                         <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white/20 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-transform duration-300">
                           <ArrowRight className="h-5 w-5" weight="bold" />
@@ -1419,6 +1419,15 @@ export default function LandingPage() {
         .animate-slow-spin { animation: slow-spin 40s linear infinite; }
         html { scroll-behavior: smooth; }
         ::selection { background: hsl(var(--primary) / 0.3); color: inherit; }
+        /* CTA button — shadow follows primary accent */
+        .cta-btn        { box-shadow: 0 20px 48px -12px hsl(var(--primary) / 0.5); }
+        .cta-btn:hover  { box-shadow: 0 24px 56px -12px hsl(var(--primary) / 0.65); }
+        .cta-btn-sm     { box-shadow: 0 16px 40px -12px hsl(var(--primary) / 0.5); }
+        .cta-btn-lg     { box-shadow: 0 24px 56px -12px hsl(var(--primary) / 0.55); }
+        .cta-btn-lg:hover { box-shadow: 0 28px 64px -12px hsl(var(--primary) / 0.7); }
+        /* Logo icon glow on hover */
+        .logo-icon-wrap { transition: box-shadow 0.5s ease; }
+        .logo-group:hover .logo-icon-wrap { box-shadow: 0 0 24px hsl(var(--primary) / 0.4); }
       `}} />
     </div>
   )

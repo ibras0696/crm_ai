@@ -446,12 +446,12 @@ export function ThemeSwitcher() {
               {/* ── Custom color ── */}
               <Section title="Свой цвет" defaultOpen={false}>
                 <div className="mt-2 space-y-3">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <span className="text-xs text-muted-foreground">Кастом цвет</span>
                     <button
                       type="button"
                       onClick={() => setCustomEnabled(!customEnabled)}
-                      className={cn('relative h-5 w-9 rounded-full transition-colors', customEnabled ? 'bg-primary' : 'bg-muted')}
+                      className={cn('relative h-5 w-9 shrink-0 rounded-full transition-colors', customEnabled ? 'bg-primary' : 'bg-muted')}
                     >
                       <span className={cn('absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform', customEnabled ? 'translate-x-4' : 'translate-x-0.5')} />
                     </button>

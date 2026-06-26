@@ -326,23 +326,23 @@ export default function DashboardPage() {
         <p className="px-4 md:px-0 text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
           Подсказки
         </p>
-        <div className="flex gap-3 overflow-x-auto pb-2 snap-x snap-mandatory px-4 md:px-0 md:grid md:grid-cols-2 md:overflow-visible">
-          <div className="snap-start shrink-0 w-[260px] md:w-auto rounded-2xl border border-border/50 bg-card p-4">
-            <div className="flex items-center gap-2 text-sm font-medium mb-2">
-              <Shield className="h-4 w-4 text-blue-400 shrink-0" />
+        <div className="flex gap-2.5 overflow-x-auto pb-2 snap-x snap-mandatory px-4 md:px-0 md:grid md:grid-cols-2 md:overflow-visible">
+          <div className="snap-start shrink-0 w-[200px] md:w-auto rounded-xl border border-border/50 bg-card p-3">
+            <div className="flex items-center gap-1.5 text-xs font-semibold mb-1.5">
+              <Shield className="h-3.5 w-3.5 text-blue-400 shrink-0" />
               Роли в команде
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               {ownersCount} owner, {adminsCount} admin,{' '}
               {Math.max(members.length - ownersCount - adminsCount, 0)} employee
             </p>
           </div>
-          <div className="snap-start shrink-0 w-[260px] md:w-auto rounded-2xl border border-border/50 bg-card p-4">
-            <div className="flex items-center gap-2 text-sm font-medium mb-2">
-              <UserPlus className="h-4 w-4 text-emerald-400 shrink-0" />
+          <div className="snap-start shrink-0 w-[200px] md:w-auto rounded-xl border border-border/50 bg-card p-3">
+            <div className="flex items-center gap-1.5 text-xs font-semibold mb-1.5">
+              <UserPlus className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
               Что делать дальше
             </div>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               Добавьте участников, создайте таблицы и подключите документы.
             </p>
           </div>

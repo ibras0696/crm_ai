@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { motion, useScroll, useTransform, AnimatePresence, useSpring, useMotionValue } from 'framer-motion'
 import type { Variants } from 'framer-motion'
@@ -21,6 +21,7 @@ import {
   Stack,
   PaperPlaneTilt,
   Hash,
+  Check,
   Sun,
   Moon,
   List,
@@ -75,6 +76,110 @@ const ECOSYSTEM_ICON_META = [Database, LucideFileText, LayoutDashboard, MessageS
 
 const resolveLandingLocale = (lang: string | undefined): LandingLocale =>
   lang === 'en' ? 'en' : 'ru'
+
+// ─── Landing Theme Switcher ───────────────────────────────────────────────────
+
+const ACCENT_OPTIONS = [
+  { id: 'teal',   color: 'hsl(174 80% 39%)' },
+  { id: 'amber',  color: 'hsl(37 90% 44%)'  },
+  { id: 'violet', color: 'hsl(262 83% 58%)' },
+  { id: 'rose',   color: 'hsl(346 77% 50%)' },
+  { id: 'sky',    color: 'hsl(199 89% 48%)' },
+  { id: 'lime',   color: 'hsl(84 70% 38%)'  },
+] as const
+
+const LandingThemeSwitcher = () => {
+  const { mode, accent, setMode, setAccent } = useTheme()
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const currentColor = ACCENT_OPTIONS.find(a => a.id === accent)?.color ?? 'hsl(174 80% 39%)'
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="h-9 w-9 rounded-xl border border-border/50 bg-secondary/30 flex items-center justify-center hover:bg-secondary transition-colors"
+        aria-label="Сменить тему"
+      >
+        <div
+          className="w-[14px] h-[14px] rounded-full ring-2 ring-border/60 transition-colors"
+          style={{ background: currentColor }}
+        />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, y: -6, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.96 }}
+            transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+            className="absolute right-0 top-[calc(100%+8px)] z-[9999] w-52 rounded-2xl border border-white/10 dark:border-white/5 bg-background/90 backdrop-blur-2xl shadow-2xl p-3 space-y-3"
+          >
+            {/* Mode */}
+            <div>
+              <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted-foreground mb-1.5">Режим</p>
+              <div className="flex gap-1.5">
+                {([
+                  { id: 'dark' as const,  Icon: Moon, label: 'Тёмная'  },
+                  { id: 'light' as const, Icon: Sun,  label: 'Светлая' },
+                ] as const).map(({ id, Icon, label }) => (
+                  <button
+                    key={id}
+                    onClick={() => setMode(id)}
+                    className={`flex flex-1 flex-col items-center gap-1.5 rounded-xl py-2 text-[10px] font-semibold transition-all ${
+                      mode === id
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-secondary/40 text-muted-foreground hover:bg-secondary/70'
+                    }`}
+                  >
+                    <Icon size={14} weight="duotone" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="h-px bg-border/50" />
+
+            {/* Accent */}
+            <div>
+              <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-muted-foreground mb-1.5">Акцент</p>
+              <div className="grid grid-cols-6 gap-1.5">
+                {ACCENT_OPTIONS.map(({ id, color }) => (
+                  <button
+                    key={id}
+                    onClick={() => setAccent(id)}
+                    className="relative h-7 rounded-lg transition-all duration-150 hover:scale-110 active:scale-95"
+                    style={{ background: color }}
+                  >
+                    {accent === id && (
+                      <Check
+                        size={11}
+                        weight="bold"
+                        className="absolute inset-0 m-auto text-white"
+                        style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.4))' }}
+                      />
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
 
 // ─── Motion Variants ──────────────────────────────────────────────────────────
 
@@ -771,7 +876,6 @@ const Showcase = ({ content }: { content: LandingContent }) => {
 
 export default function LandingPage() {
   const { i18n } = useTranslation()
-  const { theme, toggleTheme } = useTheme()
   const { scrollY } = useScroll()
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const locale = resolveLandingLocale(i18n.resolvedLanguage)
@@ -821,9 +925,7 @@ export default function LandingPage() {
               </div>
 
               {/* Theme */}
-              <button onClick={toggleTheme} className="h-9 w-9 rounded-xl border border-border/50 bg-secondary/30 flex items-center justify-center hover:bg-secondary transition-colors">
-                {theme === 'dark' ? <Sun className="h-4 w-4" weight="duotone" /> : <Moon className="h-4 w-4" weight="duotone" />}
-              </button>
+              <LandingThemeSwitcher />
 
               <Link to="/login">
                 <button className="h-9 px-5 rounded-xl text-[11px] font-bold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors">
@@ -839,9 +941,7 @@ export default function LandingPage() {
 
             {/* Mobile */}
             <div className="flex sm:hidden items-center gap-2">
-              <button onClick={toggleTheme} className="h-9 w-9 rounded-xl border border-border/50 flex items-center justify-center">
-                {theme === 'dark' ? <Sun className="h-4 w-4" weight="duotone" /> : <Moon className="h-4 w-4" weight="duotone" />}
-              </button>
+              <LandingThemeSwitcher />
               <button onClick={() => setMobileNavOpen(true)} className="h-9 w-9 rounded-xl border border-border/50 flex items-center justify-center">
                 <List className="h-4 w-4" weight="bold" />
               </button>

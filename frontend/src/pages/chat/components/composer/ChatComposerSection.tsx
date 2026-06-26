@@ -3,7 +3,6 @@ import { Camera, Image, Loader2, Mic, Paperclip, Plus, SendHorizontal, Square, V
 import { Button } from '@/components/ui/button'
 
 import {
-  CHAT_ATTACHMENT_MAX_MB,
   MESSAGE_MAX_CHARS,
   formatDurationLabel,
   formatFileSize,
@@ -113,9 +112,6 @@ export function ChatComposerSection(props: Record<string, unknown>) {
           })}
         </div>
       )}
-      <div className="mb-2 hidden text-[11px] text-muted-foreground sm:block">
-        До {CHAT_ATTACHMENT_MAX_MB} MB, 1 вложение на сообщение. Голосовое до 1 минуты.
-      </div>
       {isRecordingVoice && (
         <div className="mb-2 inline-flex items-center gap-2 rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-xs font-medium text-red-400">
           <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
@@ -266,11 +262,6 @@ export function ChatComposerSection(props: Record<string, unknown>) {
           </Button>
         )}
       </div>
-      {selectedChat && (
-        <div className="mt-2 text-right text-xs text-muted-foreground">
-          {draft.trim().length}/{MESSAGE_MAX_CHARS}
-        </div>
-      )}
     </div>
   )
 }

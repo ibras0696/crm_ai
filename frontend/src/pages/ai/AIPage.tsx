@@ -410,9 +410,9 @@ export default function AIPage() {
   const isDisabled = sending || statusError === 'auth' || status?.enabled === false || !status?.configured
 
   return (
-    <div className="flex h-[calc(100dvh-8rem)] flex-col overflow-hidden md:h-[calc(100vh-8rem)]">
+    <div className="fixed inset-x-0 top-14 bottom-0 z-10 flex flex-col overflow-hidden px-4 md:static md:inset-auto md:bottom-auto md:z-auto md:h-[calc(100dvh-8rem)] md:px-0">
       {/* Page header */}
-      <div className="flex items-center gap-3 pb-3 flex-wrap shrink-0">
+      <div className="flex items-center gap-3 pt-4 pb-3 flex-wrap shrink-0 md:pt-0">
         <div className="flex-1 min-w-0">
           <h1 className="text-xl font-semibold flex items-center gap-2">
             <Robot className="h-5 w-5 text-primary" weight="fill" />
@@ -674,7 +674,7 @@ export default function AIPage() {
           </div>
 
           {/* Input area — sticky above bottom nav */}
-          <div className="shrink-0 pt-2 pb-[calc(env(safe-area-inset-bottom,0px)+4.5rem)] md:pb-2">
+          <div className="shrink-0 pt-2 pb-[calc(env(safe-area-inset-bottom)+3.25rem)] md:pb-2">
             {/* Active intent chip */}
             {uiIntent && (
               <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2">

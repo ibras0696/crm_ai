@@ -224,7 +224,7 @@ export default function SchedulePage() {
   const { user, members } = useAuth()
   const [events, setEvents] = useState<Event[]>([])
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState<View>('month')
+  const [view, setView] = useState<View>(() => window.innerWidth < 640 ? 'day' : 'month')
   const [current, setCurrent] = useState(new Date())
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({
@@ -550,7 +550,7 @@ export default function SchedulePage() {
             </button>
           ))}
         </div>
-        <button onClick={() => openForm()} className="flex items-center gap-1.5 h-9 px-4 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary/90 transition-colors">
+        <button onClick={() => openForm()} className="hidden sm:flex items-center gap-1.5 h-9 px-4 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary/90 transition-colors">
           <Plus className="h-4 w-4" /> Событие
         </button>
       </div>
@@ -565,25 +565,25 @@ export default function SchedulePage() {
 
       {/* Month view */}
       {view === 'month' && (
-        <div className="rounded-xl border border-border bg-card overflow-x-auto">
-          <div className="min-w-[700px]">
+        <>
+          {/* Mobile: compact dots grid */}
+          <div className="sm:hidden rounded-xl border border-border bg-card">
             <div className="grid grid-cols-7 border-b border-border">
-              {DAYS_RU.map(dayLabel => <div key={dayLabel} className="py-2 text-center text-xs font-medium text-muted-foreground">{dayLabel}</div>)}
+              {DAYS_RU.map(dayLabel => <div key={dayLabel} className="py-2 text-center text-[10px] font-medium text-muted-foreground">{dayLabel}</div>)}
             </div>
             <div className="grid grid-cols-7">
               {buildMonthGrid().map((day, i) => {
                 const isToday = day && isSameDay(day, new Date())
                 const dayEvs = day ? eventsOnDay(day) : []
                 return (
-                  <div key={i} onClick={() => { if (day) { setCurrent(day); setView('day') } }} className={`min-h-[80px] p-1.5 border-b border-r border-border/50 cursor-pointer transition-colors ${day ? 'hover:bg-secondary/20' : 'bg-secondary/5'} ${isToday ? 'bg-primary/5' : ''}`}>
+                  <div key={i} onClick={() => { if (day) { setCurrent(day); setView('day') } }} className={`min-h-[52px] p-1 border-b border-r border-border/30 cursor-pointer flex flex-col items-center gap-1 active:bg-secondary/30 ${!day ? 'bg-secondary/5' : ''} ${isToday ? 'bg-primary/5' : ''}`}>
                     {day && (
                       <>
-                        <span className={`text-xs font-medium inline-flex h-6 w-6 items-center justify-center rounded-full ${isToday ? 'bg-primary text-white' : 'text-foreground'}`}>{day.getDate()}</span>
-                        <div className="mt-1 space-y-0.5">
-                          {dayEvs.slice(0, 3).map(ev => (
-                            <div key={ev.id} className="text-[10px] px-1 py-0.5 rounded truncate text-white" style={{ background: ev.color }}>{ev.title}</div>
+                        <span className={`text-xs font-medium inline-flex h-5 w-5 items-center justify-center rounded-full ${isToday ? 'bg-primary text-white' : 'text-foreground'}`}>{day.getDate()}</span>
+                        <div className="flex flex-wrap justify-center gap-[2px]">
+                          {dayEvs.slice(0, 4).map(ev => (
+                            <div key={ev.id} className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: ev.color }} />
                           ))}
-                          {dayEvs.length > 3 && <div className="text-[10px] text-muted-foreground px-1">+{dayEvs.length - 3} ещё</div>}
                         </div>
                       </>
                     )}
@@ -592,7 +592,37 @@ export default function SchedulePage() {
               })}
             </div>
           </div>
-        </div>
+
+          {/* Desktop: full text grid */}
+          <div className="hidden sm:block rounded-xl border border-border bg-card overflow-x-auto">
+            <div className="min-w-[700px]">
+              <div className="grid grid-cols-7 border-b border-border">
+                {DAYS_RU.map(dayLabel => <div key={dayLabel} className="py-2 text-center text-xs font-medium text-muted-foreground">{dayLabel}</div>)}
+              </div>
+              <div className="grid grid-cols-7">
+                {buildMonthGrid().map((day, i) => {
+                  const isToday = day && isSameDay(day, new Date())
+                  const dayEvs = day ? eventsOnDay(day) : []
+                  return (
+                    <div key={i} onClick={() => { if (day) { setCurrent(day); setView('day') } }} className={`min-h-[80px] p-1.5 border-b border-r border-border/50 cursor-pointer transition-colors ${day ? 'hover:bg-secondary/20' : 'bg-secondary/5'} ${isToday ? 'bg-primary/5' : ''}`}>
+                      {day && (
+                        <>
+                          <span className={`text-xs font-medium inline-flex h-6 w-6 items-center justify-center rounded-full ${isToday ? 'bg-primary text-white' : 'text-foreground'}`}>{day.getDate()}</span>
+                          <div className="mt-1 space-y-0.5">
+                            {dayEvs.slice(0, 3).map(ev => (
+                              <div key={ev.id} className="text-[10px] px-1 py-0.5 rounded truncate text-white" style={{ background: ev.color }}>{ev.title}</div>
+                            ))}
+                            {dayEvs.length > 3 && <div className="text-[10px] text-muted-foreground px-1">+{dayEvs.length - 3} ещё</div>}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
       {/* Day view */}
@@ -998,6 +1028,16 @@ export default function SchedulePage() {
           </div>
         </div>
       )}
+
+      {/* Mobile FAB — add event */}
+      <button
+        onClick={() => openForm()}
+        className="sm:hidden fixed right-6 z-50 h-14 w-14 rounded-full bg-primary text-white shadow-lg flex items-center justify-center active:scale-95 transition-transform"
+        style={{ bottom: 'calc(1.5rem + env(safe-area-inset-bottom, 0px))' }}
+        aria-label="Добавить событие"
+      >
+        <Plus className="h-6 w-6" />
+      </button>
     </div>
   )
 }

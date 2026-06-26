@@ -287,9 +287,9 @@ export default function BillingPage() {
               <div className={`h-10 w-10 rounded-lg ${card.bg} flex items-center justify-center shrink-0`}>
                 <card.icon className={`h-5 w-5 ${card.color}`} />
               </div>
-              <div>
-                <p className="text-lg font-bold">{typeof card.value === 'number' ? card.value.toLocaleString('ru') : card.value}</p>
-                <p className="text-[11px] text-muted-foreground">{card.label}</p>
+              <div className="min-w-0">
+                <p className="text-lg font-bold truncate">{typeof card.value === 'number' ? card.value.toLocaleString('ru') : card.value}</p>
+                <p className="text-[11px] text-muted-foreground truncate">{card.label}</p>
               </div>
             </div>
           ))}

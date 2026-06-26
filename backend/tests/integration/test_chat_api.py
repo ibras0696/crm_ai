@@ -157,6 +157,73 @@ async def test_chat_core_flow_with_members_messages_and_read_cursor(client: Asyn
 
 
 @pytest.mark.asyncio
+async def test_employee_chat_owner_can_manage_members_and_delete_chat(client: AsyncClient):
+    owner_token = await _register_owner(client, org_name="Chat Employee Admin Org")
+    emp_owner_token = await _invite_and_accept_employee(client, owner_token, label="owner-emp")
+    member_emp_token = await _invite_and_accept_employee(client, owner_token, label="member-emp")
+    target_emp_token = await _invite_and_accept_employee(client, owner_token, label="target-emp")
+
+    emp_owner_me = await client.get("/api/v1/auth/me", headers=_headers(emp_owner_token))
+    assert emp_owner_me.status_code == 200, f"Employee-owner profile fetch failed: {emp_owner_me.text}"
+    emp_owner_id = emp_owner_me.json()["data"]["id"]
+
+    member_emp_me = await client.get("/api/v1/auth/me", headers=_headers(member_emp_token))
+    assert member_emp_me.status_code == 200, f"Member employee profile fetch failed: {member_emp_me.text}"
+    member_emp_id = member_emp_me.json()["data"]["id"]
+
+    target_emp_me = await client.get("/api/v1/auth/me", headers=_headers(target_emp_token))
+    assert target_emp_me.status_code == 200, f"Target employee profile fetch failed: {target_emp_me.text}"
+    target_emp_id = target_emp_me.json()["data"]["id"]
+
+    created = await client.post(
+        "/api/v1/chat/chats",
+        json={
+            "chat_type": "group",
+            "title": "Employee Managed Chat",
+            "member_ids": [member_emp_id],
+        },
+        headers=_headers(emp_owner_token),
+    )
+    assert created.status_code == 200, f"Create chat failed: {created.text}"
+    assert created.json()["ok"] is True
+    chat_id = created.json()["data"]["id"]
+    assert emp_owner_id in created.json()["data"]["member_ids"]
+
+    add_member_by_employee_owner = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/members",
+        json={"user_id": target_emp_id, "role": "member"},
+        headers=_headers(emp_owner_token),
+    )
+    assert add_member_by_employee_owner.status_code == 200, add_member_by_employee_owner.text
+    assert add_member_by_employee_owner.json()["ok"] is True
+    assert add_member_by_employee_owner.json()["data"]["user_id"] == target_emp_id
+
+    add_member_by_regular_member = await client.post(
+        f"/api/v1/chat/chats/{chat_id}/members",
+        json={"user_id": target_emp_id, "role": "member"},
+        headers=_headers(member_emp_token),
+    )
+    assert add_member_by_regular_member.status_code == 403, add_member_by_regular_member.text
+    assert add_member_by_regular_member.json()["ok"] is False
+    assert add_member_by_regular_member.json()["error"]["code"] == "FORBIDDEN"
+
+    delete_by_regular_member = await client.delete(
+        f"/api/v1/chat/chats/{chat_id}",
+        headers=_headers(member_emp_token),
+    )
+    assert delete_by_regular_member.status_code == 403, delete_by_regular_member.text
+    assert delete_by_regular_member.json()["ok"] is False
+    assert delete_by_regular_member.json()["error"]["code"] == "FORBIDDEN"
+
+    delete_by_employee_owner = await client.delete(
+        f"/api/v1/chat/chats/{chat_id}",
+        headers=_headers(emp_owner_token),
+    )
+    assert delete_by_employee_owner.status_code == 200, delete_by_employee_owner.text
+    assert delete_by_employee_owner.json()["ok"] is True
+
+
+@pytest.mark.asyncio
 async def test_chat_message_length_and_empty_validation(client: AsyncClient):
     token = await _register_owner(client, org_name="Chat Validation Org")
 

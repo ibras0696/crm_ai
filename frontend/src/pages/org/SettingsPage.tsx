@@ -294,7 +294,7 @@ export default function SettingsPage() {
               </p>
             </div>
             <Separator className="bg-border/50" />
-            <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Globe className="h-4 w-4" />
                 <span>{t('settings:billing.usersLimit')}</span>

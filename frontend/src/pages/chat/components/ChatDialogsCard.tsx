@@ -1,4 +1,4 @@
-import { ChevronLeft, Loader2, MessageSquare, Plus, Search, Trash2, UserPlus, X } from 'lucide-react'
+import { ChevronLeft, Loader2, MessageSquare, Plus, Search, Trash2, UserPlus, Users, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -21,10 +21,15 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
     setDialogsQuery,
     selectedChat,
     getChatDisplayTitle,
+    getChatAvatarUrl,
+    getChatAvatarUserId,
     selectedChatMembers,
     isMobileViewport,
     typingLabels,
     canManageMembers,
+    canOpenGroupCard,
+    onOpenGroupCard,
+    onOpenUserProfile,
     setAddMemberOpen,
     setSearchOpen,
     searchOpen,
@@ -196,11 +201,35 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
               <div className="border-b border-border/60 bg-background/92 px-3 py-3 sm:px-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    {selectedChat && (
-                      <div className="mb-1 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border/70 bg-muted/20 text-[11px] font-semibold text-muted-foreground">
-                        {getInitials(getChatDisplayTitle(selectedChat)).slice(0, 2)}
-                      </div>
-                    )}
+                    {selectedChat && (() => {
+                      const selectedChatTitle = getChatDisplayTitle(selectedChat)
+                      const avatarUserId = getChatAvatarUserId(selectedChat)
+                      const avatarUrl = getChatAvatarUrl(selectedChat)
+
+                      if (!avatarUserId) {
+                        return (
+                          <div className="mb-1 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border/70 bg-muted/20 text-[11px] font-semibold text-muted-foreground">
+                            {getInitials(selectedChatTitle).slice(0, 2)}
+                          </div>
+                        )
+                      }
+
+                      return (
+                        <button
+                          type="button"
+                          className="mb-1 inline-flex h-8 w-8 items-center justify-center rounded-full border border-border/70 bg-muted/20 text-[11px] font-semibold text-muted-foreground"
+                          onClick={() => onOpenUserProfile(avatarUserId)}
+                          aria-label={`Открыть профиль ${selectedChatTitle}`}
+                        >
+                          <Avatar className="h-full w-full">
+                            <AvatarImage src={avatarUrl || undefined} alt={selectedChatTitle} />
+                            <AvatarFallback className="bg-muted/20 text-[11px] font-semibold text-muted-foreground">
+                              {getInitials(selectedChatTitle).slice(0, 2)}
+                            </AvatarFallback>
+                          </Avatar>
+                        </button>
+                      )
+                    })()}
                     <div className="truncate text-sm font-semibold sm:text-base">
                       {selectedChat ? getChatDisplayTitle(selectedChat) : 'Выберите чат'}
                     </div>
@@ -209,15 +238,20 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                         <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
                           <div className="flex -space-x-1">
                             {selectedChatMembers.slice(0, 3).map((member: any) => (
-                              <Avatar
+                              <button
                                 key={member.userId}
-                                className="h-5 w-5 border border-border/70"
+                                type="button"
+                                className="h-5 w-5 rounded-full border border-border/70"
+                                onClick={() => onOpenUserProfile(member.userId)}
+                                aria-label={`Открыть профиль ${member.label}`}
                               >
-                                <AvatarImage src={member.avatarUrl || undefined} alt={member.label} />
-                                <AvatarFallback className="bg-muted/20 text-[9px] font-medium" title={member.label}>
-                                  {member.initials}
-                                </AvatarFallback>
-                              </Avatar>
+                                <Avatar className="h-full w-full">
+                                  <AvatarImage src={member.avatarUrl || undefined} alt={member.label} />
+                                  <AvatarFallback className="bg-muted/20 text-[9px] font-medium" title={member.label}>
+                                    {member.initials}
+                                  </AvatarFallback>
+                                </Avatar>
+                              </button>
                             ))}
                           </div>
                           <span>{selectedChatMembers.length} участников</span>
@@ -229,10 +263,16 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                         <>
                           <div className="mt-1 flex flex-wrap items-center gap-1.5">
                             {selectedChatMembers.slice(0, 5).map((member: any) => (
-                              <span key={member.userId} className="inline-flex items-center gap-1 rounded-full border border-border/60 px-2 py-0.5 text-[11px] text-muted-foreground">
+                              <button
+                                key={member.userId}
+                                type="button"
+                                className="inline-flex items-center gap-1 rounded-full border border-border/60 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-muted/30"
+                                onClick={() => onOpenUserProfile(member.userId)}
+                                aria-label={`Открыть профиль ${member.label}`}
+                              >
                                 <span className={`h-1.5 w-1.5 rounded-full ${member.online ? 'bg-emerald-500' : 'bg-muted-foreground/40'}`} />
                                 <span className="max-w-[120px] truncate">{member.label}</span>
-                              </span>
+                              </button>
                             ))}
                           </div>
                           <div className="mt-1 text-[11px] text-muted-foreground">
@@ -260,6 +300,19 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                         <UserPlus className="h-4 w-4" />
                       </Button>
                     )}
+                    {canOpenGroupCard && (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-9 w-9 rounded-full border border-transparent hover:border-border/60"
+                        onClick={onOpenGroupCard}
+                        aria-label="Открыть карточку группы"
+                        title="Карточка группы"
+                      >
+                        <Users className="h-4 w-4" />
+                      </Button>
+                    )}
                     <Button type="button" size="icon" variant="ghost" className="h-9 w-9 rounded-full border border-transparent hover:border-border/60" onClick={() => setSearchOpen((prev: boolean) => !prev)} aria-label="Поиск по сообщениям">
                       <Search className="h-4 w-4" />
                     </Button>
@@ -271,8 +324,8 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                         className="h-9 w-9 rounded-full border border-transparent hover:border-border/60"
                         onClick={onRequestDeleteSelectedChat}
                         disabled={deletingChat}
-                        aria-label="Удалить группу"
-                        title="Удалить группу"
+                        aria-label="Удалить чат"
+                        title="Удалить чат"
                       >
                         {deletingChat ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                       </Button>
@@ -315,6 +368,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
                 composerRef={composerRef}
                 handleDeleteMessage={handleDeleteMessage}
                 getUserAvatarUrl={getUserAvatarUrl}
+                onOpenUserProfile={onOpenUserProfile}
                 membersById={membersById}
                 setMediaPreview={setMediaPreview}
                 newMessagesCount={newMessagesCount}

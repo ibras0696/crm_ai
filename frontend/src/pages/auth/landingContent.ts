@@ -99,6 +99,11 @@ export interface LandingContent {
       title: string
       description: string
       releaseBadge: string
+      channels: string[]
+      activeChannel: string
+      membersCount: string
+      messages: Array<{ initials: string; text: string; time: string; self: boolean; gradient: string }>
+      inputPlaceholder: string
     }
   }
   modules: {
@@ -181,7 +186,7 @@ export const LANDING_CONTENT: Record<LandingLocale, LandingContent> = {
       },
       searchPlaceholder: 'Поиск по всей системе...',
       tables: {
-        title: 'Сделки: Департамент Продаж',
+        title: 'Сделки: Отдел Продаж',
         addDeal: 'Сделка',
         headers: ['Проект', 'Статус', 'Ценность', 'Приоритет', 'Владелец'],
         rows: [
@@ -245,7 +250,16 @@ export const LANDING_CONTENT: Record<LandingLocale, LandingContent> = {
         title: 'Корпоративный Мессенджер',
         description:
           'Мгновенная связь с командой, приватные каналы и треды. Полная синхронизация с вашими задачами и CRM.',
-        releaseBadge: 'В разработке — Релиз в Апреле',
+        releaseBadge: 'Доступно сейчас',
+        channels: ['general', 'продажи', 'дизайн', 'разработка'],
+        activeChannel: 'продажи',
+        membersCount: '12 участников',
+        messages: [
+          { initials: 'АК', text: 'Квартальный план выполнен на 127%! AI отлично выбрал приоритетных клиентов.', time: '14:23', self: false, gradient: 'from-violet-500 to-purple-600' },
+          { initials: 'ДР', text: 'Конверсия выросла с 18% до 24.5%. Продолжаем эту стратегию в Q2.', time: '14:24', self: false, gradient: 'from-blue-500 to-cyan-500' },
+          { initials: 'Вы', text: 'Уже настраиваю скоринг по новой модели. Правила будут готовы к пятнице.', time: '14:25', self: true, gradient: 'from-primary to-blue-400' },
+        ],
+        inputPlaceholder: 'Сообщение в #продажи...',
       },
     },
     modules: {
@@ -277,6 +291,10 @@ export const LANDING_CONTENT: Record<LandingLocale, LandingContent> = {
           title: 'Аналитика',
           desc: 'Визуализация данных и выгрузка аналитики по всем модулям системы.',
         },
+        {
+          title: 'Мессенджер',
+          desc: 'Корпоративный чат с каналами, тредами, голосовыми сообщениями и интеграцией с задачами.',
+        },
       ],
     },
     ecosystem: {
@@ -297,8 +315,8 @@ export const LANDING_CONTENT: Record<LandingLocale, LandingContent> = {
           desc: 'Интерактивная аналитика и визуализация ключевых показателей в реальном времени.',
         },
         {
-          title: 'ИИ Чат (Скоро)',
-          desc: 'Персональный ассистент, знающий весь контекст вашего бизнеса и задач.',
+          title: 'Мессенджер',
+          desc: 'Корпоративный чат с каналами, тредами и голосовыми сообщениями.',
         },
       ],
     },
@@ -456,7 +474,16 @@ export const LANDING_CONTENT: Record<LandingLocale, LandingContent> = {
         title: 'Corporate Messenger',
         description:
           'Instant team communication, private channels, and threads. Fully synchronized with your tasks and CRM.',
-        releaseBadge: 'In development - release in April',
+        releaseBadge: 'Available now',
+        channels: ['general', 'sales', 'design', 'dev'],
+        activeChannel: 'sales',
+        membersCount: '12 members',
+        messages: [
+          { initials: 'AK', text: 'Q1 target hit at 127%! AI picked the right clients to focus on.', time: '2:23 PM', self: false, gradient: 'from-violet-500 to-purple-600' },
+          { initials: 'DR', text: 'Conversion jumped from 18% to 24.5%. Keeping this strategy for Q2.', time: '2:24 PM', self: false, gradient: 'from-blue-500 to-cyan-500' },
+          { initials: 'Me', text: 'Already setting up the new scoring rules. Will be ready by Friday.', time: '2:25 PM', self: true, gradient: 'from-primary to-blue-400' },
+        ],
+        inputPlaceholder: 'Message #sales...',
       },
     },
     modules: {
@@ -488,6 +515,10 @@ export const LANDING_CONTENT: Record<LandingLocale, LandingContent> = {
           title: 'Analytics',
           desc: 'Visualize data and export analytics across all system modules.',
         },
+        {
+          title: 'Messenger',
+          desc: 'Corporate chat with channels, threads, voice notes and task integration.',
+        },
       ],
     },
     ecosystem: {
@@ -508,8 +539,8 @@ export const LANDING_CONTENT: Record<LandingLocale, LandingContent> = {
           desc: 'Interactive analytics and real-time KPI visualization.',
         },
         {
-          title: 'AI Chat (Soon)',
-          desc: 'Personal assistant that understands the full context of your business and tasks.',
+          title: 'Messenger',
+          desc: 'Corporate chat with channels, threads, and voice messages.',
         },
       ],
     },

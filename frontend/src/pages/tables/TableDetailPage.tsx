@@ -1773,8 +1773,119 @@ function TableDetailPageContent() {
         </div>
       )}
 
-      <div className="border border-border rounded-lg overflow-x-auto">
-        <table className="min-w-full max-md:min-w-[760px] table-fixed text-sm">
+      {/* Mobile card view */}
+      <div className="md:hidden space-y-2">
+        {showNewRow && (
+          <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
+            <p className="text-xs font-medium text-primary">Новая запись</p>
+            <div className="space-y-2">
+              {columns.map((col: ColumnInfo) => (
+                <div key={col.id} className="space-y-1">
+                  <label className="text-xs text-muted-foreground">
+                    {col.name}{col.is_required && <span className="text-destructive ml-0.5">*</span>}
+                  </label>
+                  <EditableCell
+                    value={newRowData[col.id]}
+                    column={col}
+                    relationOptions={relationOptionsByColumn[col.id]}
+                    onSave={v => setNewRowData(d => ({ ...d, [col.id]: v }))}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={handleAddRecord}
+                disabled={addingRecord}
+                className="flex-1 h-11 rounded-xl bg-primary text-white flex items-center justify-center gap-2 text-sm font-medium disabled:opacity-50 active:scale-[0.98] transition-transform"
+              >
+                {addingRecord ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                Сохранить
+              </button>
+              <button
+                onClick={() => { setNewRowData({}); setShowNewRow(false) }}
+                className="h-11 w-11 rounded-xl border border-border flex items-center justify-center text-muted-foreground hover:bg-secondary active:scale-[0.98] transition-transform"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {pagedRecords.map((record: RecordInfo, idx: number) => {
+          const data = safeRecordData(record.data)
+          const primaryCol = columns.find((c: ColumnInfo) => c.is_primary)
+          const restCols = columns.filter((c: ColumnInfo) => !c.is_primary).slice(0, 5)
+          return (
+            <div key={record.id} className="rounded-xl border border-border bg-card p-4 space-y-3 active:scale-[0.99] transition-transform">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground/50 shrink-0 tabular-nums">{page * PAGE_SIZE + idx + 1}</span>
+                {primaryCol && (
+                  <div className="flex-1 min-w-0">
+                    <EditableCell
+                      value={data[primaryCol.id]}
+                      column={primaryCol}
+                      relationOptions={relationOptionsByColumn[primaryCol.id]}
+                      onSave={v => handleCellSave(record.id, primaryCol.id, v)}
+                    />
+                  </div>
+                )}
+              </div>
+              {restCols.length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-border/50">
+                  {restCols.map((col: ColumnInfo) => (
+                    <div key={col.id} className="flex items-start gap-2">
+                      <span className="text-xs text-muted-foreground shrink-0 w-24 pt-1 truncate">{col.name}</span>
+                      <div className="flex-1 min-w-0">
+                        <EditableCell
+                          value={data[col.id]}
+                          column={col}
+                          relationOptions={relationOptionsByColumn[col.id]}
+                          onSave={v => handleCellSave(record.id, col.id, v)}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center gap-2 pt-1 border-t border-border/50">
+                <button
+                  onClick={() => handleOpenHistory(record.id)}
+                  className="h-11 flex-1 rounded-lg border border-border flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:bg-secondary active:scale-[0.98] transition-transform"
+                >
+                  <History className="h-3.5 w-3.5" />
+                  История
+                </button>
+                <button
+                  onClick={() => handleDeleteRecord(record.id)}
+                  className="h-11 w-11 rounded-lg border border-destructive/30 flex items-center justify-center text-destructive/70 hover:bg-destructive/10 active:scale-[0.98] transition-transform"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )
+        })}
+
+        {pagedRecords.length === 0 && !showNewRow && (
+          <div className="flex flex-col items-center py-16 gap-3 text-muted-foreground">
+            <div className="h-14 w-14 rounded-full border-2 border-dashed border-border flex items-center justify-center">
+              <Plus className="h-6 w-6" />
+            </div>
+            <p className="text-sm">Нет записей</p>
+            <button
+              onClick={handleQuickAddRecord}
+              className="mt-1 h-11 px-6 rounded-xl bg-primary text-white text-sm font-medium active:scale-[0.98] transition-transform"
+            >
+              Добавить первую
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Desktop table view */}
+      <div className="hidden md:block border border-border rounded-lg overflow-x-auto">
+        <table className="min-w-full table-fixed text-sm">
           <colgroup>
             <col className="w-9" />
             <col className="w-10" />
@@ -2335,7 +2446,7 @@ function TableDetailPageContent() {
                         <div className="text-xs text-muted-foreground">Нет данных по измененным ячейкам.</div>
                       ) : (
                         getHistoryCellChanges(item).map((change) => (
-                          <div key={`${item.id}-${change.columnId}`} className="text-xs grid grid-cols-[170px_1fr_20px_1fr] gap-2 items-start">
+                          <div key={`${item.id}-${change.columnId}`} className="text-xs grid grid-cols-[100px_1fr_16px_1fr] sm:grid-cols-[170px_1fr_20px_1fr] gap-2 items-start">
                             <span className="text-muted-foreground truncate">{change.columnName}</span>
                             <span className="rounded px-1.5 py-0.5 bg-background/70 break-words">{valueAsString(change.beforeValue) || '—'}</span>
                             <span className="text-muted-foreground">→</span>
@@ -2370,6 +2481,18 @@ function TableDetailPageContent() {
         onClose={closeColumnDialog}
         onSubmit={submitColumnDialog}
       />
+
+      {/* Mobile FAB — add record */}
+      {columns.length > 0 && (
+        <button
+          onClick={handleQuickAddRecord}
+          className="md:hidden fixed right-6 z-50 h-14 w-14 rounded-full bg-primary text-white shadow-lg flex items-center justify-center active:scale-95 transition-transform"
+          style={{ bottom: 'calc(1.5rem + env(safe-area-inset-bottom, 0px))' }}
+          aria-label="Добавить запись"
+        >
+          <Plus className="h-6 w-6" />
+        </button>
+      )}
     </div>
   )
 }

@@ -1,7 +1,9 @@
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { X } from 'lucide-react'
+import { chatTypeLabel, getInitials } from '../chatHelpers'
 
 export function ChatModals(props: Record<string, unknown>) {
   const {
@@ -33,6 +35,15 @@ export function ChatModals(props: Record<string, unknown>) {
     deletingChat,
     selectedChatTitle,
     handleDeleteSelectedChat,
+    profileModalOpen,
+    setProfileModalOpen,
+    selectedProfileUser,
+    groupCardOpen,
+    setGroupCardOpen,
+    canOpenGroupCard,
+    selectedChatMembers,
+    selectedChatAdmins,
+    selectedChatCreatedByLabel,
   } = props as any
 
   return (
@@ -220,6 +231,142 @@ export function ChatModals(props: Record<string, unknown>) {
               >
                 {deletingChat ? 'Удаление...' : 'Удалить'}
               </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {profileModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setProfileModalOpen(false)}>
+          <Card
+            role="dialog"
+            aria-modal="true"
+            aria-label="Профиль пользователя"
+            className="w-full max-w-md border-border/60"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+              <div className="space-y-1">
+                <CardTitle className="text-base">Профиль пользователя</CardTitle>
+                <p className="text-xs text-muted-foreground">Информация об участнике чата</p>
+              </div>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                onClick={() => setProfileModalOpen(false)}
+                aria-label="Закрыть профиль пользователя"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {!selectedProfileUser ? (
+                <div className="py-4 text-center text-sm text-muted-foreground">Данные участника недоступны</div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-3">
+                    <Avatar className="h-12 w-12 border border-border/70">
+                      <AvatarImage src={selectedProfileUser.avatarUrl || undefined} alt={selectedProfileUser.label} />
+                      <AvatarFallback className="bg-muted/25 text-xs font-semibold">
+                        {getInitials(selectedProfileUser.label).slice(0, 2)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold">{selectedProfileUser.label}</div>
+                      <div className="truncate text-xs text-muted-foreground">{selectedProfileUser.email || 'Email не указан'}</div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2 text-sm">
+                    <div className="rounded-md border border-border/60 bg-background/40 px-3 py-2">
+                      <div className="text-[11px] text-muted-foreground">Роль в организации</div>
+                      <div className="mt-0.5 font-medium">{selectedProfileUser.orgRoleLabel}</div>
+                    </div>
+                    <div className="rounded-md border border-border/60 bg-background/40 px-3 py-2">
+                      <div className="text-[11px] text-muted-foreground">Статус в чате</div>
+                      <div className="mt-0.5 font-medium">{selectedProfileUser.online ? 'Онлайн' : 'Оффлайн'}</div>
+                    </div>
+                    <div className="rounded-md border border-border/60 bg-background/40 px-3 py-2">
+                      <div className="text-[11px] text-muted-foreground">ID пользователя</div>
+                      <div className="mt-0.5 break-all text-xs">{selectedProfileUser.userId}</div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {groupCardOpen && selectedChat && canOpenGroupCard && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setGroupCardOpen(false)}>
+          <Card
+            role="dialog"
+            aria-modal="true"
+            aria-label="Карточка группы"
+            className="w-full max-w-xl border-border/60"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+              <div className="space-y-1">
+                <CardTitle className="text-base">Карточка группы</CardTitle>
+                <p className="text-xs text-muted-foreground">Участники и основные метаданные чата</p>
+              </div>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                onClick={() => setGroupCardOpen(false)}
+                aria-label="Закрыть карточку группы"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <div className="rounded-md border border-border/60 bg-background/40 px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">Название</div>
+                  <div className="mt-0.5 font-medium">{selectedChatTitle || 'Без названия'}</div>
+                </div>
+                <div className="rounded-md border border-border/60 bg-background/40 px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">Тип</div>
+                  <div className="mt-0.5 font-medium">{chatTypeLabel(selectedChat.chat_type)}</div>
+                </div>
+                <div className="rounded-md border border-border/60 bg-background/40 px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">Участники</div>
+                  <div className="mt-0.5 font-medium">{selectedChatMembers.length}</div>
+                </div>
+                <div className="rounded-md border border-border/60 bg-background/40 px-3 py-2">
+                  <div className="text-[11px] text-muted-foreground">Админы</div>
+                  <div className="mt-0.5 font-medium">{selectedChatAdmins.length}</div>
+                </div>
+              </div>
+
+              <div className="rounded-md border border-border/60 bg-background/40 px-3 py-2 text-sm">
+                <div className="text-[11px] text-muted-foreground">Создал чат</div>
+                <div className="mt-0.5">{selectedChatCreatedByLabel || selectedChat.created_by}</div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-xs text-muted-foreground">Состав участников</div>
+                <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border border-border/60 p-2">
+                  {selectedChatMembers.map((member: any) => (
+                    <div key={member.userId} className="flex items-center justify-between gap-2 rounded px-1 py-1.5 text-sm hover:bg-muted/35">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <Avatar className="h-7 w-7 border border-border/70">
+                          <AvatarImage src={member.avatarUrl || undefined} alt={member.label} />
+                          <AvatarFallback className="bg-muted/25 text-[10px] font-semibold">{member.initials}</AvatarFallback>
+                        </Avatar>
+                        <span className="truncate">{member.label}</span>
+                      </div>
+                      <span className={`text-[11px] ${member.online ? 'text-emerald-400' : 'text-muted-foreground'}`}>
+                        {member.online ? 'онлайн' : 'оффлайн'}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>

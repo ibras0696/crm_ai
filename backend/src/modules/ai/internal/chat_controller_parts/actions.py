@@ -285,6 +285,79 @@ def _normalize_action_payload_for_execution(
     return action_payload
 
 
+def _looks_like_schedule_create_request(text: str, ui_intent: str | None) -> bool:
+    """Проверить, похож ли запрос на создание события в расписании.
+
+    Bug fix (Bug 1): added this helper so that when the intent router mis-classifies
+    a schedule request (e.g., user mixed table and schedule keywords), we still attempt
+    a schedule fallback — symmetrical to the existing KB and dashboard fallbacks.
+    """
+    t = (text or "").lower()
+    if ui_intent == "create_schedule_event":
+        return True
+    create_like = any(x in t for x in ("создай", "создать", "добавь", "добавить", "запланир", "create", "add", "schedule"))
+    schedule_like = any(
+        x in t
+        for x in (
+            "встреч", "событи", "расписан", "календар", "встречу", "встреча",
+            "event", "meeting", "calendar", "schedule",
+        )
+    )
+    return create_like and schedule_like
+
+
+def _build_schedule_fallback_action(
+    *,
+    user_message: str,
+    assistant_reply: str,
+) -> dict | None:
+    """Собрать минимальный fallback-action для schedule, если модель не прислала crm_action.
+
+    Bug fix (Bug 1): mirrors the pattern used for KB and dashboard fallbacks.
+    Extracts the title from the user message; start_at is set to midnight UTC of the current
+    day as a safe default — the scheduler service will accept it without crashing.
+    The assistant_reply is used as the event description if available.
+    """
+    if not _looks_like_schedule_create_request(user_message, None):
+        return None
+    from datetime import UTC, datetime
+
+    title = "Новое событие"
+    user_text = (user_message or "").strip()
+    lowered = user_text.lower()
+    for marker in ("создай встречу", "создай событие", "добавь встречу", "добавь событие", "create event", "schedule event"):
+        idx = lowered.find(marker)
+        if idx >= 0:
+            rest = user_text[idx + len(marker):].strip(" :,-")
+            if rest:
+                title = rest[:500]
+                break
+    if title == "Новое событие" and user_text:
+        # Use first 100 chars of message as title fallback
+        title = user_text[:100]
+
+    # Use tomorrow noon UTC as a safe default start time
+    now = datetime.now(UTC)
+    tomorrow_noon = datetime(now.year, now.month, now.day, 12, 0, 0, tzinfo=UTC)
+    from datetime import timedelta
+    tomorrow_noon = tomorrow_noon + timedelta(days=1)
+    start_at_str = tomorrow_noon.isoformat()
+    end_at_str = (tomorrow_noon + timedelta(hours=1)).isoformat()
+
+    description = (assistant_reply or "").strip() or None
+    return {
+        "action": "create_schedule_event",
+        "events": [
+            {
+                "title": title,
+                "start_at": start_at_str,
+                "end_at": end_at_str,
+                "description": description,
+            }
+        ],
+    }
+
+
 def _looks_like_kb_create_request(text: str, ui_intent: str | None) -> bool:
     """Проверить, похож ли запрос на создание страницы/курса в базе знаний."""
     t = (text or "").lower()

@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext'
 import { cn } from '@/lib/utils'
 import Sidebar from './Sidebar'
 import Header from './Header'
+import BottomNav from './BottomNav'
 import { useTranslation } from 'react-i18next'
 
 export default function AppLayout() {
@@ -43,9 +44,10 @@ export default function AppLayout() {
         id="main-content"
       >
         <Header onMenuToggle={() => setMobileMenuOpen(true)} />
-        <main className="flex-1 overflow-y-auto bg-background p-4 md:p-6 scrollbar-thin">
+        <main className="flex-1 overflow-y-auto bg-background p-4 md:p-6 scrollbar-thin pb-[calc(env(safe-area-inset-bottom)+4rem)] md:pb-6">
           <Outlet />
         </main>
+        <BottomNav onMorePress={() => setMobileMenuOpen(true)} />
       </div>
     </div>
   )

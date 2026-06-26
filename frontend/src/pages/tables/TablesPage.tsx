@@ -141,32 +141,32 @@ function TableCard({
       draggable
       onDragStart={() => onDragStart(table.id)}
       onDragEnd={onDragEnd}
-      className={`border-border/50 hover:border-border transition-colors cursor-pointer group relative ${dragging ? 'opacity-50' : ''}`}
+      className={`rounded-2xl border border-border/50 hover:border-border bg-card transition-all cursor-pointer group relative active:scale-[0.98] transition-transform ${dragging ? 'opacity-50' : ''}`}
       onClick={() => navigate(`/tables/${table.id}`)}
     >
-      <CardContent className="p-5">
+      <CardContent className="p-4 min-h-[72px]">
         <div className="flex items-start justify-between">
-          <div className={`rounded-lg p-2.5 ${bgCls}`}>
+          <div className={`rounded-xl p-2.5 ${bgCls}`}>
             <FileText className={`h-5 w-5 ${iconCls ?? 'text-blue-400'}`} />
           </div>
-          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 max-md:opacity-100 transition-opacity">
+          <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 max-md:opacity-100 transition-opacity">
             {folders.length > 0 && (
               <div className="relative">
                 <button
                   onClick={e => { e.stopPropagation(); setShowMove(v => !v) }}
-                  className="text-muted-foreground hover:text-foreground p-1"
+                  className="text-muted-foreground hover:text-foreground h-9 w-9 flex items-center justify-center rounded-full hover:bg-secondary/60 transition-colors"
                   title="Переместить в папку"
                 >
                   <Folder className="h-4 w-4" />
                 </button>
                 {showMove && (
                   <div
-                    className="absolute right-0 top-7 z-50 min-w-[190px] rounded-lg border border-border bg-popover shadow-lg py-1"
+                    className="absolute right-0 top-10 z-50 min-w-[190px] rounded-xl border border-border bg-popover shadow-lg py-1"
                     onClick={e => e.stopPropagation()}
                   >
                     {table.folder_id && (
                       <button
-                        className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
+                        className="w-full text-left px-3 py-2.5 text-sm hover:bg-accent min-h-[44px] flex items-center"
                         onClick={() => { onMoveToFolder(table.id, null); setShowMove(false) }}
                       >
                         В корень
@@ -175,7 +175,7 @@ function TableCard({
                     {folders.filter(f => f.id !== table.folder_id).map(f => (
                       <button
                         key={f.id}
-                        className="w-full text-left px-3 py-1.5 text-sm hover:bg-accent"
+                        className="w-full text-left px-3 py-2.5 text-sm hover:bg-accent min-h-[44px] flex items-center"
                         onClick={() => { onMoveToFolder(table.id, f.id); setShowMove(false) }}
                       >
                         {f.name}
@@ -187,14 +187,14 @@ function TableCard({
             )}
             <button
               onClick={e => { e.stopPropagation(); setEditing(true); setEditName(table.name) }}
-              className="text-muted-foreground hover:text-foreground p-1"
+              className="text-muted-foreground hover:text-foreground h-9 w-9 flex items-center justify-center rounded-full hover:bg-secondary/60 transition-colors"
               title="Переименовать"
             >
               <Pencil className="h-4 w-4" />
             </button>
             <button
               onClick={e => { e.stopPropagation(); onDelete(table.id) }}
-              className="text-muted-foreground hover:text-destructive p-1"
+              className="text-muted-foreground hover:text-destructive h-9 w-9 flex items-center justify-center rounded-full hover:bg-destructive/10 transition-colors"
               title="Удалить"
             >
               <Trash2 className="h-4 w-4" />
@@ -719,8 +719,30 @@ export default function TablesPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      <div className="space-y-6 pb-24 md:pb-6">
+        {/* Skeleton header */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="space-y-2">
+            <div className="h-7 w-32 rounded-lg bg-muted animate-pulse" />
+            <div className="h-4 w-56 rounded-md bg-muted/60 animate-pulse" />
+          </div>
+          <div className="flex gap-2">
+            <div className="h-9 w-20 rounded-lg bg-muted animate-pulse" />
+            <div className="h-9 w-32 rounded-lg bg-muted animate-pulse" />
+          </div>
+        </div>
+        {/* Skeleton cards */}
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="rounded-2xl border border-border bg-card p-4 space-y-3 animate-pulse">
+              <div className="flex items-center justify-between">
+                <div className="h-10 w-10 rounded-lg bg-muted" />
+              </div>
+              <div className="h-5 w-3/4 rounded-md bg-muted" />
+              <div className="h-4 w-1/2 rounded-md bg-muted/60" />
+            </div>
+          ))}
+        </div>
       </div>
     )
   }
@@ -728,7 +750,7 @@ export default function TablesPage() {
   const isEmpty = tables.length === 0 && folders.length === 0
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 pb-24 md:pb-6">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Таблицы</h1>
@@ -866,10 +888,19 @@ export default function TablesPage() {
       )}
 
       {isEmpty ? (
-        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
-          <Table2 className="h-16 w-16 mb-4 opacity-20" />
-          <p className="text-lg font-medium">Нет таблиц</p>
-          <p className="text-sm">Создайте первую таблицу или папку для начала работы</p>
+        <div className="flex flex-col items-center justify-center py-20 text-center text-muted-foreground">
+          <div className="h-20 w-20 rounded-2xl bg-muted/50 flex items-center justify-center mb-5">
+            <Table2 className="h-10 w-10 opacity-40" />
+          </div>
+          <p className="text-lg font-semibold text-foreground">Нет таблиц</p>
+          <p className="text-sm mt-1 max-w-xs">Создайте первую таблицу или папку, чтобы начать работу с данными</p>
+          <Button
+            className="mt-6 gradient-primary border-0 text-white rounded-xl h-11 px-6"
+            onClick={() => { setCreateFolderId(null); setShowCreate(true) }}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Создать таблицу
+          </Button>
         </div>
       ) : (
         <div className="space-y-8">
@@ -947,6 +978,16 @@ export default function TablesPage() {
           </div>
         </div>
       )}
+
+      {/* Mobile FAB — create new table */}
+      <button
+        onClick={() => { setCreateFolderId(null); setShowCreate(v => !v); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+        className="fixed bottom-[5rem] right-4 z-40 md:hidden h-14 w-14 rounded-full bg-primary text-white shadow-xl flex items-center justify-center active:scale-95 transition-transform"
+        aria-label="Создать таблицу"
+        style={{ bottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}
+      >
+        {showCreate ? <X className="h-6 w-6" /> : <Plus className="h-6 w-6" />}
+      </button>
     </div>
   )
 }

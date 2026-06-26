@@ -213,37 +213,49 @@ export default function BillingPage() {
 
   const currentPlan = plans.find((p) => p.name === sub?.plan) ?? null
 
-  if (loading) return <div className="flex items-center justify-center py-32"><div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" /></div>
+  if (loading) return (
+    <div className="flex items-center justify-center py-32">
+      <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+    </div>
+  )
 
   return (
-    <div className="mx-auto w-full max-w-[1680px] space-y-6">
+    <div className="mx-auto w-full max-w-[1680px] space-y-5 pb-24 md:pb-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold flex items-center gap-2"><CreditCard className="h-6 w-6 text-primary" /> Биллинг</h1>
+        <h1 className="text-2xl font-bold flex items-center gap-2">
+          <CreditCard className="h-6 w-6 text-primary" /> Биллинг
+        </h1>
         <p className="text-sm text-muted-foreground mt-0.5">Управление тарифом и использованием ресурсов</p>
       </div>
+
       {errorMessage && (
-        <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+        <div className="rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">
           {errorMessage}
         </div>
       )}
       {successMessage && (
-        <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-600">
+        <div className="rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-600">
           {successMessage}
         </div>
       )}
 
-      {/* Current subscription */}
+      {/* Current subscription — full-width prominent card */}
       {sub && (
-        <div className="rounded-xl border border-border bg-card p-5 flex items-center gap-4 flex-wrap">
-          <div className="flex items-center gap-3 flex-1 min-w-[200px]">
-            <div className="h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
-              <Crown className="h-6 w-6 text-primary" />
+        <div className="rounded-2xl border border-border bg-card p-6">
+          <div className="flex items-center gap-4">
+            <div className="h-14 w-14 rounded-2xl bg-primary/10 flex items-center justify-center shrink-0">
+              <Crown className="h-7 w-7 text-primary" />
             </div>
-            <div>
-              <p className="text-lg font-bold capitalize">{sub.plan === 'free' ? 'Бесплатный' : sub.plan === 'team' ? 'Команда' : sub.plan === 'business' ? 'Бизнес' : sub.plan}</p>
-              <p className="text-xs text-muted-foreground">
-                Статус: <span className={sub.status === 'active' ? 'text-emerald-500' : 'text-amber-500'}>{sub.status === 'active' ? 'Активен' : sub.status}</span>
+            <div className="flex-1 min-w-0">
+              <p className="text-2xl font-black capitalize leading-tight">
+                {sub.plan === 'free' ? 'Бесплатный' : sub.plan === 'team' ? 'Команда' : sub.plan === 'business' ? 'Бизнес' : sub.plan}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Статус:{' '}
+                <span className={sub.status === 'active' ? 'text-emerald-500 font-medium' : 'text-amber-500 font-medium'}>
+                  {sub.status === 'active' ? 'Активен' : sub.status}
+                </span>
                 {sub.current_period_end && <> · до {new Date(sub.current_period_end).toLocaleDateString('ru')}</>}
                 {sub.grace_period_end && <> · льготный период до {new Date(sub.grace_period_end).toLocaleDateString('ru')}</>}
                 {sub.data_purge_at && <> · удаление данных после {new Date(sub.data_purge_at).toLocaleDateString('ru')}</>}
@@ -253,10 +265,32 @@ export default function BillingPage() {
         </div>
       )}
 
+      {/* AI limits — progress bars on mobile */}
       {currentPlan && (
-        <div className="rounded-xl border border-border bg-card p-5">
-          <h3 className="text-base font-semibold">AI лимиты текущего тарифа</h3>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
+        <div className="rounded-2xl border border-border bg-card p-5">
+          <h3 className="text-base font-semibold mb-4">AI лимиты текущего тарифа</h3>
+
+          {/* Mobile: stacked with progress bars */}
+          <div className="flex flex-col gap-4 md:hidden">
+            {[
+              { label: 'Токенов на период', value: Number(currentPlan.ai_tokens_per_day || 0), max: Number(currentPlan.ai_tokens_per_day || 0) },
+              { label: 'Токенов за запрос', value: Number(currentPlan.ai_max_tokens_per_request || 0), max: Number(currentPlan.ai_max_tokens_per_request || 0) },
+              { label: 'Запросов/мин на пользователя', value: Number(currentPlan.ai_rpm_per_user || 0), max: Number(currentPlan.ai_rpm_per_user || 0) },
+            ].map((item) => (
+              <div key={item.label}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs text-muted-foreground">{item.label}</span>
+                  <span className="text-sm font-bold">{item.value.toLocaleString('ru-RU')}</span>
+                </div>
+                <div className="h-2 rounded-full bg-secondary">
+                  <div className="h-2 rounded-full bg-primary" style={{ width: '100%' }} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Desktop: grid */}
+          <div className="hidden md:grid grid-cols-3 gap-3">
             <div className="rounded-lg border border-border p-3">
               <div className="text-xs text-muted-foreground">Токенов на период тарифа</div>
               <div className="text-xl font-bold">{Number(currentPlan.ai_tokens_per_day || 0).toLocaleString('ru-RU')}</div>
@@ -297,7 +331,7 @@ export default function BillingPage() {
       )}
 
       {tokenBalance && (
-        <div className="rounded-[28px] border border-border bg-card p-6 shadow-sm space-y-6">
+        <div className="rounded-[28px] border border-border bg-card p-5 md:p-6 shadow-sm space-y-6">
           <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium text-primary">
             <Zap className="h-3.5 w-3.5" />
             AI токены
@@ -306,7 +340,7 @@ export default function BillingPage() {
           <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.9fr)] gap-4">
             <div className="rounded-3xl border border-primary/15 bg-primary/[0.04] p-5 lg:p-6">
               <div className="text-sm text-muted-foreground">Доступно сейчас</div>
-              <div className="mt-2 text-5xl font-bold tracking-tight">{formatNumber(tokenBalance.total_tokens_remaining)}</div>
+              <div className="mt-2 text-4xl md:text-5xl font-bold tracking-tight">{formatNumber(tokenBalance.total_tokens_remaining)}</div>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
                 Это общий запас токенов, который можно использовать прямо сейчас для запросов к AI.
               </p>
@@ -331,14 +365,14 @@ export default function BillingPage() {
               <div className="mt-5 rounded-2xl border border-border bg-background p-4">
                 <div className="flex items-center justify-between gap-3 text-sm">
                   <span className="text-muted-foreground">Использовано из месячного лимита</span>
-                  <span className="font-medium">
+                  <span className="font-medium tabular-nums">
                     {formatNumber(Math.max(tokenBalance.plan_tokens_monthly_quota - tokenBalance.plan_tokens_remaining, 0))}
                     {' '}из {formatNumber(tokenBalance.plan_tokens_monthly_quota)}
                   </span>
                 </div>
-                <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-secondary/70">
+                <div className="mt-3 h-2 rounded-full bg-secondary">
                   <div
-                    className="h-full rounded-full bg-primary transition-all"
+                    className="h-2 rounded-full bg-primary transition-all"
                     style={{
                       width: `${Math.min(
                         100,
@@ -400,7 +434,60 @@ export default function BillingPage() {
                   Если текущего запаса не хватит, выберите пакет под свою нагрузку. После оплаты токены появятся автоматически.
                 </div>
               </div>
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+              {/* Mobile: vertical stack */}
+              <div className="flex flex-col gap-3 lg:hidden">
+                {tokenPackages.map((p, index) => {
+                  const costPer1k = p.tokens > 0 ? Math.round((p.price_rub_cents / 100 / p.tokens) * 1000) : 0
+                  const meta = getPackageMeta(index, tokenPackages.length)
+                  const badgeText = (p.badge_text || '').trim() || meta.badge
+                  const buttonText = (p.button_text || '').trim() || 'Перейти к оплате'
+                  const priceCaption = (p.price_caption || '').trim() || `${costPer1k.toLocaleString('ru-RU')} ₽ за 1 000 токенов`
+                  return (
+                    <div
+                      key={p.code}
+                      className={`rounded-2xl border p-4 bg-card ${
+                        meta.featured ? 'border-primary/35' : 'border-border'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3 mb-3">
+                        <div>
+                          <p className="text-base font-semibold">{p.display_name}</p>
+                          <p className="text-xs text-muted-foreground">{formatNumber(p.tokens)} токенов</p>
+                        </div>
+                        <div className={`rounded-full px-2.5 py-1 text-[11px] font-medium shrink-0 ${
+                          meta.featured
+                            ? 'border border-primary/30 bg-primary/10 text-primary'
+                            : 'border border-border bg-secondary/40 text-muted-foreground'
+                        }`}>
+                          {badgeText}
+                        </div>
+                      </div>
+                      <div className="flex items-end justify-between gap-3 mb-3">
+                        <div>
+                          <p className="text-3xl font-bold tracking-tight">{(p.price_rub_cents / 100).toLocaleString('ru')} ₽</p>
+                          <p className="text-xs text-muted-foreground mt-0.5">{priceCaption}</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleBuyTokens(p.code)}
+                        disabled={buyingPackage !== null}
+                        className={`w-full h-12 rounded-xl text-sm font-medium transition-all duration-200 disabled:opacity-50 flex items-center justify-center gap-2 ${
+                          meta.featured
+                            ? 'bg-primary text-white hover:bg-primary/90'
+                            : 'border border-primary/30 bg-primary/10 text-primary hover:bg-primary/15'
+                        }`}
+                      >
+                        <Zap className="h-4 w-4" />
+                        {buyingPackage === p.code ? 'Переходим к оплате...' : buttonText}
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Desktop: 3-column grid */}
+              <div className="hidden lg:grid grid-cols-3 gap-4">
                 {tokenPackages.map((p, index) => {
                   const costPer1k = p.tokens > 0 ? Math.round((p.price_rub_cents / 100 / p.tokens) * 1000) : 0
                   const meta = getPackageMeta(index, tokenPackages.length)
@@ -442,7 +529,7 @@ export default function BillingPage() {
 
                       <div className="mt-5 rounded-2xl border border-border bg-muted/10 p-4">
                         <div className="text-xs text-muted-foreground">Стоимость</div>
-                        <div className="mt-2 text-5xl font-bold tracking-tight">{formatPrice(Number(p.price_rub_cents || 0))}</div>
+                        <div className="mt-2 text-5xl font-bold tracking-tight">{(p.price_rub_cents === 0 ? 'Бесплатно' : `${(p.price_rub_cents / 100).toLocaleString('ru')} ₽`)}</div>
                         <div className="mt-3 text-sm text-muted-foreground">
                           {priceCaption}
                         </div>
@@ -475,8 +562,66 @@ export default function BillingPage() {
         </div>
       )}
 
-      {/* Plans */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      {/* Plans — vertical stack on mobile */}
+      <div className="flex flex-col gap-3 md:hidden">
+        {plans.map(plan => {
+          const planKey = plan.name ?? 'free'
+          const colors = PLAN_COLORS[planKey] ?? PLAN_COLORS.free ?? DEFAULT_PLAN_COLORS
+          const price = plan.price_monthly
+          const isCurrent = sub?.plan === plan.name
+          const storageGb = plan.max_storage_mb >= 999999 ? null : (plan.max_storage_mb / 1024)
+          return (
+            <div key={plan.id} className={`rounded-2xl border-2 ${isCurrent ? 'border-primary bg-primary/5' : colors.border} ${isCurrent ? '' : colors.bg} p-4 relative`}>
+              {isCurrent && (
+                <div className="absolute -top-3 left-4 px-3 py-0.5 rounded-full bg-primary text-white text-xs font-bold">
+                  Текущий
+                </div>
+              )}
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${colors.badge}`}>{plan.display_name}</span>
+                  {plan.has_ai && <Sparkles className="h-3.5 w-3.5 text-amber-500" />}
+                </div>
+                <div>
+                  <span className="text-xl font-bold">{formatPrice(price)}</span>
+                  {price > 0 && <span className="text-xs text-muted-foreground ml-1">/мес</span>}
+                </div>
+              </div>
+              <div className="space-y-1.5 mb-4">
+                {[
+                  plan.max_members >= 999999 ? 'Участников: без ограничений' : `${plan.max_members} участников`,
+                  plan.max_tables >= 999999 ? 'Таблиц: без ограничений' : `${plan.max_tables} таблиц`,
+                  plan.max_records >= 999999 ? 'Записей: без ограничений' : `${plan.max_records.toLocaleString('ru')} записей`,
+                  plan.max_storage_mb >= 999999 ? 'Хранилище: без ограничений' : `${storageGb?.toLocaleString('ru', { maximumFractionDigits: 2 })} ГБ хранилище`,
+                  plan.has_ai ? 'AI Агент' : null,
+                ].filter(Boolean).map((feat, i) => (
+                  <div key={i} className="flex items-center gap-2 text-sm">
+                    <Check className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                    <span>{feat}</span>
+                  </div>
+                ))}
+              </div>
+              {!isCurrent && price > 0 ? (
+                <button onClick={() => handleUpgrade(plan.name)} disabled={paying}
+                  className="w-full h-11 rounded-xl bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors flex items-center justify-center gap-1.5 active:scale-[0.98]">
+                  <Zap className="h-3.5 w-3.5" /> {paying ? 'Обработка...' : 'Перейти на тариф'}
+                </button>
+              ) : isCurrent ? (
+                <div className="w-full h-10 rounded-xl border border-primary/30 text-primary text-sm font-medium flex items-center justify-center">
+                  Активен
+                </div>
+              ) : (
+                <div className="w-full h-10 rounded-xl border border-border text-muted-foreground text-sm flex items-center justify-center">
+                  Текущий тариф
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Plans — desktop grid */}
+      <div className="hidden md:grid grid-cols-3 gap-4">
         {plans.map(plan => {
           const planKey = plan.name ?? 'free'
           const colors = PLAN_COLORS[planKey] ?? PLAN_COLORS.free ?? DEFAULT_PLAN_COLORS
@@ -551,27 +696,29 @@ export default function BillingPage() {
           {isOrgOwner && !cancelConfirm && (
             <button
               onClick={() => setCancelConfirm(true)}
-              className="h-9 px-4 rounded-lg border border-destructive/40 text-destructive text-sm font-medium hover:bg-destructive/10 transition-colors"
+              className="w-full md:w-auto h-9 px-4 rounded-lg border border-destructive/40 text-destructive text-sm font-medium hover:bg-destructive/10 transition-colors"
             >
               Отменить подписку
             </button>
           )}
           {isOrgOwner && cancelConfirm && (
-            <div className="flex items-center gap-3">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
               <p className="text-sm font-medium text-destructive">Вы уверены?</p>
-              <button
-                onClick={handleCancelSubscription}
-                disabled={cancelling}
-                className="h-9 px-4 rounded-lg bg-destructive text-white text-sm font-medium hover:bg-destructive/90 disabled:opacity-50 transition-colors"
-              >
-                {cancelling ? 'Отмена...' : 'Да, отменить'}
-              </button>
-              <button
-                onClick={() => setCancelConfirm(false)}
-                className="h-9 px-4 rounded-lg border border-border text-sm font-medium hover:bg-secondary transition-colors"
-              >
-                Нет
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleCancelSubscription}
+                  disabled={cancelling}
+                  className="h-9 px-4 rounded-lg bg-destructive text-white text-sm font-medium hover:bg-destructive/90 disabled:opacity-50 transition-colors"
+                >
+                  {cancelling ? 'Отмена...' : 'Да, отменить'}
+                </button>
+                <button
+                  onClick={() => setCancelConfirm(false)}
+                  className="h-9 px-4 rounded-lg border border-border text-sm font-medium hover:bg-secondary transition-colors"
+                >
+                  Нет
+                </button>
+              </div>
             </div>
           )}
           {!isOrgOwner && (

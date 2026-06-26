@@ -255,6 +255,8 @@ export default function SchedulePage() {
     reminder_offsets_minutes: [] as number[],
   })
   const [editMemberSearch, setEditMemberSearch] = useState('')
+  // Mobile month view: tapped day for inline panel
+  const [selectedDay, setSelectedDay] = useState<Date | null>(null)
 
   const load = useCallback(async () => {
     try {
@@ -537,9 +539,55 @@ export default function SchedulePage() {
   }
 
   return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center gap-3 flex-wrap">
+    <div className="space-y-3 pb-24 md:pb-6">
+      {/* ── Mobile header ────────────────────────────────────────────────── */}
+      <div className="sm:hidden space-y-3">
+        {/* Row 1: prev arrow | month-year title | next arrow */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => nav(-1)}
+            className="h-10 w-10 rounded-full bg-secondary/50 flex items-center justify-center active:scale-95 transition-transform"
+            aria-label="Назад"
+          >
+            <ChevronLeft className="h-5 w-5" />
+          </button>
+          <span className="flex-1 text-center text-base font-semibold capitalize">{title}</span>
+          <button
+            onClick={() => nav(1)}
+            className="h-10 w-10 rounded-full bg-secondary/50 flex items-center justify-center active:scale-95 transition-transform"
+            aria-label="Вперёд"
+          >
+            <ChevronRight className="h-5 w-5" />
+          </button>
+        </div>
+        {/* Row 2: view segmented control + today pill */}
+        <div className="flex items-center gap-2">
+          <div className="flex rounded-full bg-secondary p-1 gap-1 flex-1">
+            {VIEWS.map(v => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                className={`flex-1 rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                  view === v
+                    ? 'bg-background shadow text-foreground'
+                    : 'text-muted-foreground'
+                }`}
+              >
+                {v === 'day' ? 'День' : v === 'month' ? 'Месяц' : 'Год'}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => setCurrent(new Date())}
+            className="rounded-full px-3 py-1.5 text-xs bg-primary text-white font-medium active:scale-95 transition-transform shrink-0"
+          >
+            Сегодня
+          </button>
+        </div>
+      </div>
+
+      {/* ── Desktop header (unchanged) ───────────────────────────────────── */}
+      <div className="hidden sm:flex items-center gap-3 flex-wrap">
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-bold">Расписание</h1>
         </div>
@@ -550,13 +598,13 @@ export default function SchedulePage() {
             </button>
           ))}
         </div>
-        <button onClick={() => openForm()} className="hidden sm:flex items-center gap-1.5 h-9 px-4 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary/90 transition-colors">
+        <button onClick={() => openForm()} className="flex items-center gap-1.5 h-9 px-4 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary/90 transition-colors">
           <Plus className="h-4 w-4" /> Событие
         </button>
       </div>
 
-      {/* Calendar nav */}
-      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+      {/* ── Desktop calendar nav ─────────────────────────────────────────── */}
+      <div className="hidden sm:flex flex-wrap items-center gap-2 sm:gap-3">
         <button onClick={() => nav(-1)} className="h-8 w-8 rounded-md border border-border flex items-center justify-center hover:bg-secondary transition-colors"><ChevronLeft className="h-4 w-4" /></button>
         <span className="flex-1 text-center font-semibold capitalize">{title}</span>
         <button onClick={() => setCurrent(new Date())} className="h-8 px-3 rounded-md border border-border text-xs hover:bg-secondary transition-colors">Сегодня</button>
@@ -566,25 +614,63 @@ export default function SchedulePage() {
       {/* Month view */}
       {view === 'month' && (
         <>
-          {/* Mobile: compact dots grid */}
-          <div className="sm:hidden rounded-xl border border-border bg-card">
-            <div className="grid grid-cols-7 border-b border-border">
-              {DAYS_RU.map(dayLabel => <div key={dayLabel} className="py-2 text-center text-[10px] font-medium text-muted-foreground">{dayLabel}</div>)}
+          {/* Mobile: compact dots grid (native calendar feel) */}
+          <div className="sm:hidden rounded-2xl border border-border bg-card overflow-hidden">
+            {/* Day-of-week header */}
+            <div className="grid grid-cols-7">
+              {DAYS_RU.map(dayLabel => (
+                <div key={dayLabel} className="py-2 text-center text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+                  {dayLabel}
+                </div>
+              ))}
             </div>
+            {/* Day cells */}
             <div className="grid grid-cols-7">
               {buildMonthGrid().map((day, i) => {
-                const isToday = day && isSameDay(day, new Date())
+                const isToday = day ? isSameDay(day, new Date()) : false
+                const isSelected = day && selectedDay ? isSameDay(day, selectedDay) : false
                 const dayEvs = day ? eventsOnDay(day) : []
+                const extraCount = dayEvs.length > 3 ? dayEvs.length - 3 : 0
                 return (
-                  <div key={i} onClick={() => { if (day) { setCurrent(day); setView('day') } }} className={`min-h-[52px] p-1 border-b border-r border-border/30 cursor-pointer flex flex-col items-center gap-1 active:bg-secondary/30 ${!day ? 'bg-secondary/5' : ''} ${isToday ? 'bg-primary/5' : ''}`}>
+                  <div
+                    key={i}
+                    onClick={() => {
+                      if (!day) return
+                      if (selectedDay && isSameDay(day, selectedDay)) {
+                        setSelectedDay(null)
+                      } else {
+                        setSelectedDay(day)
+                      }
+                    }}
+                    className={`aspect-square flex flex-col items-center justify-center gap-[3px] cursor-pointer transition-colors active:bg-secondary/40 ${!day ? 'opacity-0 pointer-events-none' : ''} ${isSelected ? 'bg-primary/8' : ''}`}
+                  >
                     {day && (
                       <>
-                        <span className={`text-xs font-medium inline-flex h-5 w-5 items-center justify-center rounded-full ${isToday ? 'bg-primary text-white' : 'text-foreground'}`}>{day.getDate()}</span>
-                        <div className="flex flex-wrap justify-center gap-[2px]">
-                          {dayEvs.slice(0, 4).map(ev => (
-                            <div key={ev.id} className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: ev.color }} />
-                          ))}
-                        </div>
+                        <span
+                          className={`text-xs font-semibold inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors ${
+                            isToday
+                              ? 'bg-primary text-white'
+                              : isSelected
+                              ? 'bg-primary/15 text-primary'
+                              : 'text-foreground'
+                          }`}
+                        >
+                          {day.getDate()}
+                        </span>
+                        {dayEvs.length > 0 && (
+                          <div className="flex items-center gap-[2px]">
+                            {dayEvs.slice(0, 3).map(ev => (
+                              <div
+                                key={ev.id}
+                                className="h-1 w-1 rounded-full shrink-0"
+                                style={{ background: ev.color }}
+                              />
+                            ))}
+                            {extraCount > 0 && (
+                              <span className="text-[8px] text-muted-foreground leading-none">+{extraCount}</span>
+                            )}
+                          </div>
+                        )}
                       </>
                     )}
                   </div>
@@ -592,6 +678,83 @@ export default function SchedulePage() {
               })}
             </div>
           </div>
+
+          {/* Mobile: selected-day events panel (inline below grid) */}
+          {selectedDay && (
+            <div className="sm:hidden rounded-2xl border border-border bg-card overflow-hidden">
+              {/* Panel header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+                <span className="text-sm font-semibold">
+                  {selectedDay.toLocaleDateString('ru', { weekday: 'long', day: 'numeric', month: 'long' })}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => { openForm(selectedDay) }}
+                    className="h-7 w-7 rounded-full bg-primary/10 text-primary flex items-center justify-center active:scale-95 transition-transform"
+                    aria-label="Добавить событие"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    onClick={() => setSelectedDay(null)}
+                    className="h-7 w-7 rounded-full bg-secondary/50 flex items-center justify-center active:scale-95 transition-transform text-muted-foreground"
+                    aria-label="Закрыть"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+              {/* Events list */}
+              {eventsOnDay(selectedDay).length === 0 ? (
+                <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  <Clock className="h-8 w-8 mx-auto mb-2 opacity-25" />
+                  <p>Нет событий</p>
+                  <button
+                    onClick={() => openForm(selectedDay)}
+                    className="mt-2 text-xs text-primary"
+                  >
+                    Добавить событие
+                  </button>
+                </div>
+              ) : (
+                <div className="divide-y divide-border/50">
+                  {eventsOnDay(selectedDay).map(ev => (
+                    <div
+                      key={ev.id}
+                      onClick={() => openEdit(ev as unknown as Event)}
+                      className="flex items-start gap-3 px-4 py-3 border-l-4 active:scale-[0.98] transition-transform cursor-pointer"
+                      style={{ borderLeftColor: ev.color }}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className={`text-sm font-semibold ${ev.is_done ? 'line-through text-muted-foreground' : ''}`}>
+                          {ev.title}
+                        </p>
+                        {!ev.all_day && (
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {new Date(ev.start_at).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}
+                            {ev.end_at ? ` - ${new Date(ev.end_at).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}` : ''}
+                          </p>
+                        )}
+                        {ev.all_day && <p className="text-xs text-muted-foreground mt-0.5">Весь день</p>}
+                        {ev.recurrence && (
+                          <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                            <Repeat className="h-3 w-3" />
+                            {RECURRENCE.find(r => r.value === ev.recurrence)?.label}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleToggle(ev as unknown as Event) }}
+                        className={`h-7 w-7 rounded-full flex items-center justify-center shrink-0 transition-colors ${ev.is_done ? 'bg-primary/10 text-primary' : 'border border-border text-transparent'}`}
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Desktop: full text grid */}
           <div className="hidden sm:block rounded-xl border border-border bg-card overflow-x-auto">
@@ -627,38 +790,55 @@ export default function SchedulePage() {
 
       {/* Day view */}
       {view === 'day' && (
-        <div className="rounded-xl border border-border bg-card">
+        <div className="rounded-2xl border border-border bg-card overflow-hidden">
           <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-            <span className="font-medium">{dayEvents.length} событий</span>
-            <button onClick={() => openForm(current)} className="text-sm text-primary hover:underline flex items-center gap-1"><Plus className="h-3.5 w-3.5" /> Добавить</button>
+            {/* Mobile: show the date prominently */}
+            <span className="font-semibold text-sm sm:hidden">
+              {current.toLocaleDateString('ru', { weekday: 'long', day: 'numeric', month: 'long' })}
+            </span>
+            <span className="hidden sm:block font-medium">{dayEvents.length} событий</span>
+            <button onClick={() => openForm(current)} className="text-sm text-primary flex items-center gap-1"><Plus className="h-3.5 w-3.5" /> Добавить</button>
           </div>
           {dayEvents.length === 0 ? (
             <div className="py-16 text-center text-muted-foreground">
               <Clock className="h-10 w-10 mx-auto mb-2 opacity-30" />
               <p>Нет событий на этот день</p>
-              <button onClick={() => openForm(current)} className="mt-3 text-sm text-primary hover:underline">Добавить событие</button>
+              <button onClick={() => openForm(current)} className="mt-3 text-sm text-primary">Добавить событие</button>
             </div>
           ) : (
-            <div className="divide-y divide-border">
+            <div className="divide-y divide-border/50 px-2 py-2 space-y-1 sm:space-y-0 sm:px-0 sm:py-0">
               {dayEvents.map(ev => (
-                <div key={ev.id} className="flex items-start gap-3 px-4 py-3 hover:bg-secondary/10 transition-colors group cursor-pointer" onClick={() => openEdit(ev)}>
-                  <div className="h-3 w-3 rounded-full mt-1.5 shrink-0" style={{ background: ev.color }} />
+                <div
+                  key={ev.id}
+                  onClick={() => openEdit(ev)}
+                  className="flex items-start gap-3 rounded-2xl border border-border bg-card sm:rounded-none sm:border-0 sm:bg-transparent p-3 sm:px-4 sm:py-3 border-l-4 hover:bg-secondary/10 active:scale-[0.98] transition-all cursor-pointer group"
+                  style={{ borderLeftColor: ev.color }}
+                >
                   <div className="flex-1 min-w-0">
-                    <p className={`font-medium ${ev.is_done ? 'line-through text-muted-foreground' : ''}`}>{ev.title}</p>
+                    <p className={`text-sm font-semibold ${ev.is_done ? 'line-through text-muted-foreground' : ''}`}>{ev.title}</p>
                     {ev.description && (
-                      <p className="mt-0.5 text-sm text-muted-foreground">
+                      <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">
                         {linkifyTextToNodes(ev.description)}
                       </p>
                     )}
                     <div className="flex items-center gap-3 mt-1">
-                      {!ev.all_day && <span className="text-xs text-muted-foreground">{new Date(ev.start_at).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}{ev.end_at ? ` — ${new Date(ev.end_at).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}` : ''}</span>}
-                      {ev.recurrence && <span className="text-xs text-muted-foreground flex items-center gap-0.5"><Repeat className="h-3 w-3" /> {RECURRENCE.find(r => r.value === ev.recurrence)?.label}</span>}
+                      {!ev.all_day && (
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(ev.start_at).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}
+                          {ev.end_at ? ` - ${new Date(ev.end_at).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })}` : ''}
+                        </span>
+                      )}
+                      {ev.recurrence && (
+                        <span className="text-xs text-muted-foreground flex items-center gap-0.5">
+                          <Repeat className="h-3 w-3" /> {RECURRENCE.find(r => r.value === ev.recurrence)?.label}
+                        </span>
+                      )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
-                    <button onClick={(e) => { e.stopPropagation(); handleToggle(ev) }} className={`h-7 w-7 rounded flex items-center justify-center transition-colors ${ev.is_done ? 'text-primary' : 'text-muted-foreground hover:text-primary'}`}><Check className="h-4 w-4" /></button>
-                    <button onClick={(e) => { e.stopPropagation(); openEdit(ev) }} className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:text-primary transition-colors"><Edit3 className="h-4 w-4" /></button>
-                    <button onClick={(e) => { e.stopPropagation(); handleDelete(ev.id) }} className="h-7 w-7 rounded flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="h-4 w-4" /></button>
+                  <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity shrink-0">
+                    <button onClick={(e) => { e.stopPropagation(); handleToggle(ev) }} className={`h-7 w-7 rounded-full flex items-center justify-center transition-colors ${ev.is_done ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:text-primary'}`}><Check className="h-4 w-4" /></button>
+                    <button onClick={(e) => { e.stopPropagation(); openEdit(ev) }} className="h-7 w-7 rounded-full flex items-center justify-center text-muted-foreground hover:text-primary transition-colors"><Edit3 className="h-4 w-4" /></button>
+                    <button onClick={(e) => { e.stopPropagation(); handleDelete(ev.id) }} className="h-7 w-7 rounded-full flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"><Trash2 className="h-4 w-4" /></button>
                   </div>
                 </div>
               ))}
@@ -1032,8 +1212,8 @@ export default function SchedulePage() {
       {/* Mobile FAB — add event */}
       <button
         onClick={() => openForm()}
-        className="sm:hidden fixed right-6 z-50 h-14 w-14 rounded-full bg-primary text-white shadow-lg flex items-center justify-center active:scale-95 transition-transform"
-        style={{ bottom: 'calc(1.5rem + env(safe-area-inset-bottom, 0px))' }}
+        className="sm:hidden fixed right-4 z-40 h-14 w-14 rounded-full bg-primary text-white shadow-xl flex items-center justify-center active:scale-95 transition-transform"
+        style={{ bottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}
         aria-label="Добавить событие"
       >
         <Plus className="h-6 w-6" />

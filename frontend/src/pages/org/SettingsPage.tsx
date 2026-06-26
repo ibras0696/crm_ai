@@ -1,7 +1,6 @@
-﻿import { useEffect, useMemo, useState, type ChangeEvent } from 'react'
+import { useEffect, useMemo, useState, type ChangeEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -138,208 +137,273 @@ export default function SettingsPage() {
     }
   }
 
+  // Shared field-row styles
+  const fieldRow = 'flex flex-col gap-1.5 px-4 py-3.5 bg-card border-b border-border/60 last:border-0 min-h-[64px]'
+  const selectCls =
+    'flex h-10 w-full rounded-md border border-input bg-secondary/50 px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+
+  const avatarInitials =
+    `${profileForm.first_name || ''} ${profileForm.last_name || ''}`.trim().slice(0, 2).toUpperCase() || 'U'
+
   return (
-    <div className="space-y-8 max-w-3xl">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">{t('settings:title')}</h1>
-        <p className="text-muted-foreground mt-1">{t('settings:subtitle')}</p>
+    <div className="pb-24 md:pb-6 touch-pan-y max-w-2xl md:mx-0">
+      {/* Page header */}
+      <div className="px-4 pt-2 pb-4 md:px-0 md:pt-0">
+        <h1 className="text-xl font-bold tracking-tight md:text-2xl">{t('settings:title')}</h1>
+        <p className="text-muted-foreground mt-0.5 text-sm">{t('settings:subtitle')}</p>
       </div>
 
-      <Card className="border-border/50">
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-blue-500/10 p-2">
-              <User className="h-5 w-5 text-blue-400" />
-            </div>
-            <div>
-              <CardTitle className="text-lg">{t('settings:profile.title')}</CardTitle>
-              <CardDescription>{t('settings:profile.description')}</CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center gap-3">
-            <Avatar className="h-14 w-14 border border-border/60">
+      {/* ── PROFILE section ──────────────────────────────── */}
+      <section className="mb-6">
+        {/* Avatar hero — centered, iOS-style profile top */}
+        <div className="flex flex-col items-center gap-2 py-6 px-4 bg-card border border-border rounded-2xl mx-4 md:mx-0 mb-4">
+          <div className="relative">
+            <Avatar className="h-20 w-20 border-2 border-border/60">
               <AvatarImage src={profileForm.avatar_url || undefined} alt="avatar" />
-              <AvatarFallback>{`${profileForm.first_name || ''} ${profileForm.last_name || ''}`.trim().slice(0, 2).toUpperCase() || 'U'}</AvatarFallback>
+              <AvatarFallback className="text-lg font-semibold">{avatarInitials}</AvatarFallback>
             </Avatar>
-            <div className="space-y-2">
-              <Label htmlFor="profile-avatar-upload">Аватар</Label>
-              <Input
-                id="profile-avatar-upload"
-                type="file"
-                accept="image/png,image/jpeg,image/gif,image/webp"
-                onChange={(e) => void handleAvatarUpload(e)}
-                disabled={avatarUploading}
-                className="bg-secondary/50"
-              />
-              <p className="text-xs text-muted-foreground">
-                {avatarUploading ? 'Загрузка...' : 'PNG/JPG/GIF/WEBP, загрузка в хранилище организации'}
-              </p>
-            </div>
+            {avatarUploading && (
+              <div className="absolute inset-0 flex items-center justify-center rounded-full bg-background/70">
+                <Loader2 className="h-5 w-5 animate-spin" />
+              </div>
+            )}
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>{t('settings:fields.firstName')}</Label>
-              <Input
-                value={profileForm.first_name}
-                onChange={(e) => setProfileForm((p) => ({ ...p, first_name: e.target.value }))}
-                className="bg-secondary/50"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>{t('settings:fields.lastName')}</Label>
-              <Input
-                value={profileForm.last_name}
-                onChange={(e) => setProfileForm((p) => ({ ...p, last_name: e.target.value }))}
-                className="bg-secondary/50"
-              />
-            </div>
+          <div className="text-center">
+            <p className="font-semibold text-base">
+              {profileForm.first_name} {profileForm.last_name}
+            </p>
+            <p className="text-xs text-muted-foreground">{user?.email}</p>
           </div>
-          <div className="space-y-2">
-            <Label>{t('settings:fields.email')}</Label>
-            <Input defaultValue={user?.email} disabled className="bg-secondary/30 opacity-60" />
-            <p className="text-xs text-muted-foreground">{t('settings:hints.emailReadonly')}</p>
+          <div className="w-full max-w-[240px]">
+            <Label htmlFor="profile-avatar-upload" className="sr-only">Аватар</Label>
+            <Input
+              id="profile-avatar-upload"
+              type="file"
+              accept="image/png,image/jpeg,image/gif,image/webp"
+              onChange={(e) => void handleAvatarUpload(e)}
+              disabled={avatarUploading}
+              className="bg-secondary/50 text-xs cursor-pointer"
+            />
+            <p className="text-[11px] text-muted-foreground mt-1 text-center">
+              {avatarUploading ? 'Загрузка...' : 'PNG / JPG / GIF / WEBP'}
+            </p>
           </div>
-          <div className="space-y-2">
-            <Label>{t('settings:fields.timezone')}</Label>
+        </div>
+
+        {/* Section label */}
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-4 mb-2">
+          <User className="inline h-3 w-3 mr-1.5 -mt-px" />
+          {t('settings:profile.title')}
+        </p>
+
+        {/* Settings rows grouped in a card */}
+        <div className="rounded-2xl overflow-hidden border border-border mx-4 md:mx-0">
+          {/* First name */}
+          <div className={fieldRow}>
+            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {t('settings:fields.firstName')}
+            </Label>
+            <Input
+              value={profileForm.first_name}
+              onChange={(e) => setProfileForm((p) => ({ ...p, first_name: e.target.value }))}
+              className="bg-secondary/50 w-full"
+            />
+          </div>
+          {/* Last name */}
+          <div className={fieldRow}>
+            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {t('settings:fields.lastName')}
+            </Label>
+            <Input
+              value={profileForm.last_name}
+              onChange={(e) => setProfileForm((p) => ({ ...p, last_name: e.target.value }))}
+              className="bg-secondary/50 w-full"
+            />
+          </div>
+          {/* Email (readonly) */}
+          <div className={fieldRow}>
+            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {t('settings:fields.email')}
+            </Label>
+            <Input
+              defaultValue={user?.email}
+              disabled
+              className="bg-secondary/30 opacity-60 w-full"
+            />
+            <p className="text-[11px] text-muted-foreground">{t('settings:hints.emailReadonly')}</p>
+          </div>
+          {/* Timezone */}
+          <div className={fieldRow}>
+            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {t('settings:fields.timezone')}
+            </Label>
             <select
               value={profileForm.timezone}
               onChange={(e) => setProfileForm((p) => ({ ...p, timezone: e.target.value }))}
-              className="flex h-10 w-full rounded-md border border-input bg-secondary/50 px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className={selectCls}
             >
               {timezoneOptions.map((tz) => (
-                <option key={tz.value} value={tz.value}>
-                  {tz.label}
-                </option>
+                <option key={tz.value} value={tz.value}>{tz.label}</option>
               ))}
             </select>
-            <p className="text-xs text-muted-foreground">{t('settings:hints.timezone')}</p>
+            <p className="text-[11px] text-muted-foreground">{t('settings:hints.timezone')}</p>
           </div>
+          {/* Locale (conditional) */}
           {localeEnabled && (
-            <div className="space-y-2">
-              <Label>{t('settings:fields.locale')}</Label>
+            <div className={fieldRow}>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                {t('settings:fields.locale')}
+              </Label>
               <select
                 value={profileForm.locale}
                 onChange={(e) => setProfileForm((p) => ({ ...p, locale: e.target.value as 'ru' | 'en' }))}
-                className="flex h-10 w-full rounded-md border border-input bg-secondary/50 px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className={selectCls}
               >
                 <option value="ru">{t('common:language.russian')}</option>
                 <option value="en">{t('common:language.english')}</option>
               </select>
             </div>
           )}
-          <Button className="gradient-primary border-0 text-white" onClick={saveProfile} disabled={profileLoading}>
-            {profileLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : profileSaved ? <Check className="h-4 w-4 mr-2" /> : null}
+        </div>
+
+        {/* Save profile button */}
+        <div className="px-4 md:px-0 mt-3">
+          <Button
+            className="gradient-primary border-0 text-white w-full md:w-auto"
+            onClick={saveProfile}
+            disabled={profileLoading}
+          >
+            {profileLoading
+              ? <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              : profileSaved
+              ? <Check className="h-4 w-4 mr-2" />
+              : null}
             {profileSaved ? t('settings:actions.saved') : t('settings:actions.save')}
           </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
-      <Card className="border-border/50">
-        <CardHeader>
-          <div className="flex items-center gap-3">
-            <div className="rounded-lg bg-purple-500/10 p-2">
-              <Building2 className="h-5 w-5 text-purple-400" />
-            </div>
-            <div>
-              <CardTitle className="text-lg">{t('settings:organization.title')}</CardTitle>
-              <CardDescription>{t('settings:organization.description')}</CardDescription>
-            </div>
+      {/* ── ORGANIZATION section ─────────────────────────── */}
+      <section className="mb-6">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-4 mb-2">
+          <Building2 className="inline h-3 w-3 mr-1.5 -mt-px" />
+          {t('settings:organization.title')}
+        </p>
+        <div className="rounded-2xl overflow-hidden border border-border mx-4 md:mx-0">
+          <div className={fieldRow}>
+            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {t('settings:organization.name')}
+            </Label>
+            <Input
+              value={orgName}
+              onChange={(e) => setOrgName(e.target.value)}
+              className="bg-secondary/50 w-full"
+            />
           </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label>{t('settings:organization.name')}</Label>
-            <Input value={orgName} onChange={(e) => setOrgName(e.target.value)} className="bg-secondary/50" />
+          <div className={fieldRow}>
+            <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {t('settings:organization.slug')}
+            </Label>
+            <Input
+              defaultValue={org?.slug}
+              disabled
+              className="bg-secondary/30 opacity-60 font-mono text-sm w-full"
+            />
           </div>
-          <div className="space-y-2">
-            <Label>{t('settings:organization.slug')}</Label>
-            <Input defaultValue={org?.slug} disabled className="bg-secondary/30 opacity-60 font-mono text-sm" />
-          </div>
-          <Button className="gradient-primary border-0 text-white" onClick={saveOrg} disabled={orgLoading}>
-            {orgLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : orgSaved ? <Check className="h-4 w-4 mr-2" /> : null}
+        </div>
+        <div className="px-4 md:px-0 mt-3">
+          <Button
+            className="gradient-primary border-0 text-white w-full md:w-auto"
+            onClick={saveOrg}
+            disabled={orgLoading}
+          >
+            {orgLoading
+              ? <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              : orgSaved
+              ? <Check className="h-4 w-4 mr-2" />
+              : null}
             {orgSaved ? t('settings:actions.saved') : t('settings:organization.update')}
           </Button>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
-      <Card className="border-border/50">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="rounded-lg bg-emerald-500/10 p-2">
-                <CreditCard className="h-5 w-5 text-emerald-400" />
-              </div>
-              <div>
-                <CardTitle className="text-lg">{t('settings:billing.title')}</CardTitle>
-                <CardDescription>{t('settings:billing.description')}</CardDescription>
-              </div>
+      {/* ── BILLING section ──────────────────────────────── */}
+      <section className="mb-6">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-4 mb-2">
+          <CreditCard className="inline h-3 w-3 mr-1.5 -mt-px" />
+          {t('settings:billing.title')}
+        </p>
+        <div className="rounded-2xl overflow-hidden border border-border mx-4 md:mx-0">
+          {/* Plan summary row */}
+          <div className="flex items-center justify-between px-4 py-3.5 min-h-[56px] border-b border-border/60">
+            <div>
+              <p className="text-sm font-medium">{t('settings:billing.freePlan')}</p>
+              <p className="text-xs text-muted-foreground">{t('settings:billing.freePlanDetails')}</p>
             </div>
-            <Badge variant={org?.plan === 'free' ? 'secondary' : 'default'} className="uppercase text-xs">
-              {org?.plan ?? 'free'}
-            </Badge>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="rounded-xl border border-border/50 bg-secondary/20 p-6 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-semibold">{t('settings:billing.freePlan')}</p>
-                <p className="text-sm text-muted-foreground">{t('settings:billing.freePlanDetails')}</p>
-              </div>
-              <p className="text-2xl font-bold">
-                0 ₽
-                <span className="text-sm font-normal text-muted-foreground">{t('settings:billing.perMonth')}</span>
+            <div className="flex items-center gap-2 shrink-0">
+              <Badge variant={org?.plan === 'free' ? 'secondary' : 'default'} className="uppercase text-xs">
+                {org?.plan ?? 'free'}
+              </Badge>
+              <p className="text-lg font-bold">
+                0 <span className="text-xs font-normal text-muted-foreground">₽{t('settings:billing.perMonth')}</span>
               </p>
             </div>
-            <Separator className="bg-border/50" />
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Globe className="h-4 w-4" />
-                <span>{t('settings:billing.usersLimit')}</span>
-              </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Lock className="h-4 w-4" />
-                <span>{t('settings:billing.rbacBasic')}</span>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                className="gradient-primary border-0 text-white flex-1"
-                onClick={() => navigate('/billing')}
-              >
-                {t('settings:billing.openBilling')}
-              </Button>
-              <Badge variant="secondary" className="text-xs">
-                {t('settings:billing.teamSoon')}
-              </Badge>
-            </div>
           </div>
-        </CardContent>
-      </Card>
+          <Separator className="bg-border/50" />
+          {/* Feature rows */}
+          <div className="flex items-center gap-3 px-4 py-3 min-h-[48px] border-b border-border/40">
+            <Globe className="h-4 w-4 text-muted-foreground shrink-0" />
+            <span className="text-sm text-muted-foreground">{t('settings:billing.usersLimit')}</span>
+          </div>
+          <div className="flex items-center gap-3 px-4 py-3 min-h-[48px]">
+            <Lock className="h-4 w-4 text-muted-foreground shrink-0" />
+            <span className="text-sm text-muted-foreground">{t('settings:billing.rbacBasic')}</span>
+          </div>
+        </div>
+        <div className="px-4 md:px-0 mt-3 flex items-center gap-2">
+          <Button
+            className="gradient-primary border-0 text-white flex-1 md:flex-none"
+            onClick={() => navigate('/billing')}
+          >
+            {t('settings:billing.openBilling')}
+          </Button>
+          <Badge variant="secondary" className="text-xs shrink-0">
+            {t('settings:billing.teamSoon')}
+          </Badge>
+        </div>
+      </section>
 
-      <Card className="border-destructive/20">
-        <CardHeader>
-          <CardTitle className="text-lg text-destructive">{t('settings:dangerZone.title')}</CardTitle>
-          <CardDescription>{t('settings:dangerZone.description')}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex items-center justify-between rounded-lg border border-destructive/20 p-4">
-            <div>
+      {/* ── DANGER ZONE section ──────────────────────────── */}
+      <section className="mb-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-destructive/70 px-4 mb-2">
+          {t('settings:dangerZone.title')}
+        </p>
+        <div className="rounded-2xl overflow-hidden border border-destructive/20 mx-4 md:mx-0">
+          <div className="flex items-center justify-between px-4 py-3.5 min-h-[60px]">
+            <div className="flex-1 min-w-0 pr-3">
               <p className="text-sm font-medium">{t('settings:dangerZone.deleteOrgTitle')}</p>
               <p className="text-xs text-muted-foreground">{t('settings:dangerZone.deleteOrgDescription')}</p>
             </div>
             {isOrgOwner ? (
-              <Button variant="destructive" size="sm" onClick={deleteOrg} disabled={deleteLoading}>
-                {deleteLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : t('settings:dangerZone.delete')}
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={deleteOrg}
+                disabled={deleteLoading}
+                className="shrink-0"
+              >
+                {deleteLoading
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : t('settings:dangerZone.delete')}
               </Button>
             ) : (
-              <Badge variant="secondary" className="text-xs">{t('settings:dangerZone.ownerOnly')}</Badge>
+              <Badge variant="secondary" className="text-xs shrink-0">
+                {t('settings:dangerZone.ownerOnly')}
+              </Badge>
             )}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
     </div>
   )
 }

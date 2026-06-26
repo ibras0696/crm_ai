@@ -11,22 +11,30 @@ import {
   type TableInfo,
 } from '@/lib/api'
 import CapabilitiesMenu from '@/components/ai/CapabilitiesMenu'
-import { ActionErrorPreview, DashboardPreview, DocumentPreview, KnowledgePreview, PendingActionPreview, SchedulePreview, TablePreview } from '@/components/ai/ActionPreviews'
+import {
+  ActionErrorPreview,
+  DashboardPreview,
+  DocumentPreview,
+  KnowledgePreview,
+  PendingActionPreview,
+  SchedulePreview,
+  TablePreview,
+} from '@/components/ai/ActionPreviews'
 import StatsTab from '@/components/ai/StatsTab'
 import ChatHistory from '@/components/ai/ChatHistory'
 import ContextHoverPickers from '@/components/ai/ContextHoverPickers'
 import {
-  Send,
-  Bot,
+  PaperPlaneTilt,
+  Robot,
   User,
-  RefreshCw,
+  ArrowClockwise,
   Plus,
-  History,
-  Sparkles,
-  MessageSquareDashed,
+  ClockCounterClockwise,
+  Sparkle,
+  ChatDots,
   X,
-  Languages,
-} from 'lucide-react'
+  Translate,
+} from '@phosphor-icons/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { isAxiosError } from 'axios'
@@ -77,6 +85,72 @@ const EXAMPLES = [
   'Сделай сводку по задачам команды за неделю',
 ]
 
+// Custom markdown components — no @tailwindcss/typography needed
+const mdComponents: React.ComponentProps<typeof ReactMarkdown>['components'] = {
+  p: (props) => <p className="my-1.5 leading-relaxed [overflow-wrap:anywhere]" {...props} />,
+  h1: (props) => <h1 className="text-base font-semibold mt-3 mb-1.5 leading-snug" {...props} />,
+  h2: (props) => <h2 className="text-sm font-semibold mt-3 mb-1 leading-snug" {...props} />,
+  h3: (props) => <h3 className="text-sm font-medium mt-2 mb-1 leading-snug" {...props} />,
+  ul: (props) => <ul className="my-1.5 ml-4 space-y-0.5 list-disc" {...props} />,
+  ol: (props) => <ol className="my-1.5 ml-4 space-y-0.5 list-decimal" {...props} />,
+  li: (props) => <li className="leading-relaxed" {...props} />,
+  strong: (props) => <strong className="font-semibold" {...props} />,
+  em: (props) => <em className="italic" {...props} />,
+  blockquote: (props) => (
+    <blockquote
+      className="my-2 border-l-2 border-border pl-3 text-muted-foreground italic"
+      {...props}
+    />
+  ),
+  table: (props) => (
+    <div className="overflow-x-auto my-2 rounded-lg border border-border">
+      <table className="min-w-full text-xs border-collapse" {...props} />
+    </div>
+  ),
+  thead: (props) => <thead className="bg-muted/60" {...props} />,
+  th: (props) => (
+    <th
+      className="border-b border-border px-3 py-1.5 text-left font-semibold text-foreground"
+      {...props}
+    />
+  ),
+  td: (props) => (
+    <td className="border-b border-border/50 px-3 py-1.5 last:border-b-0" {...props} />
+  ),
+  tr: (props) => <tr className="even:bg-muted/20" {...props} />,
+  code: ({ className, children, ...props }: React.HTMLAttributes<HTMLElement> & { className?: string; children?: React.ReactNode }) => {
+    const isBlock = className?.startsWith('language-')
+    if (isBlock) {
+      return (
+        <code
+          className="block bg-muted rounded-xl p-3 text-[11px] font-mono overflow-x-auto whitespace-pre leading-relaxed [overflow-wrap:anywhere]"
+          {...props}
+        >
+          {children}
+        </code>
+      )
+    }
+    return (
+      <code
+        className="bg-muted/70 rounded px-1 py-0.5 text-[11px] font-mono [overflow-wrap:anywhere] break-all"
+        {...props}
+      >
+        {children}
+      </code>
+    )
+  },
+  pre: ({ children }) => <pre className="my-2 [overflow-wrap:anywhere]">{children}</pre>,
+  a: (props) => (
+    <a
+      className="text-primary underline underline-offset-2 hover:opacity-80 transition-opacity"
+      target="_blank"
+      rel="noopener noreferrer"
+      {...props}
+    />
+  ),
+  hr: () => <hr className="my-3 border-border/50" />,
+}
+
 export default function AIPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
@@ -93,7 +167,10 @@ export default function AIPage() {
   const [language, setLanguage] = useState<'ru' | 'ce' | 'en'>('ru')
   const [languageMenuOpen, setLanguageMenuOpen] = useState(false)
 
-  const [contextSources, setContextSources] = useState<{ kb_pages: AIContextSourcePage[]; tables: AIContextSourceTable[] }>({ kb_pages: [], tables: [] })
+  const [contextSources, setContextSources] = useState<{
+    kb_pages: AIContextSourcePage[]
+    tables: AIContextSourceTable[]
+  }>({ kb_pages: [], tables: [] })
   const [contextTableFolders, setContextTableFolders] = useState<FolderInfo[]>([])
   const [contextTableFolderById, setContextTableFolderById] = useState<Record<string, string | null>>({})
   const [includeContext] = useState(true)
@@ -199,8 +276,14 @@ export default function AIPage() {
     loadContextSources()
   }, [loadStatus, loadChats, loadContextSources])
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
-  useEffect(() => { loadChatMessages(currentChatId) }, [currentChatId, loadChatMessages])
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  useEffect(() => {
+    loadChatMessages(currentChatId)
+  }, [currentChatId, loadChatMessages])
+
   useEffect(() => {
     const onMouseDown = (event: MouseEvent) => {
       if (!languageMenuRef.current) return
@@ -248,14 +331,22 @@ export default function AIPage() {
         if (d.chat_id && d.chat_id !== currentChatId) setCurrentChatId(d.chat_id)
         await loadChats()
         loadStatus()
-        // Сбрасываем режим, если AI реально выполнил действие (чтобы не было случайных повторов).
-        if ((d.action_result as any)?.ok) setUiIntent(null)
+        if ((d.action_result as Record<string, unknown> | null)?.ok) setUiIntent(null)
       } else {
         const err = (r.data as { error?: { message?: string } }).error
-        setMessages((prev) => [...prev, { role: 'assistant', content: `Ошибка: ${err?.message || 'Неизвестная ошибка'}` }])
+        setMessages((prev) => [
+          ...prev,
+          { role: 'assistant', content: `Ошибка: ${err?.message || 'Неизвестная ошибка'}` },
+        ])
       }
     } catch (e: unknown) {
-      setMessages((prev) => [...prev, { role: 'assistant', content: `Ошибка соединения: ${e instanceof Error ? e.message : String(e)}` }])
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: `Ошибка соединения: ${e instanceof Error ? e.message : String(e)}`,
+        },
+      ])
     }
     setSending(false)
   }
@@ -304,156 +395,225 @@ export default function AIPage() {
     return -1
   })()
 
+  const statusLabel = loadingStatus
+    ? 'Загрузка...'
+    : statusError === 'auth'
+      ? 'Требуется вход — обновите страницу'
+      : statusError
+        ? 'Нет доступа к AI API'
+        : status?.enabled === false
+          ? 'AI отключен администратором'
+          : status?.configured
+            ? 'AI агент подключен'
+            : 'AI не настроен — задайте OPENAI_BEARER_TOKEN'
+
+  const isDisabled = sending || statusError === 'auth' || status?.enabled === false || !status?.configured
+
   return (
-    <div className="flex h-[calc(100dvh-8rem)] flex-col gap-0 overflow-hidden md:h-[calc(100vh-8rem)]">
-      <div className="flex items-center gap-3 pb-4 flex-wrap">
+    <div className="flex h-[calc(100dvh-8rem)] flex-col overflow-hidden md:h-[calc(100vh-8rem)]">
+      {/* Page header */}
+      <div className="flex items-center gap-3 pb-3 flex-wrap shrink-0">
         <div className="flex-1 min-w-0">
-          <h1 className="text-2xl font-bold flex items-center gap-2"><Bot className="h-6 w-6 text-primary" /> AI Агент</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {loadingStatus
-              ? 'Загрузка...'
-              : statusError === 'auth'
-                ? 'Требуется вход. Обновите страницу или войдите заново.'
-                : statusError
-                  ? 'Не удалось получить статус AI. Проверьте доступ к API.'
-                  : status?.enabled === false
-                    ? 'AI отключен администратором.'
-                    : status?.configured
-                      ? 'AI агент подключен'
-                      : 'AI не настроен на сервере: задайте OPENAI_BEARER_TOKEN (через secrets.yml или переменные окружения) и перезапустите backend.'}
-          </p>
+          <h1 className="text-xl font-semibold flex items-center gap-2">
+            <Robot className="h-5 w-5 text-primary" weight="fill" />
+            AI Агент
+          </h1>
+          <p className="text-xs text-muted-foreground mt-0.5 truncate">{statusLabel}</p>
         </div>
         <div className="flex items-center gap-1 rounded-lg border border-border p-0.5 bg-secondary/30">
           {(['chat', 'stats'] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
-              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${tab === t ? 'bg-background shadow text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                tab === t
+                  ? 'bg-background shadow text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
             >
               {t === 'chat' ? 'Чат' : 'Статистика'}
             </button>
           ))}
         </div>
         <button
-          onClick={() => { loadStatus(); loadChats(); loadContextSources() }}
+          onClick={() => {
+            loadStatus()
+            loadChats()
+            loadContextSources()
+          }}
           disabled={loadingStatus}
           className="h-9 w-9 rounded-lg border border-border flex items-center justify-center hover:bg-secondary transition-colors disabled:opacity-50"
         >
-          <RefreshCw className={`h-4 w-4 ${loadingStatus ? 'animate-spin' : ''}`} />
+          <ArrowClockwise className={`h-4 w-4 ${loadingStatus ? 'animate-spin' : ''}`} />
         </button>
       </div>
 
-      {tab === 'stats' && (
-        <StatsTab status={status} onRefresh={loadStatus} />
-      )}
+      {tab === 'stats' && <StatsTab status={status} onRefresh={loadStatus} />}
 
       {tab === 'chat' && (
-        <>
-          {/* Chat layout: chat + history drawer */}
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="flex-1 overflow-y-auto rounded-xl border border-border bg-card flex flex-col min-h-0">
-              <div className="px-3 py-2 border-b border-border/60 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setHistoryMobileOpen(true)}
-                    className="h-8 w-8 rounded-md border border-border flex items-center justify-center hover:bg-secondary transition-colors"
-                    title="Открыть историю"
-                  >
-                    <History className="h-4 w-4" />
-                  </button>
-                  <ContextHoverPickers
-                    includeContext={includeContext}
-                    contextOptions={contextOptions}
-                    setContextOptions={(updater) => setContextOptions(updater)}
-                    contextSources={contextSources}
-                    tableFolders={contextTableFolders}
-                    tableFolderById={contextTableFolderById}
-                  />
-                  <div className="relative" ref={languageMenuRef}>
-                    <button
-                      type="button"
-                      onClick={() => setLanguageMenuOpen((prev) => !prev)}
-                      className="h-8 flex items-center gap-1.5 px-2 rounded-md border border-border bg-card hover:bg-secondary transition-colors text-sm"
-                    >
-                      <Languages className="h-4 w-4" />
-                      <span className="hidden sm:inline">
-                        {language === 'ru' ? 'Русский' : language === 'ce' ? 'Нохчийн' : 'English'}
-                      </span>
-                    </button>
-                    {languageMenuOpen && (
-                      <div className="absolute top-full left-0 mt-1 w-36 bg-popover border border-border shadow-lg rounded-md overflow-hidden z-[60]">
-                        <button
-                          type="button"
-                          onClick={() => { setLanguage('ru'); setLanguageMenuOpen(false) }}
-                          className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary ${language === 'ru' ? 'font-medium bg-secondary/50' : ''}`}
-                        >
-                          Русский
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setLanguage('ce'); setLanguageMenuOpen(false) }}
-                          className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary ${language === 'ce' ? 'font-medium bg-secondary/50' : ''}`}
-                        >
-                          Нохчийн
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setLanguage('en'); setLanguageMenuOpen(false) }}
-                          className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary ${language === 'en' ? 'font-medium bg-secondary/50' : ''}`}
-                        >
-                          English
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {/* Chat card */}
+          <div className="flex-1 min-h-0 flex flex-col rounded-2xl border border-border bg-card overflow-hidden">
+            {/* Chat toolbar */}
+            <div className="px-3 py-2 border-b border-border/60 flex items-center justify-between shrink-0 bg-card/80 backdrop-blur-sm">
+              <div className="flex items-center gap-1.5">
                 <button
-                  onClick={handleNewChat}
-                  className="h-8 w-8 rounded-md border border-border flex items-center justify-center hover:bg-secondary transition-colors"
-                  title="Новый чат"
+                  onClick={() => setHistoryMobileOpen(true)}
+                  className="h-8 w-8 rounded-lg border border-border flex items-center justify-center hover:bg-secondary transition-colors"
+                  title="Открыть историю"
                 >
-                  <Plus className="h-4 w-4" />
+                  <ClockCounterClockwise className="h-4 w-4" />
                 </button>
-              </div>
-              {messages.length === 0 ? (
-                <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-4 p-8 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.12),_transparent_55%)]">
-                  <Bot className="h-16 w-16 opacity-20" />
-                  <p className="text-lg font-medium">Начните диалог с AI</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-2xl">
-                    {EXAMPLES.map((ex) => (
-                      <button
-                        key={ex}
-                        onClick={() => void handleSend(ex)}
-                        className="text-left rounded-lg border border-border bg-secondary/20 px-3 py-2 text-sm hover:bg-secondary/40 transition-colors"
-                      >
-                        <span className="inline-flex items-center gap-1.5 mb-1 text-xs text-primary"><Sparkles className="h-3 w-3" /> Пример</span>
-                        <p>{ex}</p>
-                      </button>
-                    ))}
-                  </div>
+                <ContextHoverPickers
+                  includeContext={includeContext}
+                  contextOptions={contextOptions}
+                  setContextOptions={(updater) => setContextOptions(updater)}
+                  contextSources={contextSources}
+                  tableFolders={contextTableFolders}
+                  tableFolderById={contextTableFolderById}
+                />
+                <div className="relative" ref={languageMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setLanguageMenuOpen((prev) => !prev)}
+                    className="h-8 flex items-center gap-1.5 px-2.5 rounded-lg border border-border bg-card hover:bg-secondary transition-colors text-sm"
+                  >
+                    <Translate className="h-4 w-4 shrink-0" />
+                    <span className="hidden sm:inline text-xs">
+                      {language === 'ru' ? 'Русский' : language === 'ce' ? 'Нохчийн' : 'English'}
+                    </span>
+                  </button>
+                  {languageMenuOpen && (
+                    <div className="absolute top-full left-0 mt-1 w-36 bg-popover border border-border shadow-lg rounded-xl overflow-hidden z-[60]">
+                      {(['ru', 'ce', 'en'] as const).map((lang) => (
+                        <button
+                          key={lang}
+                          type="button"
+                          onClick={() => {
+                            setLanguage(lang)
+                            setLanguageMenuOpen(false)
+                          }}
+                          className={`w-full text-left px-3 py-2 text-sm hover:bg-secondary transition-colors ${language === lang ? 'font-medium bg-secondary/50' : ''}`}
+                        >
+                          {lang === 'ru' ? 'Русский' : lang === 'ce' ? 'Нохчийн' : 'English'}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="flex-1 overflow-y-auto p-4 space-y-4">
+              </div>
+              <button
+                onClick={handleNewChat}
+                className="h-8 w-8 rounded-lg border border-border flex items-center justify-center hover:bg-secondary transition-colors"
+                title="Новый чат"
+              >
+                <Plus className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Message list */}
+            {messages.length === 0 ? (
+              /* Empty state */
+              <div className="flex-1 flex flex-col items-center justify-center text-muted-foreground gap-5 p-6 overflow-y-auto bg-[radial-gradient(ellipse_at_top,_hsl(var(--primary)/0.08),_transparent_60%)]">
+                <div className="h-14 w-14 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center">
+                  <Robot className="h-7 w-7 text-primary" weight="fill" />
+                </div>
+                <div className="text-center">
+                  <p className="text-base font-semibold text-foreground">Начните диалог с AI</p>
+                  <p className="text-xs text-muted-foreground mt-1">Задайте вопрос или выберите пример</p>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg">
+                  {EXAMPLES.map((ex) => (
+                    <button
+                      key={ex}
+                      onClick={() => void handleSend(ex)}
+                      disabled={isDisabled}
+                      className="text-left rounded-xl border border-border bg-secondary/20 px-3.5 py-3 text-sm hover:bg-secondary/50 hover:border-primary/30 transition-all active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      <span className="inline-flex items-center gap-1 mb-1.5 text-xs text-primary font-medium">
+                        <Sparkle className="h-3 w-3" weight="fill" />
+                        Пример
+                      </span>
+                      <p className="text-foreground leading-snug">{ex}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              /* Message thread */
+              <div className="flex-1 overflow-y-auto">
+                <div className="px-3 py-4 space-y-3 pb-2">
                   {messages.map((msg, i) => (
-                    <div key={getMessageKey(msg, i)} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
-                      <div className={`h-8 w-8 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-primary text-white' : 'bg-secondary'}`}>
-                        {msg.role === 'user' ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
-                      </div>
-                      <div className={`ai-message min-w-0 max-w-[94%] sm:max-w-[88%] rounded-2xl px-4 py-3 text-sm ${msg.role === 'user' ? 'bg-primary text-white rounded-tr-sm' : 'bg-secondary rounded-tl-sm'}`}>
+                    <div
+                      key={getMessageKey(msg, i)}
+                      className={`flex gap-2.5 animate-in fade-in slide-in-from-bottom-2 duration-200 ${
+                        msg.role === 'user' ? 'flex-row-reverse' : ''
+                      }`}
+                    >
+                      {/* Avatar */}
+                      <div
+                        className={`h-7 w-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
+                          msg.role === 'user'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-secondary border border-border'
+                        }`}
+                      >
                         {msg.role === 'user' ? (
-                          <p className="whitespace-pre-wrap leading-relaxed [overflow-wrap:anywhere]">{msg.content}</p>
+                          <User className="h-3.5 w-3.5" weight="bold" />
                         ) : (
-                          <div className="min-w-0 prose prose-sm max-w-none dark:prose-invert prose-p:my-2 prose-p:[overflow-wrap:anywhere] prose-pre:my-2 prose-pre:whitespace-pre-wrap prose-pre:[overflow-wrap:anywhere] prose-code:before:content-none prose-code:after:content-none prose-code:whitespace-pre-wrap prose-code:[overflow-wrap:anywhere] prose-code:break-all">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-                          </div>
+                          <Robot className="h-3.5 w-3.5 text-primary" weight="fill" />
                         )}
-                        {msg.tokens && (
-                          <p className={`text-xs mt-2 ${msg.role === 'user' ? 'text-white/60' : 'text-muted-foreground'}`}>
-                            {msg.tokensEstimated ? `≈ ${msg.tokens} токенов (оценка)` : `${msg.tokens} токенов`}
+                      </div>
+
+                      {/* Bubble */}
+                      <div
+                        className={`min-w-0 text-sm ${
+                          msg.role === 'user'
+                            ? 'max-w-[85%] sm:max-w-[78%]'
+                            : 'max-w-[92%] sm:max-w-[86%]'
+                        }`}
+                      >
+                        <div
+                          className={`rounded-2xl px-4 py-3 ${
+                            msg.role === 'user'
+                              ? 'bg-primary text-primary-foreground rounded-tr-md'
+                              : 'bg-secondary/60 border border-border/60 rounded-tl-md'
+                          }`}
+                        >
+                          {msg.role === 'user' ? (
+                            <p className="whitespace-pre-wrap leading-relaxed [overflow-wrap:anywhere]">
+                              {msg.content}
+                            </p>
+                          ) : (
+                            <div className="min-w-0 text-sm leading-relaxed text-foreground">
+                              <ReactMarkdown
+                                remarkPlugins={[remarkGfm]}
+                                components={mdComponents}
+                              >
+                                {msg.content}
+                              </ReactMarkdown>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Token count */}
+                        {msg.tokens != null && (
+                          <p
+                            className={`text-[10px] mt-1 px-1 ${
+                              msg.role === 'user'
+                                ? 'text-right text-muted-foreground'
+                                : 'text-muted-foreground'
+                            }`}
+                          >
+                            {msg.tokensEstimated
+                              ? `~${msg.tokens} токенов`
+                              : `${msg.tokens} токенов`}
                           </p>
                         )}
+
+                        {/* Action result cards */}
                         {msg.actionResult && (
-                          <>
+                          <div className="mt-2 space-y-2">
                             <TablePreview result={msg.actionResult} />
                             <DashboardPreview result={msg.actionResult} />
                             <DocumentPreview result={msg.actionResult} />
@@ -462,128 +622,155 @@ export default function AIPage() {
                             <PendingActionPreview
                               result={msg.actionResult}
                               disabled={
-                                sending
-                                || i !== lastPendingIndex
-                                || pendingActionLocks[getMessageKey(msg, i)] === true
+                                sending ||
+                                i !== lastPendingIndex ||
+                                pendingActionLocks[getMessageKey(msg, i)] === true
                               }
                               onConfirm={() => {
                                 const key = getMessageKey(msg, i)
-                                if (pendingActionLocks[key] || sending || i !== lastPendingIndex) return
+                                if (pendingActionLocks[key] || sending || i !== lastPendingIndex)
+                                  return
                                 setPendingActionLocks((prev) => ({ ...prev, [key]: true }))
                                 void handleSend('подтверждаю')
                               }}
                               onCancel={() => {
                                 const key = getMessageKey(msg, i)
-                                if (pendingActionLocks[key] || sending || i !== lastPendingIndex) return
+                                if (pendingActionLocks[key] || sending || i !== lastPendingIndex)
+                                  return
                                 setPendingActionLocks((prev) => ({ ...prev, [key]: true }))
                                 void handleSend('отмена')
                               }}
                             />
                             <ActionErrorPreview result={msg.actionResult} />
-                          </>
+                          </div>
                         )}
                       </div>
                     </div>
                   ))}
+
+                  {/* Typing indicator */}
                   {sending && (
-                    <div className="flex gap-3">
-                      <div className="h-8 w-8 rounded-full bg-secondary flex items-center justify-center shrink-0"><MessageSquareDashed className="h-4 w-4" /></div>
-                      <div className="bg-secondary rounded-2xl rounded-tl-sm px-4 py-3">
-                        <div className="flex gap-1 items-center h-5">
-                          {[0, 1, 2].map((i) => <span key={i} className="h-2 w-2 rounded-full bg-muted-foreground animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />)}
+                    <div className="flex gap-2.5 animate-in fade-in duration-200">
+                      <div className="h-7 w-7 rounded-full bg-secondary border border-border flex items-center justify-center shrink-0 mt-0.5">
+                        <ChatDots className="h-3.5 w-3.5 text-primary" weight="fill" />
+                      </div>
+                      <div className="bg-secondary/60 border border-border/60 rounded-2xl rounded-tl-md px-4 py-3">
+                        <div className="flex gap-1 items-center h-4">
+                          {[0, 1, 2].map((dot) => (
+                            <span
+                              key={dot}
+                              className="h-1.5 w-1.5 rounded-full bg-muted-foreground animate-bounce"
+                              style={{ animationDelay: `${dot * 0.15}s` }}
+                            />
+                          ))}
                         </div>
                       </div>
                     </div>
                   )}
                   <div ref={bottomRef} />
                 </div>
-              )}
-            </div>
-
-            <div className="pt-3 flex gap-2 items-end pb-[env(safe-area-inset-bottom,0px)]">
-              <div className="flex-1">
-                {uiIntent && (
-                  <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-border bg-card px-3 py-2">
-                    <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground">Выбран режим</p>
-                      <p className="text-sm font-medium truncate">
-                        {uiIntent.type === 'create_table'
-                          ? 'Создание таблицы'
-                          : uiIntent.type === 'create_dashboard'
-                            ? `Создание дашборда${(uiIntent.params as any)?.widget_type ? ` (${String((uiIntent.params as any).widget_type)})` : ''}`
-                            : uiIntent.type === 'create_document'
-                              ? `Создание документа${(uiIntent.params as any)?.file_type ? ` (${String((uiIntent.params as any).file_type).toUpperCase()})` : ''}`
-                            : uiIntent.type === 'create_schedule_event'
-                              ? 'Создание события в расписании'
-                              : uiIntent.type === 'create_kb_page'
-                                ? 'Создание страницы базы знаний'
-                                : uiIntent.type}
-                      </p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {uiIntent.type === 'create_document'
-                          ? 'Опишите документ, который нужно подготовить (например: "сделай коммерческое предложение для клиента").'
-                          : 'Опишите, что нужно сделать (например: "придумай 10 тестовых товаров").'}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={clearUiIntent}
-                      className="h-8 w-8 rounded-lg border border-border flex items-center justify-center hover:bg-secondary shrink-0"
-                      title="Сбросить режим"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                )}
-
-                <div className="flex items-end gap-2 rounded-xl border border-border bg-card px-3 py-2 focus-within:border-primary/50 transition-colors">
-                  <textarea
-                    ref={textareaRef}
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={handleKey}
-                    placeholder={status?.configured ? 'Напишите сообщение... (Enter — отправить, Shift+Enter — новая строка)' : statusError === 'auth' ? 'Требуется вход' : 'AI не настроен'}
-                    disabled={sending || statusError === 'auth' || status?.enabled === false || !status?.configured}
-                    rows={1}
-                    className="flex-1 bg-transparent outline-none resize-none text-sm leading-relaxed max-h-32 disabled:opacity-50"
-                    style={{ minHeight: '24px' }}
-                    onInput={(e) => {
-                      const t = e.target as HTMLTextAreaElement
-                      t.style.height = 'auto'
-                      t.style.height = `${Math.min(t.scrollHeight, 128)}px`
-                    }}
-                  />
-                  <CapabilitiesMenu
-                    includeContext={includeContext}
-                    disabled={sending || statusError === 'auth' || status?.enabled === false || !status?.configured}
-                    tables={contextSources.tables}
-                    selectedTableIds={contextOptions.selected_table_ids ?? []}
-                    onSelect={(intent) => { setUiIntent(intent); requestAnimationFrame(() => textareaRef.current?.focus()) }}
-                  />
-                  <button
-                    onClick={() => void handleSend()}
-                    disabled={!input.trim() || sending || statusError === 'auth' || status?.enabled === false || !status?.configured}
-                    className="h-8 w-8 rounded-lg bg-primary text-white flex items-center justify-center hover:bg-primary/90 disabled:opacity-40 transition-colors shrink-0"
-                  >
-                    <Send className="h-4 w-4" />
-                  </button>
-                </div>
               </div>
-            </div>
+            )}
           </div>
 
-          {historyMobileOpen && (
-            <ChatHistory
-              chats={chats}
-              currentChatId={currentChatId}
-              loadingChats={loadingChats}
-              onSelect={(chatId) => setCurrentChatId(chatId)}
-              onDelete={handleDeleteChat}
-              onNewChat={handleNewChat}
-              onClose={() => setHistoryMobileOpen(false)}
-            />
-          )}
-        </>
+          {/* Input area — sticky above bottom nav */}
+          <div className="shrink-0 pt-2 pb-[calc(env(safe-area-inset-bottom,0px)+4.5rem)] md:pb-2">
+            {/* Active intent chip */}
+            {uiIntent && (
+              <div className="mb-2 flex items-center justify-between gap-2 rounded-xl border border-primary/30 bg-primary/5 px-3 py-2">
+                <div className="min-w-0">
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-medium">
+                    Режим
+                  </p>
+                  <p className="text-sm font-medium truncate">
+                    {uiIntent.type === 'create_table'
+                      ? 'Создание таблицы'
+                      : uiIntent.type === 'create_dashboard'
+                        ? `Создание дашборда${(uiIntent.params as Record<string, unknown>)?.widget_type ? ` (${String((uiIntent.params as Record<string, unknown>).widget_type)})` : ''}`
+                        : uiIntent.type === 'create_document'
+                          ? `Создание документа${(uiIntent.params as Record<string, unknown>)?.file_type ? ` (${String((uiIntent.params as Record<string, unknown>).file_type).toUpperCase()})` : ''}`
+                          : uiIntent.type === 'create_schedule_event'
+                            ? 'Создание события в расписании'
+                            : uiIntent.type === 'create_kb_page'
+                              ? 'Создание страницы базы знаний'
+                              : uiIntent.type}
+                  </p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {uiIntent.type === 'create_document'
+                      ? 'Опишите документ для подготовки'
+                      : 'Опишите, что нужно сделать'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={clearUiIntent}
+                  className="h-8 w-8 rounded-lg border border-border flex items-center justify-center hover:bg-secondary transition-colors shrink-0"
+                  title="Сбросить режим"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+
+            {/* Input box */}
+            <div className="flex items-end gap-2 rounded-2xl border border-border bg-card px-3 py-2.5 focus-within:border-primary/50 focus-within:shadow-sm transition-all">
+              <textarea
+                ref={textareaRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKey}
+                placeholder={
+                  isDisabled
+                    ? statusError === 'auth'
+                      ? 'Требуется вход'
+                      : 'AI не настроен'
+                    : 'Напишите сообщение...'
+                }
+                disabled={isDisabled}
+                rows={1}
+                className="flex-1 bg-transparent outline-none resize-none text-sm leading-relaxed max-h-32 disabled:opacity-50 placeholder:text-muted-foreground/60"
+                style={{ minHeight: '28px' }}
+                onInput={(e) => {
+                  const t = e.target as HTMLTextAreaElement
+                  t.style.height = 'auto'
+                  t.style.height = `${Math.min(t.scrollHeight, 128)}px`
+                }}
+              />
+              <CapabilitiesMenu
+                includeContext={includeContext}
+                disabled={isDisabled}
+                tables={contextSources.tables}
+                selectedTableIds={contextOptions.selected_table_ids ?? []}
+                onSelect={(intent) => {
+                  setUiIntent(intent)
+                  requestAnimationFrame(() => textareaRef.current?.focus())
+                }}
+              />
+              <button
+                onClick={() => void handleSend()}
+                disabled={!input.trim() || isDisabled}
+                className="h-9 w-9 rounded-full bg-primary text-primary-foreground flex items-center justify-center hover:bg-primary/90 active:scale-95 disabled:opacity-35 transition-all shrink-0"
+              >
+                <PaperPlaneTilt className="h-4 w-4" weight="fill" />
+              </button>
+            </div>
+            <p className="text-[10px] text-muted-foreground/50 text-center mt-1.5 hidden md:block">
+              Enter — отправить · Shift+Enter — перенос строки
+            </p>
+          </div>
+        </div>
+      )}
+
+      {historyMobileOpen && (
+        <ChatHistory
+          chats={chats}
+          currentChatId={currentChatId}
+          loadingChats={loadingChats}
+          onSelect={(chatId) => setCurrentChatId(chatId)}
+          onDelete={handleDeleteChat}
+          onNewChat={handleNewChat}
+          onClose={() => setHistoryMobileOpen(false)}
+        />
       )}
     </div>
   )

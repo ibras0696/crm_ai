@@ -1241,9 +1241,6 @@ export default function LandingPage() {
                   <h2 className="text-4xl sm:text-5xl md:text-7xl lg:text-8xl font-black tracking-[-0.04em] leading-[0.88] text-balance">
                     {content.cta.title}
                   </h2>
-                  <p className="text-lg md:text-2xl text-muted-foreground max-w-2xl mx-auto font-medium leading-relaxed">
-                    {content.cta.subtitle}
-                  </p>
                   <div className="pt-4">
                     <Link to="/register">
                       <button className="group inline-flex items-center gap-3 rounded-full bg-primary px-8 py-5 text-lg font-bold text-white shadow-[0_24px_56px_-12px_rgba(37,99,235,0.6)] hover:bg-primary/90 hover:shadow-[0_28px_64px_-12px_rgba(37,99,235,0.7)] active:scale-[0.98] transition-all duration-300">
@@ -1304,18 +1301,6 @@ export default function LandingPage() {
                 </span>
                 <span className="text-[10px] font-bold opacity-30 uppercase tracking-wide">{content.footer.globalNodes}</span>
               </div>
-            </div>
-            <div className="flex items-center gap-6">
-              <div className="flex -space-x-2.5">
-                {[1, 2, 3, 4].map(i => (
-                  <div key={i} className="h-8 w-8 rounded-full border-2 border-background bg-gradient-to-br from-primary/30 to-purple-500/30 shadow-lg flex items-center justify-center text-[8px] font-bold text-white/60">
-                    {String.fromCharCode(64 + i)}
-                  </div>
-                ))}
-              </div>
-              <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground hover:text-foreground transition-colors cursor-default">
-                {content.footer.trustedBy}
-              </span>
             </div>
           </div>
         </div>

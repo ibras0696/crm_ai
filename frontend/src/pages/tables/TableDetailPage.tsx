@@ -1590,11 +1590,50 @@ function TableDetailPageContent() {
     }))
   }
 
-  if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
+  if (loading) return (
+    <div className="space-y-4 pb-24 md:pb-6">
+      {/* Header skeleton */}
+      <div className="flex items-center gap-3">
+        <div className="h-9 w-9 rounded-lg bg-muted animate-pulse shrink-0" />
+        <div className="space-y-1.5 flex-1">
+          <div className="h-6 w-40 rounded-md bg-muted animate-pulse" />
+          <div className="h-4 w-24 rounded-md bg-muted/60 animate-pulse" />
+        </div>
+      </div>
+      {/* Toolbar skeleton */}
+      <div className="flex gap-2">
+        <div className="h-8 flex-1 max-w-xs rounded-lg bg-muted animate-pulse" />
+        <div className="h-8 w-20 rounded-lg bg-muted animate-pulse" />
+      </div>
+      {/* Card skeletons — mobile shape */}
+      <div className="md:hidden space-y-3">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="rounded-2xl border border-border bg-card p-4 space-y-3 animate-pulse">
+            <div className="h-5 w-3/4 rounded-md bg-muted" />
+            <div className="pt-2 border-t border-border/40 space-y-2">
+              {Array.from({ length: 3 }).map((_, j) => (
+                <div key={j} className="flex justify-between">
+                  <div className="h-4 w-20 rounded-md bg-muted/60" />
+                  <div className="h-4 w-24 rounded-md bg-muted/40" />
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      {/* Table skeleton — desktop */}
+      <div className="hidden md:block rounded-lg border border-border overflow-hidden animate-pulse">
+        <div className="h-10 bg-muted/40 border-b border-border" />
+        {Array.from({ length: 6 }).map((_, i) => (
+          <div key={i} className="h-9 border-b border-border/40 bg-muted/10" />
+        ))}
+      </div>
+    </div>
+  )
   if (loadError || !table) return <div className="text-center py-20 text-muted-foreground"><p>Таблица не найдена</p><Button variant="ghost" className="mt-4" onClick={() => navigate('/tables')}><ArrowLeft className="h-4 w-4 mr-2" /> Назад</Button></div>
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-24 md:pb-6">
       <div className="flex items-center gap-3 flex-wrap">
         <Button variant="ghost" size="icon" onClick={() => navigate('/tables')}><ArrowLeft className="h-5 w-5" /></Button>
         <div className="flex-1 min-w-0">
@@ -1774,22 +1813,24 @@ function TableDetailPageContent() {
       )}
 
       {/* Mobile card view */}
-      <div className="md:hidden space-y-2">
+      <div className="md:hidden space-y-3">
         {showNewRow && (
-          <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
-            <p className="text-xs font-medium text-primary">Новая запись</p>
+          <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4 space-y-3">
+            <p className="text-xs font-semibold text-primary uppercase tracking-wide">Новая запись</p>
             <div className="space-y-2">
               {columns.map((col: ColumnInfo) => (
-                <div key={col.id} className="space-y-1">
-                  <label className="text-xs text-muted-foreground">
+                <div key={col.id} className="flex items-start justify-between gap-3">
+                  <label className="text-xs text-muted-foreground shrink-0 w-28 pt-2">
                     {col.name}{col.is_required && <span className="text-destructive ml-0.5">*</span>}
                   </label>
-                  <EditableCell
-                    value={newRowData[col.id]}
-                    column={col}
-                    relationOptions={relationOptionsByColumn[col.id]}
-                    onSave={v => setNewRowData(d => ({ ...d, [col.id]: v }))}
-                  />
+                  <div className="flex-1 min-w-0">
+                    <EditableCell
+                      value={newRowData[col.id]}
+                      column={col}
+                      relationOptions={relationOptionsByColumn[col.id]}
+                      onSave={v => setNewRowData(d => ({ ...d, [col.id]: v }))}
+                    />
+                  </div>
                 </div>
               ))}
             </div>
@@ -1817,11 +1858,12 @@ function TableDetailPageContent() {
           const primaryCol = columns.find((c: ColumnInfo) => c.is_primary)
           const restCols = columns.filter((c: ColumnInfo) => !c.is_primary).slice(0, 5)
           return (
-            <div key={record.id} className="rounded-xl border border-border bg-card p-4 space-y-3 active:scale-[0.99] transition-transform">
+            <div key={record.id} className="rounded-2xl border border-border bg-card p-4 mb-3 space-y-2 active:scale-[0.99] transition-transform">
+              {/* Summary line — primary field */}
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground/50 shrink-0 tabular-nums">{page * PAGE_SIZE + idx + 1}</span>
-                {primaryCol && (
-                  <div className="flex-1 min-w-0">
+                <span className="text-xs text-muted-foreground/40 shrink-0 tabular-nums w-5 text-right">{page * PAGE_SIZE + idx + 1}</span>
+                {primaryCol ? (
+                  <div className="flex-1 min-w-0 font-semibold text-sm">
                     <EditableCell
                       value={data[primaryCol.id]}
                       column={primaryCol}
@@ -1829,14 +1871,17 @@ function TableDetailPageContent() {
                       onSave={v => handleCellSave(record.id, primaryCol.id, v)}
                     />
                   </div>
+                ) : (
+                  <span className="text-xs text-muted-foreground italic">Запись #{page * PAGE_SIZE + idx + 1}</span>
                 )}
               </div>
+              {/* Field-value rows */}
               {restCols.length > 0 && (
-                <div className="space-y-2 pt-2 border-t border-border/50">
+                <div className="space-y-1.5 pt-2 border-t border-border/40">
                   {restCols.map((col: ColumnInfo) => (
-                    <div key={col.id} className="flex items-start gap-2">
+                    <div key={col.id} className="flex items-start justify-between gap-3">
                       <span className="text-xs text-muted-foreground shrink-0 w-24 pt-1 truncate">{col.name}</span>
-                      <div className="flex-1 min-w-0">
+                      <div className="flex-1 min-w-0 text-right">
                         <EditableCell
                           value={data[col.id]}
                           column={col}
@@ -1848,19 +1893,21 @@ function TableDetailPageContent() {
                   ))}
                 </div>
               )}
-              <div className="flex items-center gap-2 pt-1 border-t border-border/50">
+              {/* Action buttons */}
+              <div className="flex items-center justify-end gap-1.5 pt-2 border-t border-border/40">
                 <button
                   onClick={() => handleOpenHistory(record.id)}
-                  className="h-11 flex-1 rounded-lg border border-border flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:bg-secondary active:scale-[0.98] transition-transform"
+                  className="h-8 w-8 rounded-full bg-secondary/50 flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-secondary active:scale-[0.95] transition-all"
+                  title="История изменений"
                 >
                   <History className="h-3.5 w-3.5" />
-                  История
                 </button>
                 <button
                   onClick={() => handleDeleteRecord(record.id)}
-                  className="h-11 w-11 rounded-lg border border-destructive/30 flex items-center justify-center text-destructive/70 hover:bg-destructive/10 active:scale-[0.98] transition-transform"
+                  className="h-8 w-8 rounded-full bg-secondary/50 flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 active:scale-[0.95] transition-all"
+                  title="Удалить запись"
                 >
-                  <Trash2 className="h-4 w-4" />
+                  <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
             </div>
@@ -1868,14 +1915,17 @@ function TableDetailPageContent() {
         })}
 
         {pagedRecords.length === 0 && !showNewRow && (
-          <div className="flex flex-col items-center py-16 gap-3 text-muted-foreground">
-            <div className="h-14 w-14 rounded-full border-2 border-dashed border-border flex items-center justify-center">
-              <Plus className="h-6 w-6" />
+          <div className="flex flex-col items-center py-16 gap-4 text-muted-foreground">
+            <div className="h-16 w-16 rounded-2xl bg-muted/50 flex items-center justify-center">
+              <Plus className="h-7 w-7 opacity-40" />
             </div>
-            <p className="text-sm">Нет записей</p>
+            <div className="text-center space-y-1">
+              <p className="text-sm font-medium text-foreground">Нет записей</p>
+              <p className="text-xs text-muted-foreground">Нажмите кнопку ниже, чтобы добавить первую</p>
+            </div>
             <button
               onClick={handleQuickAddRecord}
-              className="mt-1 h-11 px-6 rounded-xl bg-primary text-white text-sm font-medium active:scale-[0.98] transition-transform"
+              className="h-11 px-6 rounded-xl bg-primary text-white text-sm font-medium active:scale-[0.98] transition-transform"
             >
               Добавить первую
             </button>
@@ -2486,8 +2536,8 @@ function TableDetailPageContent() {
       {columns.length > 0 && (
         <button
           onClick={handleQuickAddRecord}
-          className="md:hidden fixed right-6 z-50 h-14 w-14 rounded-full bg-primary text-white shadow-lg flex items-center justify-center active:scale-95 transition-transform"
-          style={{ bottom: 'calc(1.5rem + env(safe-area-inset-bottom, 0px))' }}
+          className="md:hidden fixed right-4 z-40 h-14 w-14 rounded-full bg-primary text-white shadow-xl flex items-center justify-center active:scale-95 transition-transform"
+          style={{ bottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))' }}
           aria-label="Добавить запись"
         >
           <Plus className="h-6 w-6" />

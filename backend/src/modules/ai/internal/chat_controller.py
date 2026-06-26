@@ -34,12 +34,14 @@ from src.modules.ai.internal.chat_controller_parts.actions import (
     _build_document_fallback_action,
     _build_kb_fallback_action,
     _build_pending_action_result,
+    _build_schedule_fallback_action,
     _claims_action_completed,
     _execute_action,
     _get_last_pending_action,
     _is_cancel_message,
     _is_confirmation_message,
     _looks_like_kb_create_request,
+    _looks_like_schedule_create_request,
     _normalize_action_payload_for_execution,
 )
 from src.modules.ai.internal.chat_controller_parts.intent_limits import (
@@ -655,6 +657,20 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                 )
                 if not reply.strip():
                     reply = "Готово, выполняю."
+        # Bug fix (Bug 1): schedule fallback — symmetrical to KB/dashboard/document fallbacks.
+        # When the model returns a text answer without a crm_action block for a schedule-creation
+        # request (e.g., intent router misclassified or model skipped the action), we synthesize
+        # a minimal create_schedule_event payload so the event still gets created.
+        if action_payload is None and _looks_like_schedule_create_request(body.message, body.ui_intent):
+            schedule_fallback = _build_schedule_fallback_action(
+                user_message=body.message,
+                assistant_reply=reply or reply_raw,
+            )
+            action_payload = _normalize_action_payload_for_execution(
+                schedule_fallback,
+                ui_intent=body.ui_intent,
+                user_message=body.message,
+            )
         if action_payload is None and _looks_like_kb_create_request(body.message, body.ui_intent):
             kb_fallback = _build_kb_fallback_action(
                 user_message=body.message,
@@ -739,7 +755,11 @@ async def run_ai_chat(body: ChatRequest, current_user: CurrentUser) -> ApiRespon
                     ui_intent=body.ui_intent,
                     user_message=body.message,
                 )
-        if action_payload is None and _claims_action_completed(reply):
+        # Bug fix (garbled response): only replace reply with the error message when action_mode
+        # is True — i.e., we actually expected an action from the model.  In read/analytics mode
+        # the model legitimately uses words like "создал" in explanations, and replacing the reply
+        # with ACTION_NOT_EXECUTED_MESSAGE was surfacing a confusing technical message to the user.
+        if action_mode and action_payload is None and _claims_action_completed(reply):
             reply = ACTION_NOT_EXECUTED_MESSAGE
         usage = _extract_usage_dict(data)
         # Нормализация usage для провайдеров, которые кладут токены в root-поля.

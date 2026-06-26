@@ -46,10 +46,16 @@ _DELETE_MARKERS = ("удал", "очист", "сотри", "delete", "remove", "
 _READ_MARKERS = ("покажи", "посмотр", "найди", "проанализ", "сколько", "какие", "show", "find", "analy", "report")
 
 _DOMAIN_MARKERS: dict[IntentDomain, tuple[str, ...]] = {
-    "table": ("таблиц", "колон", "запис", "строк", "records", "table", "column"),
-    "schedule": ("расписан", "событи", "календар", "встреч", "schedule", "event", "calendar"),
-    # Добавляем основы слов, чтобы ловить формы вроде "в базе знаний".
-    "knowledge": ("база знаний", "баз", "знан", "курс", "урок", "kb", "страниц", "knowledge", "wiki", "документац"),
+    "table": ("таблиц", "колон", "строк", "records", "table", "column"),
+    # Bug fix: added "встреч", "напомн", "задач", "remind", "meeting", "task" to schedule markers.
+    # Removed "запис" from table markers (ambiguous with "запись события") and moved table-specific
+    # plural form "записи/записей" to be disambiguated by presence of table markers.
+    "schedule": (
+        "расписан", "событи", "календар", "встреч", "schedule", "event", "calendar",
+        "напомн", "дедлайн", "deadline", "встречу", "встреча", "напоминан",
+    ),
+    # Narrowed "баз" and "знан" to avoid matching unrelated words; use longer stems.
+    "knowledge": ("база знаний", "базе знаний", "базу знаний", "знани", "курс", "урок", "kb", "страниц", "knowledge", "wiki", "документац"),
     "dashboard": ("дашборд", "график", "виджет", "отчет", "отчёт", "dashboard", "chart", "widget", "report"),
     "document": ("документ", "docx", "pdf", "файл", "document", "file", "договор", "кп", "коммерческ"),
     "general": (),

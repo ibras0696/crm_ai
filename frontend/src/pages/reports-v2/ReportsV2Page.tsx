@@ -1,43 +1,56 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
-  Bot,
-  Brain,
-  Copy,
-  Filter,
-  LayoutDashboard,
-  Loader2,
-  RefreshCcw,
-  Save,
-} from 'lucide-react'
+  ArrowClockwise,
+  FloppyDisk,
+  Funnel,
+  Plus,
+  Robot,
+  X,
+} from '@phosphor-icons/react'
+import { AnimatePresence, motion } from 'framer-motion'
 
 import {
   aiApi,
   reportsApi,
   tablesApi,
   type AnalyticsFilter,
+  type AnalyticsQueryRequest,
   type AnalyticsSemanticField,
   type AnalyticsSemanticSchema,
   type TableInfo,
 } from '@/lib/api'
 import { FILTER_OPERATORS } from '@/lib/constants'
 import { cn } from '@/lib/utils'
-import AnalyticsWidgetCardV2, { type AnalyticsWidgetPreview } from './AnalyticsWidgetCardV2'
-import { buildWidgetPlans, type DashboardPreset } from './presetBuilder'
+import ChartCard from './AnalyticsWidgetCardV2'
+import { buildWidgetPlans, type DashboardPreset, type WidgetPlan } from './presetBuilder'
+import type { ChartConfig } from './AnalyticsWidgetCardV2'
 
-const PRESET_META: Array<{ key: DashboardPreset; label: string; description: string }> = [
-  { key: 'executive', label: 'Руководитель', description: 'Ключевые KPI и общий тренд' },
-  { key: 'revenue', label: 'Выручка', description: 'Деньги, источники и динамика' },
-  { key: 'ops', label: 'Операции', description: 'Операционные метрики и стабильность' },
-  { key: 'funnel', label: 'Воронка', description: 'Этапы и конверсия воронки' },
-  { key: 'marketing', label: 'Маркетинг', description: 'Каналы, доли и эффективность' },
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const PRESET_META: Array<{ key: DashboardPreset; label: string }> = [
+  { key: 'executive', label: 'Руководитель' },
+  { key: 'revenue', label: 'Выручка' },
+  { key: 'ops', label: 'Операции' },
+  { key: 'funnel', label: 'Воронка' },
+  { key: 'marketing', label: 'Маркетинг' },
 ]
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 type DraftFilter = {
   column_id: string
   op: AnalyticsFilter['op']
   value: string
 }
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function opLabel(op: AnalyticsFilter['op']): string {
   return FILTER_OPERATORS.find((item) => item.value === op)?.label ?? op
@@ -51,29 +64,21 @@ function parseDraftToFilter(draft: DraftFilter, field: AnalyticsSemanticField | 
   }
 
   if (draft.op === 'between') {
-    const [fromRaw, toRaw] = draft.value.split(',').map((item) => item.trim())
+    const [fromRaw, toRaw] = draft.value.split(',').map((s) => s.trim())
     if (!fromRaw || !toRaw) return null
     const fromValue = field?.analytics_type === 'number' ? Number(fromRaw) : fromRaw
     const toValue = field?.analytics_type === 'number' ? Number(toRaw) : toRaw
     if (field?.analytics_type === 'number' && (Number.isNaN(fromValue) || Number.isNaN(toValue))) return null
-    return {
-      column_id: draft.column_id,
-      op: draft.op,
-      from_value: fromValue,
-      to_value: toValue,
-    }
+    return { column_id: draft.column_id, op: draft.op, from_value: fromValue, to_value: toValue }
   }
 
   if (draft.op === 'in' || draft.op === 'not_in') {
-    const values = draft.value
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean)
+    const values = draft.value.split(',').map((s) => s.trim()).filter(Boolean)
     if (!values.length) return null
     return {
       column_id: draft.column_id,
       op: draft.op,
-      values: field?.analytics_type === 'number' ? values.map((item) => Number(item)) : values,
+      values: field?.analytics_type === 'number' ? values.map(Number) : values,
     }
   }
 
@@ -84,26 +89,56 @@ function parseDraftToFilter(draft: DraftFilter, field: AnalyticsSemanticField | 
     value = parsed
   }
   if (field?.analytics_type === 'boolean') {
-    const normalized = draft.value.trim().toLowerCase()
-    if (normalized !== 'true' && normalized !== 'false') return null
-    value = normalized === 'true'
+    const norm = draft.value.trim().toLowerCase()
+    if (norm !== 'true' && norm !== 'false') return null
+    value = norm === 'true'
   }
 
+  return { column_id: draft.column_id, op: draft.op, value }
+}
+
+function buildQuery(c: ChartConfig, tableId: string, globalFilters: AnalyticsFilter[]): AnalyticsQueryRequest {
   return {
-    column_id: draft.column_id,
-    op: draft.op,
-    value,
+    table_id: tableId,
+    widget_type: c.widgetType,
+    title: c.title,
+    metrics: [
+      {
+        key: 'y',
+        aggregation: c.yAggregation,
+        column_id: c.yAggregation === 'count' ? null : c.yColumnId,
+        label: 'Значение',
+      },
+    ],
+    group_by_column_id: c.xMode === 'group' ? c.xColumnId : null,
+    time_column_id: c.xMode === 'time' ? c.xColumnId : null,
+    date_bucket: c.dateBucket,
+    filters: globalFilters,
+    limit: c.limit,
+    sort: { by: 'metric', metric_key: 'y', direction: c.sortDir },
   }
 }
 
-function summarizeWidget(widget: AnalyticsWidgetPreview): string {
-  if (!widget.data) return `${widget.title}: нет данных`
-  if (widget.widgetType === 'metric') return `${widget.title}: ${String(widget.data.value ?? '—')}`
-  if (Array.isArray(widget.data.points)) {
-    const first = widget.data.points[0] as { x?: unknown; y?: unknown } | undefined
-    if (first) return `${widget.title}: ${String(first.x ?? '—')} -> ${String(first.y ?? '—')}`
+function planToConfig(plan: WidgetPlan): ChartConfig {
+  const q = plan.query
+  const m = q.metrics[0]
+  const xIsTime = Boolean(q.time_column_id)
+  return {
+    id: plan.id,
+    title: plan.title,
+    widgetType: plan.widget_type,
+    xMode: xIsTime ? 'time' : 'group',
+    xColumnId: xIsTime ? (q.time_column_id ?? null) : (q.group_by_column_id ?? null),
+    dateBucket: q.date_bucket ?? 'month',
+    yAggregation: m?.aggregation ?? 'count',
+    yColumnId: m?.column_id ?? null,
+    limit: q.limit ?? 12,
+    sortDir: q.sort?.direction ?? 'desc',
+    data: null,
+    loading: true,
+    error: null,
+    isConfigOpen: false,
   }
-  return `${widget.title}: обновлено`
 }
 
 function extractQueryData(payload: unknown): Record<string, unknown> | null {
@@ -116,53 +151,120 @@ function extractQueryData(payload: unknown): Record<string, unknown> | null {
   return data as Record<string, unknown>
 }
 
+// ---------------------------------------------------------------------------
+// Main Page
+// ---------------------------------------------------------------------------
+
 export default function ReportsV2Page() {
   const [searchParams, setSearchParams] = useSearchParams()
+
+  // Core state
   const [tables, setTables] = useState<TableInfo[]>([])
   const [selectedTableId, setSelectedTableId] = useState('')
   const [schema, setSchema] = useState<AnalyticsSemanticSchema | null>(null)
   const [preset, setPreset] = useState<DashboardPreset>('executive')
-  const [widgets, setWidgets] = useState<AnalyticsWidgetPreview[]>([])
+  const [charts, setCharts] = useState<ChartConfig[]>([])
   const [filters, setFilters] = useState<AnalyticsFilter[]>([])
-  const [draftFilter, setDraftFilter] = useState<DraftFilter>({ column_id: '', op: 'eq', value: '' })
+
+  // UI state
   const [loadingInit, setLoadingInit] = useState(true)
   const [loadingSchema, setLoadingSchema] = useState(false)
-  const [loadingWidgets, setLoadingWidgets] = useState(false)
+  const [filterOpen, setFilterOpen] = useState(false)
+  const [aiOpen, setAiOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Filter draft
+  const [draftFilter, setDraftFilter] = useState<DraftFilter>({ column_id: '', op: 'eq', value: '' })
+
+  // AI state
   const [aiQuestion, setAiQuestion] = useState('')
   const [aiAnswer, setAiAnswer] = useState('')
   const [aiError, setAiError] = useState<string | null>(null)
   const [aiBusy, setAiBusy] = useState(false)
 
+  // Ref for filter button positioning
+  const filterBtnRef = useRef<HTMLDivElement>(null)
+
   const selectedField = useMemo(
-    () => schema?.fields.find((field) => field.id === draftFilter.column_id) ?? null,
+    () => schema?.fields.find((f) => f.id === draftFilter.column_id) ?? null,
     [schema?.fields, draftFilter.column_id],
   )
 
-  useEffect(() => {
-    const presetParam = searchParams.get('preset')
-    if (presetParam && PRESET_META.some((item) => item.key === presetParam)) {
-      setPreset(presetParam as DashboardPreset)
-    }
+  // Helpers
+  const updateChart = useCallback((id: string, updates: Partial<ChartConfig>) => {
+    setCharts((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)))
   }, [])
 
+  const deleteChart = useCallback((id: string) => {
+    setCharts((prev) => prev.filter((c) => c.id !== id))
+  }, [])
+
+  // Load single chart data
+  const loadChartData = useCallback(
+    async (chart: ChartConfig, tableId: string, globalFilters: AnalyticsFilter[]) => {
+      if (!tableId) return
+      updateChart(chart.id, { loading: true, error: null })
+      try {
+        const q = buildQuery(chart, tableId, globalFilters)
+        const res = await reportsApi.unifiedPreviewV2({ mode: 'query', query: q })
+        const raw = extractQueryData(res.data?.data)
+        updateChart(chart.id, { data: raw ?? null, loading: false })
+      } catch (e) {
+        updateChart(chart.id, {
+          error: e instanceof Error ? e.message : 'Ошибка загрузки',
+          loading: false,
+        })
+      }
+    },
+    [updateChart],
+  )
+
+  // -------------------------------------------------------------------------
+  // Effects
+  // -------------------------------------------------------------------------
+
+  // Init: read URL params
+  useEffect(() => {
+    const presetParam = searchParams.get('preset')
+    if (presetParam && PRESET_META.some((p) => p.key === presetParam)) {
+      setPreset(presetParam as DashboardPreset)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Load tables
   useEffect(() => {
     let active = true
     setLoadingInit(true)
     setError(null)
 
-    void tablesApi.list()
-      .then((response) => {
+    void tablesApi
+      .list()
+      .then((res) => {
         if (!active) return
-        const items = response.data.data ?? []
+        const items = res.data.data ?? []
         setTables(items)
         const urlTable = searchParams.get('table')
-        const defaultTable = items.find((item) => item.id === urlTable)?.id ?? items[0]?.id ?? ''
+        const defaultTable = items.find((t) => t.id === urlTable)?.id ?? items[0]?.id ?? ''
         setSelectedTableId(defaultTable)
+
+        // Try restore saved view
+        if (defaultTable) {
+          const saved = localStorage.getItem(`analytics-v2:view:${defaultTable}`)
+          if (saved) {
+            try {
+              const parsed = JSON.parse(saved) as { preset?: DashboardPreset; filters?: AnalyticsFilter[] }
+              if (parsed.preset && PRESET_META.some((p) => p.key === parsed.preset)) setPreset(parsed.preset)
+              if (Array.isArray(parsed.filters)) setFilters(parsed.filters)
+            } catch {
+              // ignore
+            }
+          }
+        }
       })
-      .catch((err) => {
+      .catch((e) => {
         if (!active) return
-        setError(err instanceof Error ? err.message : 'Не удалось загрузить список таблиц')
+        setError(e instanceof Error ? e.message : 'Не удалось загрузить таблицы')
       })
       .finally(() => {
         if (!active) return
@@ -172,8 +274,10 @@ export default function ReportsV2Page() {
     return () => {
       active = false
     }
-  }, [searchParams])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
+  // Load schema when table changes
   useEffect(() => {
     if (!selectedTableId) {
       setSchema(null)
@@ -184,14 +288,15 @@ export default function ReportsV2Page() {
     setLoadingSchema(true)
     setError(null)
 
-    void reportsApi.semanticSchemaV2(selectedTableId)
-      .then((response) => {
+    void reportsApi
+      .semanticSchemaV2(selectedTableId)
+      .then((res) => {
         if (!active) return
-        setSchema(response.data.data ?? null)
+        setSchema(res.data.data ?? null)
       })
-      .catch((err) => {
+      .catch((e) => {
         if (!active) return
-        setError(err instanceof Error ? err.message : 'Не удалось загрузить semantic schema')
+        setError(e instanceof Error ? e.message : 'Не удалось загрузить схему')
       })
       .finally(() => {
         if (!active) return
@@ -203,83 +308,33 @@ export default function ReportsV2Page() {
     }
   }, [selectedTableId])
 
+  // Build charts when schema/preset changes
   useEffect(() => {
     if (!selectedTableId || !schema) {
-      setWidgets([])
+      setCharts([])
       return
     }
 
-    const plans = buildWidgetPlans({
-      tableId: selectedTableId,
-      schema,
-      preset,
-      filters,
-    })
+    const plans = buildWidgetPlans({ tableId: selectedTableId, schema, preset, filters })
+    const newCharts = plans.map(planToConfig)
+    setCharts(newCharts)
 
-    setWidgets(
-      plans.map((plan) => ({
-        id: plan.id,
-        title: plan.title,
-        widgetType: plan.widget_type,
-        data: null,
-        loading: true,
-      })),
-    )
-
+    // Fetch data for each chart
     let active = true
-    setLoadingWidgets(true)
-    setError(null)
-
     void Promise.all(
-      plans.map(async (plan) => {
-        try {
-          const response = await reportsApi.unifiedPreviewV2({ mode: 'query', query: plan.query })
-          const payload = response.data
-          const queryData = extractQueryData(payload.data)
-          if (!payload.ok || !queryData) {
-            return {
-              id: plan.id,
-              title: plan.title,
-              widgetType: plan.widget_type,
-              data: null,
-              loading: false,
-              error: payload.error?.message ?? 'Не удалось загрузить виджет',
-            } satisfies AnalyticsWidgetPreview
-          }
-          return {
-            id: plan.id,
-            title: plan.title,
-            widgetType: plan.widget_type,
-            data: queryData,
-            loading: false,
-            error: null,
-          } satisfies AnalyticsWidgetPreview
-        } catch (err) {
-          return {
-            id: plan.id,
-            title: plan.title,
-            widgetType: plan.widget_type,
-            data: null,
-            loading: false,
-            error: err instanceof Error ? err.message : 'Ошибка превью',
-          } satisfies AnalyticsWidgetPreview
-        }
+      newCharts.map(async (c) => {
+        if (!active) return
+        await loadChartData(c, selectedTableId, filters)
       }),
     )
-      .then((items) => {
-        if (!active) return
-        setWidgets(items)
-      })
-      .finally(() => {
-        if (!active) return
-        setLoadingWidgets(false)
-      })
 
     return () => {
       active = false
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTableId, schema, preset, filters])
 
+  // Sync URL params
   useEffect(() => {
     const next = new URLSearchParams()
     if (selectedTableId) next.set('table', selectedTableId)
@@ -288,307 +343,483 @@ export default function ReportsV2Page() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTableId, preset])
 
+  // -------------------------------------------------------------------------
+  // Actions
+  // -------------------------------------------------------------------------
+
+  function addChart() {
+    const id = `custom-${Date.now()}`
+    const defaultX = schema?.dimensions[0] ?? schema?.time_dimensions[0] ?? null
+    const xIsTime = defaultX ? schema?.fields.find((f) => f.id === defaultX)?.analytics_type === 'date' : false
+    const newChart: ChartConfig = {
+      id,
+      title: 'Новый график',
+      widgetType: 'bar',
+      xMode: xIsTime ? 'time' : 'group',
+      xColumnId: defaultX ?? null,
+      dateBucket: 'month',
+      yAggregation: 'count',
+      yColumnId: null,
+      limit: 10,
+      sortDir: 'desc',
+      data: null,
+      loading: true,
+      error: null,
+      isConfigOpen: true,
+    }
+    setCharts((prev) => [...prev, newChart])
+    if (selectedTableId) {
+      void loadChartData(newChart, selectedTableId, filters)
+    }
+  }
+
   function onAddFilter() {
-    const field = schema?.fields.find((item) => item.id === draftFilter.column_id) ?? null
-    const next = parseDraftToFilter(draftFilter, field)
+    const next = parseDraftToFilter(draftFilter, selectedField)
     if (!next) {
       setError('Фильтр заполнен некорректно. Проверьте поле и значение.')
       return
     }
-    setFilters((current) => [...current, next])
+    setFilters((prev) => [...prev, next])
     setDraftFilter({ column_id: '', op: 'eq', value: '' })
     setError(null)
   }
 
   function onSaveView() {
     if (!selectedTableId) return
-    const storageKey = `reports-v2:view:${selectedTableId}`
-    localStorage.setItem(storageKey, JSON.stringify({ preset, filters }))
-  }
-
-  function onLoadView() {
-    if (!selectedTableId) return
-    const storageKey = `reports-v2:view:${selectedTableId}`
-    const raw = localStorage.getItem(storageKey)
-    if (!raw) return
-    try {
-      const parsed = JSON.parse(raw) as { preset?: DashboardPreset; filters?: AnalyticsFilter[] }
-      if (parsed.preset && PRESET_META.some((item) => item.key === parsed.preset)) {
-        setPreset(parsed.preset)
-      }
-      if (Array.isArray(parsed.filters)) {
-        setFilters(parsed.filters)
-      }
-    } catch {
-      // ignore invalid cached state
-    }
-  }
-
-  async function onCopySnapshot() {
-    const snapshot = {
-      table: selectedTableId,
-      preset,
-      filters,
-      generated_at: new Date().toISOString(),
-    }
-    await navigator.clipboard.writeText(JSON.stringify(snapshot, null, 2))
+    const storageKey = `analytics-v2:view:${selectedTableId}`
+    localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        preset,
+        filters,
+        charts: charts.map((c) => ({ ...c, data: null, loading: false })),
+      }),
+    )
   }
 
   async function onAskAI() {
     const question = aiQuestion.trim()
     if (!question) return
-
     setAiBusy(true)
     setAiError(null)
     try {
-      const compactContext = {
+      const ctx = {
         table: schema?.table_name,
         preset,
         filters,
-        widgets: widgets.map(summarizeWidget),
+        charts: charts.map((c) => c.title),
       }
-      const response = await aiApi.chat({
+      const res = await aiApi.chat({
         include_context: false,
         system_prompt:
           'Ты аналитик CRM. Работаешь только в read-only режиме. Дай краткие выводы, риски и что проверить дополнительно.',
-        message: `${question}\n\nКонтекст:\n${JSON.stringify(compactContext, null, 2)}`,
+        message: `${question}\n\nКонтекст:\n${JSON.stringify(ctx, null, 2)}`,
       })
-      if (!response.data.ok || !response.data.data?.reply) {
-        setAiError(response.data.error?.message ?? 'Не удалось получить ответ AI')
+      if (!res.data.ok || !res.data.data?.reply) {
+        setAiError(res.data.error?.message ?? 'Не удалось получить ответ AI')
         return
       }
-      setAiAnswer(response.data.data.reply)
-    } catch (err) {
-      setAiError(err instanceof Error ? err.message : 'AI временно недоступен')
+      setAiAnswer(res.data.data.reply)
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : 'AI временно недоступен')
     } finally {
       setAiBusy(false)
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Render
+  // -------------------------------------------------------------------------
+
+  const isLoading = loadingInit || loadingSchema
+
   return (
-    <div className="space-y-5 pb-6">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div className="space-y-1">
-          <h1 className="flex items-center gap-2 text-2xl font-semibold text-foreground">
-            <LayoutDashboard className="h-6 w-6 text-primary" />
-            Аналитика
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Универсальный слой аналитики для любых таблиц + единый контракт запросов
-          </p>
-        </div>
+    <div className="flex flex-col min-h-full pb-24 md:pb-6">
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground hover:bg-muted"
-            onClick={onSaveView}
+      {/* ---- Sticky Toolbar ---- */}
+      <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-md border-b border-border/60">
+        <div className="flex items-center gap-2 px-4 py-2.5 flex-wrap">
+
+          {/* Table selector */}
+          <select
+            className="h-8 rounded-lg border border-border bg-background px-2.5 text-sm max-w-[180px] text-foreground focus:outline-none focus:border-primary transition-colors"
+            value={selectedTableId}
+            onChange={(e) => setSelectedTableId(e.target.value)}
+            disabled={loadingInit}
           >
-            <Save className="h-4 w-4" />
-            Сохранить вид
-          </button>
-          <button
-            type="button"
-            className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground hover:bg-muted"
-            onClick={onLoadView}
-          >
-            <RefreshCcw className="h-4 w-4" />
-            Загрузить вид
-          </button>
-          <button
-            type="button"
-            className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground hover:bg-muted"
-            onClick={() => void onCopySnapshot()}
-          >
-            <Copy className="h-4 w-4" />
-            Снимок
-          </button>
-        </div>
-      </header>
+            {tables.length === 0 && <option value="">Загрузка...</option>}
+            {tables.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
 
-      <section className="grid gap-4 lg:grid-cols-12">
-        <aside className="space-y-4 lg:col-span-4">
-          <div className="rounded-2xl border border-border bg-card p-4">
-            <label className="mb-2 block text-xs font-medium uppercase tracking-wide text-muted-foreground">Таблица</label>
-            <select
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
-              value={selectedTableId}
-              onChange={(event) => setSelectedTableId(event.target.value)}
-              disabled={loadingInit}
-            >
-              {tables.map((table) => (
-                <option key={table.id} value={table.id}>
-                  {table.name}
-                </option>
-              ))}
-            </select>
-
-            <div className="mt-4 grid grid-cols-3 gap-2 text-xs">
-              <div className="rounded-lg border border-border/80 bg-muted/30 p-2">
-                <p className="text-muted-foreground">Измерения</p>
-                <p className="text-foreground">{schema?.dimensions.length ?? 0}</p>
-              </div>
-              <div className="rounded-lg border border-border/80 bg-muted/30 p-2">
-                <p className="text-muted-foreground">Метрики</p>
-                <p className="text-foreground">{schema?.measures.length ?? 0}</p>
-              </div>
-              <div className="rounded-lg border border-border/80 bg-muted/30 p-2">
-                <p className="text-muted-foreground">Время</p>
-                <p className="text-foreground">{schema?.time_dimensions.length ?? 0}</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-border bg-card p-4">
-            <p className="mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">Шаблоны раскладки</p>
-            <div className="space-y-2">
-              {PRESET_META.map((item) => (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => setPreset(item.key)}
-                  className={cn(
-                    'w-full rounded-xl border px-3 py-2 text-left transition-colors',
-                    preset === item.key
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border bg-background text-foreground hover:bg-muted',
-                  )}
-                >
-                  <p className="text-sm font-medium">{item.label}</p>
-                  <p className="text-xs text-muted-foreground">{item.description}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-border bg-card p-4">
-            <p className="mb-3 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <Filter className="h-4 w-4" />
-              Глобальные фильтры
-            </p>
-
-            <div className="space-y-2">
-              <select
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                value={draftFilter.column_id}
-                onChange={(event) => setDraftFilter((current) => ({ ...current, column_id: event.target.value }))}
-              >
-                <option value="">Поле</option>
-                {schema?.fields.map((field) => (
-                  <option key={field.id} value={field.id}>
-                    {field.name}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                value={draftFilter.op}
-                onChange={(event) => setDraftFilter((current) => ({ ...current, op: event.target.value as AnalyticsFilter['op'] }))}
-              >
-                {(selectedField?.supported_filter_ops ?? FILTER_OPERATORS.map((item) => item.value)).map((op) => (
-                  <option key={op} value={op}>
-                    {opLabel(op as AnalyticsFilter['op'])}
-                  </option>
-                ))}
-              </select>
-
-              {!['is_empty', 'not_empty'].includes(draftFilter.op) && (
-                <input
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
-                  placeholder={draftFilter.op === 'between' ? 'from,to' : draftFilter.op === 'in' || draftFilter.op === 'not_in' ? 'v1,v2,v3' : 'значение'}
-                  value={draftFilter.value}
-                  onChange={(event) => setDraftFilter((current) => ({ ...current, value: event.target.value }))}
-                />
-              )}
-
+          {/* Preset pills */}
+          <div className="flex gap-1 overflow-x-auto scrollbar-none">
+            {PRESET_META.map((p) => (
               <button
+                key={p.key}
                 type="button"
-                className="w-full rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
-                onClick={onAddFilter}
+                onClick={() => setPreset(p.key)}
+                className={cn(
+                  'shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-all duration-200 whitespace-nowrap',
+                  preset === p.key
+                    ? 'bg-primary text-primary-foreground shadow-sm'
+                    : 'bg-secondary text-muted-foreground hover:text-foreground hover:bg-secondary/80',
+                )}
               >
-                Добавить фильтр
+                {p.label}
               </button>
-            </div>
-
-            <div className="mt-3 space-y-2">
-              {filters.map((filter, idx) => (
-                <div key={`${filter.column_id}-${filter.op}-${idx}`} className="flex items-center justify-between rounded-lg border border-border bg-background px-3 py-2 text-xs">
-                  <span className="truncate text-muted-foreground">
-                    {schema?.fields.find((f) => f.id === filter.column_id)?.name ?? filter.column_id} · {opLabel(filter.op)}
-                  </span>
-                  <button
-                    type="button"
-                    className="text-xs text-destructive hover:underline"
-                    onClick={() => setFilters((current) => current.filter((_, currentIdx) => currentIdx !== idx))}
-                  >
-                    Удалить
-                  </button>
-                </div>
-              ))}
-            </div>
+            ))}
           </div>
 
-          <div className="rounded-2xl border border-border bg-card p-4">
-            <p className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <Brain className="h-4 w-4" />
-              AI Analyst (read-only)
-            </p>
-            <textarea
-              className="h-24 w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm"
-              placeholder="Например: где просадка и почему?"
-              value={aiQuestion}
-              onChange={(event) => setAiQuestion(event.target.value)}
-            />
+          <div className="flex-1" />
+
+          {/* Filter button */}
+          <div className="relative" ref={filterBtnRef}>
             <button
               type="button"
-              className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
-              onClick={() => void onAskAI()}
-              disabled={aiBusy}
+              onClick={() => setFilterOpen((v) => !v)}
+              className={cn(
+                'h-8 px-3 rounded-lg border border-border bg-background text-sm flex items-center gap-1.5 hover:bg-secondary transition-colors',
+                filterOpen && 'bg-secondary',
+              )}
             >
-              {aiBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
-              Получить анализ
+              <Funnel
+                weight={filters.length > 0 ? 'fill' : 'regular'}
+                className={cn('h-3.5 w-3.5', filters.length > 0 && 'text-primary')}
+              />
+              <span>Фильтры</span>
+              {filters.length > 0 && (
+                <span className="h-4 w-4 rounded-full bg-primary text-[10px] text-primary-foreground flex items-center justify-center font-semibold">
+                  {filters.length}
+                </span>
+              )}
             </button>
-            {aiError && <p className="mt-2 text-xs text-destructive">{aiError}</p>}
-            {aiAnswer && <p className="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">{aiAnswer}</p>}
+
+            {/* Filter popover */}
+            <AnimatePresence>
+              {filterOpen && (
+                <motion.div
+                  initial={{ opacity: 0, y: -4, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -4, scale: 0.97 }}
+                  transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
+                  className="absolute top-full right-0 mt-1.5 w-72 bg-card border border-border/80 rounded-xl shadow-xl z-30 p-3 space-y-2.5"
+                >
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Добавить фильтр</p>
+
+                  <select
+                    className="w-full h-8 rounded-lg border border-border bg-background px-2 text-sm focus:outline-none focus:border-primary transition-colors"
+                    value={draftFilter.column_id}
+                    onChange={(e) => setDraftFilter((d) => ({ ...d, column_id: e.target.value }))}
+                  >
+                    <option value="">Поле</option>
+                    {schema?.fields.map((f) => (
+                      <option key={f.id} value={f.id}>{f.name}</option>
+                    ))}
+                  </select>
+
+                  <select
+                    className="w-full h-8 rounded-lg border border-border bg-background px-2 text-sm focus:outline-none focus:border-primary transition-colors"
+                    value={draftFilter.op}
+                    onChange={(e) => setDraftFilter((d) => ({ ...d, op: e.target.value as AnalyticsFilter['op'] }))}
+                  >
+                    {(selectedField?.supported_filter_ops ?? FILTER_OPERATORS.map((o) => o.value)).map((op) => (
+                      <option key={op} value={op}>{opLabel(op as AnalyticsFilter['op'])}</option>
+                    ))}
+                  </select>
+
+                  {!['is_empty', 'not_empty'].includes(draftFilter.op) && (
+                    <input
+                      className="w-full h-8 rounded-lg border border-border bg-background px-2.5 text-sm focus:outline-none focus:border-primary transition-colors"
+                      placeholder={
+                        draftFilter.op === 'between'
+                          ? 'от,до'
+                          : draftFilter.op === 'in' || draftFilter.op === 'not_in'
+                          ? 'v1,v2,v3'
+                          : 'значение'
+                      }
+                      value={draftFilter.value}
+                      onChange={(e) => setDraftFilter((d) => ({ ...d, value: e.target.value }))}
+                    />
+                  )}
+
+                  {error && (
+                    <p className="text-xs text-destructive">{error}</p>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={onAddFilter}
+                    className="w-full h-8 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:opacity-90 transition-opacity"
+                  >
+                    Применить фильтр
+                  </button>
+
+                  {/* Active filters */}
+                  {filters.length > 0 && (
+                    <div className="space-y-1.5 pt-1 border-t border-border/60">
+                      <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">Активные</p>
+                      {filters.map((f, idx) => (
+                        <div
+                          key={`${f.column_id}-${f.op}-${idx}`}
+                          className="flex items-center justify-between rounded-lg border border-border/60 bg-background/60 px-2.5 py-1.5"
+                        >
+                          <span className="text-xs text-muted-foreground truncate">
+                            {schema?.fields.find((sf) => sf.id === f.column_id)?.name ?? f.column_id}
+                            {' '}
+                            <span className="text-foreground/60">{opLabel(f.op)}</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setFilters((prev) => prev.filter((_, i) => i !== idx))}
+                            className="ml-2 text-muted-foreground hover:text-destructive transition-colors"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setFilterOpen(false)}
+                    className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors py-0.5"
+                  >
+                    Закрыть
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
-        </aside>
 
-        <main className="space-y-4 lg:col-span-8">
-          {error && (
-            <div className="rounded-xl border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-              {error}
-            </div>
-          )}
+          {/* Add chart */}
+          <button
+            type="button"
+            onClick={addChart}
+            disabled={!schema}
+            className="h-8 px-3 rounded-lg bg-primary text-primary-foreground text-sm font-medium flex items-center gap-1.5 hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Plus className="h-3.5 w-3.5" weight="bold" />
+            <span className="hidden sm:inline">График</span>
+          </button>
 
-          {(loadingInit || loadingSchema) && (
-            <div className="flex h-36 items-center justify-center rounded-2xl border border-border bg-card text-sm text-muted-foreground">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Готовим semantic schema...
-            </div>
-          )}
+          {/* AI */}
+          <button
+            type="button"
+            onClick={() => setAiOpen(true)}
+            className="h-8 w-8 rounded-lg border border-border bg-background flex items-center justify-center hover:bg-secondary transition-colors"
+            title="AI Аналитик"
+          >
+            <Robot className="h-4 w-4 text-primary" />
+          </button>
 
-          {!loadingInit && !loadingSchema && schema && (
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              {widgets.map((widget) => (
-                <div key={widget.id} className={cn(widget.widgetType === 'table' || widget.widgetType === 'line' || widget.widgetType === 'area' ? 'xl:col-span-2' : '')}>
-                  <AnalyticsWidgetCardV2 widget={widget} />
-                </div>
+          {/* Save */}
+          <button
+            type="button"
+            onClick={onSaveView}
+            className="h-8 w-8 rounded-lg border border-border bg-background flex items-center justify-center hover:bg-secondary transition-colors"
+            title="Сохранить вид"
+          >
+            <FloppyDisk className="h-4 w-4 text-muted-foreground" />
+          </button>
+
+          {/* Refresh all */}
+          <button
+            type="button"
+            onClick={() => {
+              if (!selectedTableId) return
+              charts.forEach((c) => void loadChartData(c, selectedTableId, filters))
+            }}
+            className="h-8 w-8 rounded-lg border border-border bg-background flex items-center justify-center hover:bg-secondary transition-colors"
+            title="Обновить все"
+          >
+            <ArrowClockwise className="h-4 w-4 text-muted-foreground" />
+          </button>
+        </div>
+      </div>
+
+      {/* ---- Main Content ---- */}
+      <div className="p-4 md:p-6">
+
+        {/* Error banner */}
+        {error && !filterOpen && (
+          <div className="mb-4 rounded-xl border border-destructive/40 bg-destructive/8 px-4 py-2.5 text-sm text-destructive flex items-center justify-between">
+            <span>{error}</span>
+            <button type="button" onClick={() => setError(null)} className="ml-3 opacity-60 hover:opacity-100 transition-opacity">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* Loading state */}
+        {isLoading && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div
+                key={i}
+                className={cn(
+                  'h-48 rounded-2xl bg-card border border-border/60 animate-pulse',
+                  i === 0 || i === 1 ? 'col-span-1' : i >= 4 ? 'col-span-full' : 'col-span-1 sm:col-span-1 lg:col-span-2',
+                )}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* No schema */}
+        {!isLoading && !schema && selectedTableId && (
+          <div className="rounded-2xl border border-border/60 bg-card p-8 text-center text-sm text-muted-foreground">
+            Для выбранной таблицы не удалось построить аналитическую схему.
+          </div>
+        )}
+
+        {/* No table selected */}
+        {!isLoading && !selectedTableId && (
+          <div className="rounded-2xl border border-border/60 bg-card p-8 text-center text-sm text-muted-foreground">
+            Выберите таблицу для начала работы.
+          </div>
+        )}
+
+        {/* Dashboard grid */}
+        {!isLoading && schema && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 auto-rows-auto">
+            <AnimatePresence initial={false}>
+              {charts.map((chart) => (
+                <motion.div
+                  key={chart.id}
+                  initial={{ opacity: 0, scale: 0.96 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.96 }}
+                  transition={{ duration: 0.22, ease: [0.32, 0.72, 0, 1] }}
+                  className={cn(
+                    chart.widgetType === 'metric'
+                      ? 'col-span-1'
+                      : chart.widgetType === 'table'
+                      ? 'col-span-full'
+                      : chart.widgetType === 'line' || chart.widgetType === 'area'
+                      ? 'col-span-full sm:col-span-2 lg:col-span-4'
+                      : 'col-span-1 sm:col-span-1 lg:col-span-2',
+                  )}
+                >
+                  <ChartCard
+                    chart={chart}
+                    schema={schema}
+                    onUpdate={(updates) => {
+                      updateChart(chart.id, updates)
+                      // Refetch if config change affects data dimensions
+                      const dataKeys: (keyof ChartConfig)[] = [
+                        'widgetType', 'xColumnId', 'yAggregation', 'yColumnId',
+                        'dateBucket', 'limit', 'sortDir',
+                      ]
+                      const needsRefetch = Object.keys(updates).some((k) => dataKeys.includes(k as keyof ChartConfig))
+                      if (needsRefetch && selectedTableId) {
+                        const updated = { ...chart, ...updates }
+                        void loadChartData(updated, selectedTableId, filters)
+                      }
+                    }}
+                    onDelete={() => deleteChart(chart.id)}
+                    onRefresh={() => {
+                      if (selectedTableId) void loadChartData(chart, selectedTableId, filters)
+                    }}
+                  />
+                </motion.div>
               ))}
-            </div>
-          )}
+            </AnimatePresence>
 
-          {!loadingInit && !loadingSchema && !schema && (
-            <div className="rounded-2xl border border-border bg-card p-6 text-sm text-muted-foreground">
-              Для выбранной таблицы не удалось построить semantic schema.
-            </div>
-          )}
+            {/* Add card placeholder */}
+            <motion.button
+              type="button"
+              onClick={addChart}
+              disabled={!schema}
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.99 }}
+              transition={{ duration: 0.15, ease: [0.32, 0.72, 0, 1] }}
+              className="col-span-1 h-40 rounded-2xl border-2 border-dashed border-border/60 flex flex-col items-center justify-center gap-2 text-muted-foreground hover:border-primary hover:text-primary hover:bg-primary/5 transition-all duration-200 group disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Plus className="h-7 w-7 group-hover:scale-110 transition-transform duration-200" />
+              <span className="text-sm font-medium">Добавить график</span>
+            </motion.button>
+          </div>
+        )}
+      </div>
 
-          {loadingWidgets && (
-            <p className="text-xs text-muted-foreground">Обновление виджетов по единому превью...</p>
-          )}
-        </main>
-      </section>
+      {/* ---- AI Modal ---- */}
+      <AnimatePresence>
+        {aiOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+            onClick={() => setAiOpen(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, y: 24, scale: 0.97 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.97 }}
+              transition={{ duration: 0.22, ease: [0.32, 0.72, 0, 1] }}
+              className="w-full max-w-lg bg-card rounded-2xl border border-border shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal header */}
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border/60">
+                <span className="font-semibold text-sm flex items-center gap-2">
+                  <Robot className="h-4 w-4 text-primary" />
+                  AI Аналитик
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setAiOpen(false)}
+                  className="h-7 w-7 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Modal body */}
+              <div className="p-4 space-y-3">
+                <textarea
+                  className="w-full h-24 resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:border-primary transition-colors placeholder:text-muted-foreground/60"
+                  placeholder="Например: где просадка и почему?"
+                  value={aiQuestion}
+                  onChange={(e) => setAiQuestion(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void onAskAI()
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => void onAskAI()}
+                  disabled={aiBusy || !aiQuestion.trim()}
+                  className="w-full h-9 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 flex items-center justify-center gap-2 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {aiBusy ? (
+                    <ArrowClockwise className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Robot className="h-4 w-4" />
+                  )}
+                  Получить анализ
+                </button>
+
+                {aiAnswer && (
+                  <div className="text-xs text-muted-foreground whitespace-pre-wrap bg-secondary/30 rounded-xl p-3 max-h-48 overflow-y-auto leading-relaxed">
+                    {aiAnswer}
+                  </div>
+                )}
+
+                {aiError && (
+                  <p className="text-xs text-destructive">{aiError}</p>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }

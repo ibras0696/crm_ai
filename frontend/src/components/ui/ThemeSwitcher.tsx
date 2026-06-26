@@ -381,8 +381,9 @@ export function ThemeSwitcher() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -6, scale: 0.96 }}
             transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
-            className="absolute right-0 top-[calc(100%+6px)] z-[9999] w-64 rounded-2xl border border-border bg-card shadow-2xl"
+            className="absolute right-0 top-[calc(100%+6px)] z-[9999] w-64 max-w-[calc(100vw-1rem)] rounded-2xl border border-border bg-card shadow-2xl"
           >
+            <div className="max-h-[calc(100dvh-6rem)] overflow-y-auto overscroll-contain rounded-2xl">
             <div className="space-y-3 p-3">
 
               {/* ── Mode ── */}
@@ -510,38 +511,51 @@ export function ThemeSwitcher() {
 
               {/* ── Saved presets ── */}
               <Section title={`Стили (${presets.filter(Boolean).length}/${MAX_PRESETS})`} defaultOpen>
-                <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-                  {presets.map((p, i) =>
-                    savingName === i ? (
-                      /* Name input */
-                      <div key={i} className="col-span-2 flex gap-1.5">
-                        <input
-                          autoFocus
-                          value={nameInput}
-                          onChange={(e) => setNameInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') confirmSavePreset(i)
-                            if (e.key === 'Escape') setSavingName(null)
-                          }}
-                          placeholder="Название стиля"
-                          className="flex-1 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => confirmSavePreset(i)}
-                          className="rounded-lg bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                        >
-                          OK
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSavingName(null)}
-                          className="rounded-lg border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ) : (
+                <div className="mt-1.5 space-y-1.5">
+                  {/* Name input — above the grid, not inside it */}
+                  <AnimatePresence initial={false}>
+                    {savingName !== null && (
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.15 }}
+                        className="overflow-hidden"
+                      >
+                        <div className="flex gap-1.5 pb-0.5">
+                          <input
+                            autoFocus
+                            value={nameInput}
+                            onChange={(e) => setNameInput(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') confirmSavePreset(savingName)
+                              if (e.key === 'Escape') setSavingName(null)
+                            }}
+                            placeholder="Название стиля"
+                            className="flex-1 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => confirmSavePreset(savingName)}
+                            className="rounded-lg bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                          >
+                            OK
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setSavingName(null)}
+                            className="rounded-lg border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Always 2×2 grid — never broken by inline input */}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {presets.map((p, i) => (
                       <PresetSlot
                         key={i}
                         preset={p}
@@ -550,11 +564,12 @@ export function ThemeSwitcher() {
                         onSave={handleSavePreset}
                         onDelete={deletePreset}
                       />
-                    )
-                  )}
+                    ))}
+                  </div>
                 </div>
               </Section>
 
+            </div>
             </div>
           </motion.div>
         )}

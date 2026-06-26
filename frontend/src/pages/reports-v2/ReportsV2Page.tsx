@@ -23,20 +23,7 @@ import {
 import { FILTER_OPERATORS } from '@/lib/constants'
 import { cn } from '@/lib/utils'
 import ChartCard from './AnalyticsWidgetCardV2'
-import { buildWidgetPlans, type DashboardPreset, type WidgetPlan } from './presetBuilder'
 import type { ChartConfig } from './AnalyticsWidgetCardV2'
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const PRESET_META: Array<{ key: DashboardPreset; label: string }> = [
-  { key: 'executive', label: 'Руководитель' },
-  { key: 'revenue', label: 'Выручка' },
-  { key: 'ops', label: 'Операции' },
-  { key: 'funnel', label: 'Воронка' },
-  { key: 'marketing', label: 'Маркетинг' },
-]
 
 // ---------------------------------------------------------------------------
 // Types
@@ -119,28 +106,6 @@ function buildQuery(c: ChartConfig, tableId: string, globalFilters: AnalyticsFil
   }
 }
 
-function planToConfig(plan: WidgetPlan): ChartConfig {
-  const q = plan.query
-  const m = q.metrics[0]
-  const xIsTime = Boolean(q.time_column_id)
-  return {
-    id: plan.id,
-    title: plan.title,
-    widgetType: plan.widget_type,
-    xMode: xIsTime ? 'time' : 'group',
-    xColumnId: xIsTime ? (q.time_column_id ?? null) : (q.group_by_column_id ?? null),
-    dateBucket: q.date_bucket ?? 'month',
-    yAggregation: m?.aggregation ?? 'count',
-    yColumnId: m?.column_id ?? null,
-    limit: q.limit ?? 12,
-    sortDir: q.sort?.direction ?? 'desc',
-    data: null,
-    loading: true,
-    error: null,
-    isConfigOpen: false,
-  }
-}
-
 function extractQueryData(payload: unknown): Record<string, unknown> | null {
   if (!payload || typeof payload !== 'object') return null
   const root = payload as Record<string, unknown>
@@ -162,7 +127,6 @@ export default function ReportsV2Page() {
   const [tables, setTables] = useState<TableInfo[]>([])
   const [selectedTableId, setSelectedTableId] = useState('')
   const [schema, setSchema] = useState<AnalyticsSemanticSchema | null>(null)
-  const [preset, setPreset] = useState<DashboardPreset>('executive')
   const [charts, setCharts] = useState<ChartConfig[]>([])
   const [filters, setFilters] = useState<AnalyticsFilter[]>([])
 
@@ -223,15 +187,6 @@ export default function ReportsV2Page() {
   // Effects
   // -------------------------------------------------------------------------
 
-  // Init: read URL params
-  useEffect(() => {
-    const presetParam = searchParams.get('preset')
-    if (presetParam && PRESET_META.some((p) => p.key === presetParam)) {
-      setPreset(presetParam as DashboardPreset)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
   // Load tables
   useEffect(() => {
     let active = true
@@ -248,13 +203,12 @@ export default function ReportsV2Page() {
         const defaultTable = items.find((t) => t.id === urlTable)?.id ?? items[0]?.id ?? ''
         setSelectedTableId(defaultTable)
 
-        // Try restore saved view
+        // Try restore saved filters
         if (defaultTable) {
           const saved = localStorage.getItem(`analytics-v2:view:${defaultTable}`)
           if (saved) {
             try {
-              const parsed = JSON.parse(saved) as { preset?: DashboardPreset; filters?: AnalyticsFilter[] }
-              if (parsed.preset && PRESET_META.some((p) => p.key === parsed.preset)) setPreset(parsed.preset)
+              const parsed = JSON.parse(saved) as { filters?: AnalyticsFilter[] }
               if (Array.isArray(parsed.filters)) setFilters(parsed.filters)
             } catch {
               // ignore
@@ -308,40 +262,21 @@ export default function ReportsV2Page() {
     }
   }, [selectedTableId])
 
-  // Build charts when schema/preset changes
+  // Reset charts when table changes (user builds their own dashboard)
   useEffect(() => {
     if (!selectedTableId || !schema) {
       setCharts([])
-      return
-    }
-
-    const plans = buildWidgetPlans({ tableId: selectedTableId, schema, preset, filters })
-    const newCharts = plans.map(planToConfig)
-    setCharts(newCharts)
-
-    // Fetch data for each chart
-    let active = true
-    void Promise.all(
-      newCharts.map(async (c) => {
-        if (!active) return
-        await loadChartData(c, selectedTableId, filters)
-      }),
-    )
-
-    return () => {
-      active = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTableId, schema, preset, filters])
+  }, [selectedTableId, schema])
 
   // Sync URL params
   useEffect(() => {
     const next = new URLSearchParams()
     if (selectedTableId) next.set('table', selectedTableId)
-    next.set('preset', preset)
     setSearchParams(next, { replace: true })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTableId, preset])
+  }, [selectedTableId])
 
   // -------------------------------------------------------------------------
   // Actions
@@ -390,7 +325,6 @@ export default function ReportsV2Page() {
     localStorage.setItem(
       storageKey,
       JSON.stringify({
-        preset,
         filters,
         charts: charts.map((c) => ({ ...c, data: null, loading: false })),
       }),
@@ -405,7 +339,6 @@ export default function ReportsV2Page() {
     try {
       const ctx = {
         table: schema?.table_name,
-        preset,
         filters,
         charts: charts.map((c) => c.title),
       }
@@ -454,25 +387,6 @@ export default function ReportsV2Page() {
               </option>
             ))}
           </select>
-
-          {/* Preset pills */}
-          <div className="flex gap-1 overflow-x-auto scrollbar-none">
-            {PRESET_META.map((p) => (
-              <button
-                key={p.key}
-                type="button"
-                onClick={() => setPreset(p.key)}
-                className={cn(
-                  'shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-all duration-200 whitespace-nowrap',
-                  preset === p.key
-                    ? 'bg-primary text-primary-foreground shadow-sm'
-                    : 'bg-secondary text-muted-foreground hover:text-foreground hover:bg-secondary/80',
-                )}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
 
           <div className="flex-1" />
 

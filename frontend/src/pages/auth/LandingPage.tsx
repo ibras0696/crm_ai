@@ -247,8 +247,7 @@ const PremiumCursor = () => {
         style={{
           x: ringX, y: ringY,
           translateX: '-50%', translateY: '-50%',
-          border: '1px solid hsl(var(--primary)/0.55)',
-          boxShadow: '0 0 14px hsl(var(--primary)/0.18), inset 0 0 6px hsl(var(--primary)/0.06)',
+          boxShadow: '0 0 0 1px hsl(var(--primary)/0.5), 0 0 16px hsl(var(--primary)/0.2), inset 0 0 6px hsl(var(--primary)/0.06)',
         }}
       />
       {/* Inner dot — snappy */}
@@ -1073,15 +1072,15 @@ export default function LandingPage() {
                         <div className="h-2.5 w-2.5 rounded-full bg-emerald-500/40" />
                       </div>
                       <div className="flex-1 h-5 rounded-md bg-secondary/60 mx-6" />
-                      <div className="h-6 w-6 rounded-full bg-gradient-to-tr from-primary to-purple-500" />
+                      <div className="h-6 w-6 rounded-full bg-gradient-to-br from-primary to-primary/40" />
                     </div>
                     {/* Stats */}
                     <div className="p-5 space-y-4">
                       <div className="grid grid-cols-3 gap-3">
                         {[
-                          { label: 'Выручка', value: '₽12.4M', delta: '+14%', color: 'text-emerald-400' },
-                          { label: 'Сделок',  value: '184',    delta: '+8%',  color: 'text-blue-400' },
-                          { label: 'Конверсия',value: '24.5%', delta: '+12%', color: 'text-purple-400' },
+                          { label: 'Выручка', value: '₽12.4M', delta: '+14%', color: 'text-primary' },
+                          { label: 'Сделок',  value: '184',    delta: '+8%',  color: 'text-primary/70' },
+                          { label: 'Конверсия',value: '24.5%', delta: '+12%', color: 'text-primary/50' },
                         ].map((s, i) => (
                           <div key={i} className="rounded-xl bg-secondary/40 p-3">
                             <div className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">{s.label}</div>
@@ -1103,8 +1102,8 @@ export default function LandingPage() {
                       </div>
                       <div className="space-y-2">
                         {[
-                          { label: 'Внедрение AI-платформы', status: 'В работе',   c: 'bg-blue-400/12 text-blue-400' },
-                          { label: 'Разработка MVP CRM',     status: 'Проверка',   c: 'bg-purple-400/12 text-purple-400' },
+                          { label: 'Внедрение AI-платформы', status: 'В работе',   c: 'bg-primary/10 text-primary' },
+                          { label: 'Разработка MVP CRM',     status: 'Проверка',   c: 'bg-muted text-muted-foreground' },
                           { label: 'Дизайн-система v2',      status: 'Оплачено',   c: 'bg-emerald-400/12 text-emerald-400' },
                         ].map((row, i) => (
                           <div key={i} className="flex items-center gap-3 rounded-lg bg-secondary/20 px-3 py-2">
@@ -1143,16 +1142,39 @@ export default function LandingPage() {
                   <span className="text-hero-gradient">{content.hero.titleAccent}</span>
                 </motion.h1>
 
+                {/* Feature icons — fill empty space on mobile/tablet */}
+                <motion.div
+                  initial={{ opacity: 0, y: 16 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.24, duration: 0.7, ease: EXPO_OUT }}
+                  className="flex justify-center gap-5 sm:gap-7"
+                >
+                  {[
+                    { icon: Table,            label: 'Таблицы' },
+                    { icon: Brain,            label: 'AI' },
+                    { icon: ChatTeardropDots, label: 'Чат' },
+                    { icon: CalendarBlank,    label: 'Расписание' },
+                    { icon: FileText,         label: 'Docs' },
+                  ].map(({ icon: Icon, label }) => (
+                    <div key={label} className="flex flex-col items-center gap-1.5">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-primary/8 border border-primary/15">
+                        <Icon className="h-5 w-5 text-primary" weight="duotone" />
+                      </div>
+                      <span className="text-[10px] font-medium text-muted-foreground">{label}</span>
+                    </div>
+                  ))}
+                </motion.div>
+
                 <motion.p
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.28, duration: 0.8, ease: EXPO_OUT }}
+                  transition={{ delay: 0.34, duration: 0.8, ease: EXPO_OUT }}
                   className="text-base sm:text-lg text-muted-foreground max-w-2xl mx-auto font-medium leading-relaxed"
                 >
                   {content.hero.description}
                 </motion.p>
 
-                <motion.div initial={{ opacity: 0, scale: 0.92 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.42, duration: 0.7, ease: EXPO_OUT }}>
+                <motion.div initial={{ opacity: 0, scale: 0.92 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.48, duration: 0.7, ease: EXPO_OUT }}>
                   <Link to="/register">
                     <button className="cta-btn-sm group inline-flex items-center gap-3 rounded-full bg-primary px-8 py-4 text-base font-bold text-white hover:bg-primary/90 active:scale-[0.98] transition-all duration-300">
                       {content.hero.cta}

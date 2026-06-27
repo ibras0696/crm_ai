@@ -3,8 +3,8 @@
 from fastapi import APIRouter
 
 from src.modules.access.routes import router as access_router
-from src.modules.appearance.routes import router as appearance_router
 from src.modules.ai.routes import router as ai_router
+from src.modules.appearance.routes import router as appearance_router
 from src.modules.audit.routes import router as audit_router
 from src.modules.auth.routes import router as auth_router
 from src.modules.billing.routes import router as billing_router

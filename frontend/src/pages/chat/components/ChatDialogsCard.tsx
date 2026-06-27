@@ -596,7 +596,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
     isMobileViewport,
     isDesktopSidebarCollapsed,
     setIsDesktopSidebarCollapsed,
-    renderChatList: _,          // unused now, we render ourselves
+    renderChatList: legacyRenderChatList,          // unused now, we render ourselves
     dialogsQuery,
     setDialogsQuery,
     selectedChat,
@@ -625,6 +625,7 @@ export function ChatDialogsCard(props: Record<string, unknown>) {
     // pass-through for MessageViewport & ChatComposerSection
     ...rest
   } = props as any
+  void legacyRenderChatList
 
   // Extract chats and loading from the renderChatList closure via rest (not available),
   // so ChatPage needs to pass them explicitly. We re-use existing props.

@@ -267,7 +267,6 @@ export default function ReportsV2Page() {
     if (!selectedTableId || !schema) {
       setCharts([])
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTableId, schema])
 
   // Sync URL params

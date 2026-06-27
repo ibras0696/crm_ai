@@ -73,6 +73,8 @@ export function AttachmentPreview({
   isMessageVisible,
   forceEagerLoad = false,
   telemetryEnabled = true,
+  hintDurationMs,
+  isOutgoing = false,
 }: {
   chatId: string
   attachment: ChatAttachmentInfo
@@ -80,6 +82,8 @@ export function AttachmentPreview({
   isMessageVisible: boolean
   forceEagerLoad?: boolean
   telemetryEnabled?: boolean
+  hintDurationMs?: number
+  isOutgoing?: boolean
 }) {
   const [isElementVisible, setIsElementVisible] = useState(false)
   const [audioFailed, setAudioFailed] = useState(false)
@@ -231,9 +235,12 @@ export function AttachmentPreview({
     setAudioCurrentTime(Math.max(0, nextValue))
   }
 
+  // WebM/Opus recordings often have NaN duration in metadata — use server hint as fallback
+  const effectiveDuration = audioDuration > 0 ? audioDuration : (hintDurationMs ?? 0) / 1000
+
   const audioProgressPercent = (() => {
-    if (audioDuration <= 0) return 0
-    return clamp01(audioCurrentTime / audioDuration) * 100
+    if (effectiveDuration <= 0) return 0
+    return clamp01(audioCurrentTime / effectiveDuration) * 100
   })()
 
   const handleAudioTrackSeek = (event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -363,7 +370,11 @@ export function AttachmentPreview({
             <button
               type="button"
               onClick={() => void toggleAudioPlayback()}
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground transition-colors hover:bg-primary/90 active:scale-95"
+              className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors active:scale-95 ${
+                isOutgoing
+                  ? 'bg-white/25 text-white hover:bg-white/35'
+                  : 'bg-primary text-primary-foreground hover:bg-primary/90'
+              }`}
               aria-label={isAudioPlaying ? 'Пауза' : 'Воспроизвести'}
             >
               {isAudioPlaying
@@ -376,23 +387,35 @@ export function AttachmentPreview({
               <button
                 type="button"
                 onClick={handleAudioTrackSeek}
-                className="flex h-8 w-full cursor-pointer items-center gap-px"
+                className="flex h-8 w-full cursor-pointer items-center gap-[2px]"
                 aria-label="Перемотать голосовое сообщение"
               >
                 {generateWaveformBars(attachment.file_id, WAVEFORM_BARS).map((height, i) => {
-                  const played = i / WAVEFORM_BARS < audioProgressPercent / 100
+                  const ratio = i / WAVEFORM_BARS
+                  const progress = audioProgressPercent / 100
+                  const played = ratio < progress
+                  const isCursor = isAudioPlaying && Math.abs(ratio - progress) < 2 / WAVEFORM_BARS
+                  const barH = Math.round(height * 22)
                   return (
                     <span
                       key={i}
-                      className={`flex-1 rounded-full transition-colors ${played ? 'bg-primary' : 'bg-muted-foreground/30'}`}
-                      style={{ height: `${Math.round(height * 24)}px`, minHeight: '3px' }}
+                      className={`flex-1 rounded-full transition-all duration-75 ${
+                        played
+                          ? isOutgoing ? 'bg-white' : 'bg-primary'
+                          : isOutgoing ? 'bg-white/40' : 'bg-muted-foreground/25'
+                      }`}
+                      style={{
+                        height: `${isCursor ? Math.min(barH * 1.3, 26) : barH}px`,
+                        minHeight: '3px',
+                        opacity: played ? 1 : (isOutgoing ? 0.6 : 0.45),
+                      }}
                     />
                   )
                 })}
               </button>
-              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+              <div className={`flex items-center justify-between text-[11px] ${isOutgoing ? 'text-white/70' : 'text-muted-foreground'}`}>
                 <span>{formatClockSeconds(audioCurrentTime)}</span>
-                <span>{formatClockSeconds(audioDuration)}</span>
+                <span>{formatClockSeconds(effectiveDuration)}</span>
               </div>
             </div>
           </div>

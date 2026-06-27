@@ -1,10 +1,6 @@
 """Pagination utilities and schemas."""
 
-from typing import Generic, TypeVar
-
 from pydantic import BaseModel, Field, field_validator
-
-T = TypeVar("T")
 
 
 class PaginationParams(BaseModel):
@@ -20,7 +16,7 @@ class PaginationParams(BaseModel):
         return min(v, 1000)
 
 
-class PaginatedResponse(BaseModel, Generic[T]):
+class PaginatedResponse[T](BaseModel):
     """Paginated response with metadata."""
 
     items: list[T]
@@ -47,7 +43,7 @@ class CursorPaginationParams(BaseModel):
         return min(v, 1000)
 
 
-class CursorPaginatedResponse(BaseModel, Generic[T]):
+class CursorPaginatedResponse[T](BaseModel):
     """Cursor-based paginated response."""
 
     items: list[T]

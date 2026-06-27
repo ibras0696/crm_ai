@@ -21,78 +21,75 @@ const ACCENTS = [
 // SVG icons per accent
 // ---------------------------------------------------------------------------
 function AccentIcon({ id, color }: { id: string; color: string }) {
-  const size = 22
+  const size = 28
+  const bg = <rect width="28" height="28" rx="7" ry="7" fill={color} />
   switch (id) {
     case 'teal':
       return (
-        <svg width={size} height={size} viewBox="0 0 22 22" fill="none" aria-hidden="true">
-          <circle cx="11" cy="11" r="11" fill={color} />
-          {/* water drop */}
-          <path d="M11 4C11 4 6.5 9.5 6.5 13A4.5 4.5 0 0 0 15.5 13C15.5 9.5 11 4 11 4Z"
+        <svg width={size} height={size} viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          {bg}
+          <path d="M14 5.5C14 5.5 8.5 12 8.5 16.5A5.5 5.5 0 0 0 19.5 16.5C19.5 12 14 5.5 14 5.5Z"
             fill="white" opacity="0.9" />
         </svg>
       )
     case 'amber':
       return (
-        <svg width={size} height={size} viewBox="0 0 22 22" fill="none" aria-hidden="true">
-          <circle cx="11" cy="11" r="11" fill={color} />
-          {/* sun */}
-          <circle cx="11" cy="11" r="3.5" fill="white" opacity="0.9" />
+        <svg width={size} height={size} viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          {bg}
+          <circle cx="14" cy="14" r="3.8" fill="white" opacity="0.9" />
           {[0,45,90,135,180,225,270,315].map((deg) => {
             const r = (deg * Math.PI) / 180
             return (
               <line key={deg}
-                x1={(11 + 5.5 * Math.cos(r)).toFixed(2)} y1={(11 + 5.5 * Math.sin(r)).toFixed(2)}
-                x2={(11 + 7.2 * Math.cos(r)).toFixed(2)} y2={(11 + 7.2 * Math.sin(r)).toFixed(2)}
-                stroke="white" strokeWidth="1.6" strokeLinecap="round" opacity="0.9" />
+                x1={(14 + 6.3 * Math.cos(r)).toFixed(2)} y1={(14 + 6.3 * Math.sin(r)).toFixed(2)}
+                x2={(14 + 8.2 * Math.cos(r)).toFixed(2)} y2={(14 + 8.2 * Math.sin(r)).toFixed(2)}
+                stroke="white" strokeWidth="1.8" strokeLinecap="round" opacity="0.9" />
             )
           })}
         </svg>
       )
     case 'violet':
       return (
-        <svg width={size} height={size} viewBox="0 0 22 22" fill="none" aria-hidden="true">
-          <circle cx="11" cy="11" r="11" fill={color} />
-          {/* gem / diamond */}
-          <polygon points="11,4.5 16,9 11,18 6,9" fill="white" opacity="0.85" />
-          <polygon points="11,4.5 16,9 11,10.5 6,9" fill="white" opacity="0.5" />
-          <line x1="6" y1="9" x2="16" y2="9" stroke={color} strokeWidth="0.8" opacity="0.6" />
+        <svg width={size} height={size} viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          {bg}
+          <polygon points="14,5.5 20,11.5 14,23 8,11.5" fill="white" opacity="0.85" />
+          <polygon points="14,5.5 20,11.5 14,13.5 8,11.5" fill="white" opacity="0.5" />
+          <line x1="8" y1="11.5" x2="20" y2="11.5" stroke={color} strokeWidth="0.9" opacity="0.6" />
         </svg>
       )
     case 'rose':
       return (
-        <svg width={size} height={size} viewBox="0 0 22 22" fill="none" aria-hidden="true">
-          <circle cx="11" cy="11" r="11" fill={color} />
-          {/* heart */}
-          <path d="M11 16.5C11 16.5 4.5 12.2 4.5 8.5C4.5 6.5 6.2 5 8 5C9.3 5 10.4 5.7 11 6.7C11.6 5.7 12.7 5 14 5C15.8 5 17.5 6.5 17.5 8.5C17.5 12.2 11 16.5 11 16.5Z"
+        <svg width={size} height={size} viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          {bg}
+          <path d="M14 21C14 21 5.5 15.5 5.5 10.5C5.5 7.5 7.8 6 10 6C11.7 6 13.1 6.9 14 8.2C14.9 6.9 16.3 6 18 6C20.2 6 22.5 7.5 22.5 10.5C22.5 15.5 14 21 14 21Z"
             fill="white" opacity="0.9" />
         </svg>
       )
     case 'sky':
       return (
-        <svg width={size} height={size} viewBox="0 0 22 22" fill="none" aria-hidden="true">
-          <circle cx="11" cy="11" r="11" fill={color} />
-          {/* cloud */}
-          <ellipse cx="11" cy="13" rx="5.5" ry="3.2" fill="white" opacity="0.9" />
-          <circle cx="9" cy="11.5" r="2.5" fill="white" opacity="0.9" />
-          <circle cx="13" cy="11" r="3" fill="white" opacity="0.9" />
+        <svg width={size} height={size} viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          {bg}
+          <ellipse cx="14" cy="16.5" rx="6.5" ry="3.8" fill="white" opacity="0.9" />
+          <circle cx="11.5" cy="14.5" r="3" fill="white" opacity="0.9" />
+          <circle cx="16" cy="13.5" r="3.5" fill="white" opacity="0.9" />
         </svg>
       )
     case 'lime':
       return (
-        <svg width={size} height={size} viewBox="0 0 22 22" fill="none" aria-hidden="true">
-          <circle cx="11" cy="11" r="11" fill={color} />
-          {/* leaf */}
-          <path d="M11 5C11 5 17 8 17 13C17 16 14.5 17 11 17C7.5 17 5 16 5 13C5 8 11 5 11 5Z"
+        <svg width={size} height={size} viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          {bg}
+          <path d="M14 6C14 6 21.5 9.5 21.5 16C21.5 20 18.5 21.5 14 21.5C9.5 21.5 6.5 20 6.5 16C6.5 9.5 14 6 14 6Z"
             fill="white" opacity="0.9" />
-          <line x1="11" y1="17" x2="11" y2="9" stroke={color} strokeWidth="1" opacity="0.5" />
-          <path d="M11 12 Q8 10 7 8" stroke={color} strokeWidth="0.8" fill="none" opacity="0.4" />
-          <path d="M11 10 Q14 8 15 7" stroke={color} strokeWidth="0.8" fill="none" opacity="0.4" />
+          <line x1="14" y1="21.5" x2="14" y2="11" stroke={color} strokeWidth="1.2" opacity="0.5" />
+          <path d="M14 15 Q10.5 12.5 9 9.5" stroke={color} strokeWidth="1" fill="none" opacity="0.4" />
+          <path d="M14 12.5 Q17.5 10 19 8" stroke={color} strokeWidth="1" fill="none" opacity="0.4" />
         </svg>
       )
     default:
       return (
-        <span className="h-[22px] w-[22px] rounded-full" style={{ background: color }} />
+        <svg width={size} height={size} viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <rect width="28" height="28" rx="7" ry="7" fill={color} />
+        </svg>
       )
   }
 }
@@ -283,11 +280,17 @@ export function ThemeSwitcher() {
   const [savingName, setSavingName] = useState<number | null>(null)
   const [nameInput, setNameInput] = useState('')
   const ref = useRef<HTMLDivElement>(null)
+  // Tracks whether user has made any local change before the server GET resolves.
+  // If true, the server response must NOT overwrite the user's selection.
+  const hasUserChangedRef = useRef(false)
+  const markChanged = () => { hasUserChangedRef.current = true }
 
-  // Load from server on mount
+  // Load from server on mount — skip if the user already touched something
   useEffect(() => {
     appearanceApi.get()
-      .then((r) => { if (r.data.ok && r.data.data) syncFromServer(r.data.data) })
+      .then((r) => {
+        if (!hasUserChangedRef.current && r.data.ok && r.data.data) syncFromServer(r.data.data)
+      })
       .catch(() => {})
   }, [syncFromServer])
 
@@ -339,6 +342,7 @@ export function ThemeSwitcher() {
   }
 
   const applyPreset = (p: StylePreset) => {
+    markChanged()
     setMode(p.mode)
     setAccent(p.accent)
     setCustomEnabled(p.customEnabled)
@@ -393,7 +397,7 @@ export function ThemeSwitcher() {
                     { id: 'dark' as const, Icon: Moon, label: 'Тёмная' },
                     { id: 'light' as const, Icon: Sun, label: 'Светлая' },
                   ]).map(({ id, Icon, label }) => (
-                    <button key={id} onClick={() => setMode(id)}
+                    <button key={id} onClick={() => { markChanged(); setMode(id) }}
                       className={cn(
                         'flex flex-1 flex-col items-center gap-1.5 rounded-xl py-2.5 text-[11px] font-medium transition-all',
                         mode === id ? 'bg-primary text-primary-foreground' : 'bg-muted/60 text-muted-foreground hover:bg-muted',
@@ -417,7 +421,7 @@ export function ThemeSwitcher() {
                     return (
                       <button
                         key={a.id}
-                        onClick={() => { setAccent(a.id); setCustomEnabled(false) }}
+                        onClick={() => { markChanged(); setAccent(a.id); setCustomEnabled(false) }}
                         className={cn(
                           'flex flex-col items-center gap-1 rounded-xl py-2 text-[10px] font-medium transition-all',
                           isActive
@@ -450,7 +454,7 @@ export function ThemeSwitcher() {
                     <span className="text-xs text-muted-foreground">Кастом цвет</span>
                     <button
                       type="button"
-                      onClick={() => setCustomEnabled(!customEnabled)}
+                      onClick={() => { markChanged(); setCustomEnabled(!customEnabled) }}
                       className={cn('relative h-5 w-9 shrink-0 rounded-full transition-colors', customEnabled ? 'bg-primary' : 'bg-muted')}
                     >
                       <span className={cn('absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform', customEnabled ? 'translate-x-4' : 'translate-x-0.5')} />
@@ -465,11 +469,11 @@ export function ThemeSwitcher() {
                       >
                         <div className="space-y-2 pt-1">
                           <HslSlider label="H" value={customPrimary.h} min={0} max={360}
-                            onChange={(h) => setCustomPrimary({ ...customPrimary, h })} />
+                            onChange={(h) => { markChanged(); setCustomPrimary({ ...customPrimary, h }) }} />
                           <HslSlider label="S" value={customPrimary.s} min={0} max={100}
-                            onChange={(s) => setCustomPrimary({ ...customPrimary, s })} />
+                            onChange={(s) => { markChanged(); setCustomPrimary({ ...customPrimary, s }) }} />
                           <HslSlider label="L" value={customPrimary.l} min={10} max={70}
-                            onChange={(l) => setCustomPrimary({ ...customPrimary, l })} />
+                            onChange={(l) => { markChanged(); setCustomPrimary({ ...customPrimary, l }) }} />
                           <div
                             className="mt-1 h-6 w-full rounded-lg border border-border/60"
                             style={{ background: `hsl(${customPrimary.h} ${customPrimary.s}% ${customPrimary.l}%)` }}
@@ -488,7 +492,7 @@ export function ThemeSwitcher() {
                 <div className="mt-2 space-y-1">
                   <input
                     type="range" min={0} max={1.5} step={0.1} value={radius}
-                    onChange={(e) => setRadius(Number(e.target.value))}
+                    onChange={(e) => { markChanged(); setRadius(Number(e.target.value)) }}
                     className="h-1.5 w-full cursor-pointer appearance-none rounded-full bg-muted [&::-webkit-slider-thumb]:h-3.5 [&::-webkit-slider-thumb]:w-3.5 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary"
                   />
                   <div className="flex justify-between text-[10px] text-muted-foreground">
@@ -498,7 +502,7 @@ export function ThemeSwitcher() {
                   </div>
                   <div className="flex gap-1.5 pt-1">
                     {([0, 0.5, 1, 1.5] as number[]).map((r) => (
-                      <button key={r} onClick={() => setRadius(r)}
+                      <button key={r} onClick={() => { markChanged(); setRadius(r) }}
                         className={cn('h-7 flex-1 border transition-colors', Math.abs(radius - r) < 0.05 ? 'border-primary bg-primary/10' : 'border-border bg-muted/40 hover:bg-muted')}
                         style={{ borderRadius: `${r}rem` }}
                       />
@@ -522,7 +526,7 @@ export function ThemeSwitcher() {
                         transition={{ duration: 0.15 }}
                         className="overflow-hidden"
                       >
-                        <div className="flex gap-1.5 pb-0.5">
+                        <div className="flex items-center gap-1 pb-0.5 overflow-hidden">
                           <input
                             autoFocus
                             value={nameInput}
@@ -531,20 +535,20 @@ export function ThemeSwitcher() {
                               if (e.key === 'Enter') confirmSavePreset(savingName)
                               if (e.key === 'Escape') setSavingName(null)
                             }}
-                            placeholder="Название стиля"
-                            className="flex-1 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+                            placeholder="Название"
+                            className="min-w-0 flex-1 h-7 rounded-md border border-border/60 bg-muted/60 px-2 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                           />
                           <button
                             type="button"
                             onClick={() => confirmSavePreset(savingName)}
-                            className="rounded-lg bg-primary px-2.5 py-1.5 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                            className="shrink-0 h-7 rounded-md bg-primary px-3 text-[11px] font-semibold text-primary-foreground hover:bg-primary/90"
                           >
                             OK
                           </button>
                           <button
                             type="button"
                             onClick={() => setSavingName(null)}
-                            className="rounded-lg border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted"
+                            className="shrink-0 h-7 w-7 rounded-md border border-border text-xs text-muted-foreground hover:bg-muted flex items-center justify-center"
                           >
                             ✕
                           </button>

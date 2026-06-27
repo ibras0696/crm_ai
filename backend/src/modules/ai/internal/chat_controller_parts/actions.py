@@ -295,7 +295,9 @@ def _looks_like_schedule_create_request(text: str, ui_intent: str | None) -> boo
     t = (text or "").lower()
     if ui_intent == "create_schedule_event":
         return True
-    create_like = any(x in t for x in ("создай", "создать", "добавь", "добавить", "запланир", "create", "add", "schedule"))
+    create_like = any(
+        x in t for x in ("создай", "создать", "добавь", "добавить", "запланир", "create", "add", "schedule")
+    )
     schedule_like = any(
         x in t
         for x in (
@@ -325,7 +327,14 @@ def _build_schedule_fallback_action(
     title = "Новое событие"
     user_text = (user_message or "").strip()
     lowered = user_text.lower()
-    for marker in ("создай встречу", "создай событие", "добавь встречу", "добавь событие", "create event", "schedule event"):
+    for marker in (
+        "создай встречу",
+        "создай событие",
+        "добавь встречу",
+        "добавь событие",
+        "create event",
+        "schedule event",
+    ):
         idx = lowered.find(marker)
         if idx >= 0:
             rest = user_text[idx + len(marker):].strip(" :,-")

@@ -36,7 +36,7 @@ function ContextMenu({ own, onCopy, onReply, onDelete, onClose }: ContextMenuPro
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.92, y: -4 }}
         transition={{ duration: 0.13, ease: [0.32, 0.72, 0, 1] }}
-        className={`absolute top-7 z-30 min-w-[160px] overflow-hidden rounded-xl border border-border/70 bg-card shadow-2xl ${
+        className={`absolute top-7 z-[200] min-w-[160px] overflow-hidden rounded-xl border border-border/70 bg-card shadow-2xl ${
           own ? 'right-0' : 'left-0'
         }`}
       >
@@ -224,6 +224,8 @@ export function MessageViewport(props: Record<string, unknown>) {
               const ownStatus = getOwnMessageStatus(message)
               const attachments = getMessageAttachments(message)
               const hasAttachments = attachments.length > 0
+              const voiceHintMs = (message.meta as Record<string, unknown> | null | undefined)
+                ?.voice_note as { duration_ms?: number } | undefined
               const bodyText = message.body.trim()
               const hasBody = bodyText.length > 0
               const syntheticAttachmentBody =
@@ -260,7 +262,9 @@ export function MessageViewport(props: Record<string, unknown>) {
                   ref={chatRealtimeEnabled ? rowVirtualizer.measureElement : undefined}
                   data-index={virtualRow.index}
                   className={chatRealtimeEnabled ? `absolute left-0 top-0 w-full ${rowMb}` : `w-full ${rowMb}`}
-                  style={chatRealtimeEnabled ? { transform: `translateY(${virtualRow.start}px)` } : undefined}
+                  style={chatRealtimeEnabled
+                    ? { transform: `translateY(${virtualRow.start}px)`, zIndex: showMenu ? 50 : undefined }
+                    : showMenu ? { zIndex: 50, position: 'relative' } : undefined}
                 >
                   {showDayDivider && (
                     <div className="my-3 flex items-center justify-center">
@@ -401,6 +405,8 @@ export function MessageViewport(props: Record<string, unknown>) {
                                 isMessageVisible
                                 forceEagerLoad={!chatRealtimeEnabled}
                                 telemetryEnabled={chatTelemetryEnabled}
+                                hintDurationMs={voiceHintMs?.duration_ms}
+                                isOutgoing={own}
                               />
                             ))}
                           </div>

@@ -1,8 +1,6 @@
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 from pydantic import BaseModel
-
-T = TypeVar("T")
 
 
 class ErrorDetail(BaseModel):
@@ -13,7 +11,7 @@ class ErrorDetail(BaseModel):
     correlation_id: str | None = None
 
 
-class ApiResponse(BaseModel, Generic[T]):
+class ApiResponse[T](BaseModel):
     ok: bool = True
     data: T | None = None
     error: ErrorDetail | None = None
@@ -27,7 +25,7 @@ class PaginationMeta(BaseModel):
     has_next: bool = False
 
 
-class PaginatedResponse(BaseModel, Generic[T]):
+class PaginatedResponse[T](BaseModel):
     ok: bool = True
     data: list[T] = []
     meta: PaginationMeta | None = None

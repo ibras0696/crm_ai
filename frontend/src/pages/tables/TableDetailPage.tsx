@@ -342,8 +342,11 @@ function EditableCell({
   const options = getColumnOptions(column)
   const relationCfg = relationConfigFromColumn(column)
   const relationMultiple = Boolean(relationCfg?.multiple)
-  const relationChoices = relationOptions || []
-  const relationLabelById = useMemo(() => Object.fromEntries(relationChoices.map((o) => [o.id, o.label])), [relationChoices])
+  const relationChoices = useMemo(() => relationOptions || [], [relationOptions])
+  const relationLabelById = useMemo(
+    () => Object.fromEntries(relationChoices.map((o) => [o.id, o.label])),
+    [relationChoices],
+  )
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(valueAsString(value))
   const [multiDraft, setMultiDraft] = useState<string[]>(valueAsList(value))

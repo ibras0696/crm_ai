@@ -497,5 +497,6 @@ export function useChatComposer({
     handleSend,
     startVoiceRecording,
     stopVoiceRecording,
+    voiceStreamRef,
   }
 }

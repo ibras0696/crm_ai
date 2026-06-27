@@ -55,7 +55,10 @@ _DOMAIN_MARKERS: dict[IntentDomain, tuple[str, ...]] = {
         "напомн", "дедлайн", "deadline", "встречу", "встреча", "напоминан",
     ),
     # Narrowed "баз" and "знан" to avoid matching unrelated words; use longer stems.
-    "knowledge": ("база знаний", "базе знаний", "базу знаний", "знани", "курс", "урок", "kb", "страниц", "knowledge", "wiki", "документац"),
+    "knowledge": (
+        "база знаний", "базе знаний", "базу знаний", "знани", "курс", "урок",
+        "kb", "страниц", "knowledge", "wiki", "документац",
+    ),
     "dashboard": ("дашборд", "график", "виджет", "отчет", "отчёт", "dashboard", "chart", "widget", "report"),
     "document": ("документ", "docx", "pdf", "файл", "document", "file", "договор", "кп", "коммерческ"),
     "general": (),

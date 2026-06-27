@@ -292,6 +292,58 @@ services:
       api:
         condition: service_healthy
 
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    restart: always
+    command:
+      - --path.rootfs=/host
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)
+    volumes:
+      - /:/host:ro,rslave
+    expose:
+      - "9100"
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    restart: always
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+    ports:
+      - "${PROMETHEUS_BIND_HOST:-127.0.0.1}:${PROMETHEUS_HOST_PORT:-9110}:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alerts:/etc/prometheus/alerts:ro
+      - prometheus_data_prod:/prometheus
+    depends_on:
+      api:
+        condition: service_healthy
+      node-exporter:
+        condition: service_started
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    restart: always
+    ports:
+      - "${GRAFANA_BIND_HOST:-127.0.0.1}:${GRAFANA_HOST_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-CHANGE_ME_GRAFANA_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_DOMAIN: ${GRAFANA_DOMAIN:-localhost}
+      GF_SERVER_ROOT_URL: ${GRAFANA_ROOT_URL:-http://localhost:3000/}
+      GF_SERVER_SERVE_FROM_SUB_PATH: "false"
+      TZ: ${TZ:-Europe/Moscow}
+    volumes:
+      - grafana_data_prod:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      prometheus:
+        condition: service_started
+
   # Nginx service is assumed to be configured externally or via a separate compose file for ingress
   # to avoid conflicts with local folder structures.
 
@@ -311,3 +363,5 @@ volumes:
   onlyoffice_data_prod:
   onlyoffice_logs_prod:
   celery_beat_state_prod:
+  prometheus_data_prod:
+  grafana_data_prod:

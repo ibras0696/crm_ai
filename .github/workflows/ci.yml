@@ -244,13 +244,54 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Resolve SSH port
+        id: ssh-port
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_PORTS: ${{ secrets.DEPLOY_PORTS }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${DEPLOY_HOST:-}" ]; then
+            echo "DEPLOY_HOST secret is empty." >&2
+            exit 1
+          fi
+
+          # Try port 22 first, then optional DEPLOY_PORT and DEPLOY_PORTS.
+          # DEPLOY_PORTS may be space- or comma-separated, e.g. "2222,22022".
+          RAW_PORTS="22 ${DEPLOY_PORT:-} ${DEPLOY_PORTS:-}"
+          PORTS=$(printf '%s\n' "$RAW_PORTS" \
+            | tr ',;' '  ' \
+            | tr ' ' '\n' \
+            | awk '/^[0-9]+$/ && !seen[$0]++ { print }')
+
+          if [ -z "$PORTS" ]; then
+            echo "No SSH port candidates configured." >&2
+            exit 1
+          fi
+
+          echo "Checking SSH connectivity to ${DEPLOY_HOST}..."
+          for port in $PORTS; do
+            echo "Trying SSH port ${port}..."
+            if timeout 5 bash -c "</dev/tcp/${DEPLOY_HOST}/${port}" 2>/dev/null; then
+              echo "Selected SSH port: ${port}"
+              echo "port=${port}" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+
+          echo "No configured SSH ports are reachable. Checked: $(echo "$PORTS" | tr '\n' ' ')" >&2
+          exit 1
+
       - name: Deploy to server
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: ${{ secrets.DEPLOY_PORT }}
+          port: ${{ steps.ssh-port.outputs.port }}
           script: |
             set -e
             cd ${{ secrets.DEPLOY_PATH }}

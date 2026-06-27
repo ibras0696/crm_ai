@@ -87,8 +87,8 @@
       },
       "targets": [
         {
-          "expr": "sum by (status_code) (rate(http_requests_total{job=\"crm-api\"}[5m]))",
-          "legendFormat": "{{status_code}}",
+          "expr": "sum by (status) (rate(http_requests_total{job=\"crm-api\"}[5m]))",
+          "legendFormat": "{{status}}",
           "refId": "A"
         }
       ],
@@ -149,7 +149,7 @@
       "pluginVersion": "11.2.0",
       "targets": [
         {
-          "expr": "100 * sum(rate(http_requests_total{job=\"crm-api\",status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(http_requests_total{job=\"crm-api\"}[5m])), 0.001)",
+          "expr": "100 * sum(rate(http_requests_total{job=\"crm-api\",status=\"5xx\"}[5m])) / clamp_min(sum(rate(http_requests_total{job=\"crm-api\"}[5m])), 0.001)",
           "legendFormat": "5xx",
           "refId": "A"
         }
@@ -385,8 +385,8 @@
       },
       "targets": [
         {
-          "expr": "topk(10, sum by (method, path) (rate(http_requests_total{job=\"crm-api\"}[5m])))",
-          "legendFormat": "{{method}} {{path}}",
+          "expr": "topk(10, sum by (method, handler) (rate(http_requests_total{job=\"crm-api\"}[5m])))",
+          "legendFormat": "{{method}} {{handler}}",
           "refId": "A"
         }
       ],
@@ -446,10 +446,10 @@
       "pluginVersion": "11.2.0",
       "targets": [
         {
-          "expr": "topk(10, sum by (method, path) (rate(http_request_duration_seconds_sum{job=\"crm-api\"}[5m])) / clamp_min(sum by (method, path) (rate(http_request_duration_seconds_count{job=\"crm-api\"}[5m])), 0.001))",
+          "expr": "topk(10, sum by (method, handler) (rate(http_request_duration_seconds_sum{job=\"crm-api\"}[5m])) / clamp_min(sum by (method, handler) (rate(http_request_duration_seconds_count{job=\"crm-api\"}[5m])), 0.001))",
           "format": "table",
           "instant": true,
-          "legendFormat": "{{method}} {{path}}",
+          "legendFormat": "{{method}} {{handler}}",
           "refId": "A"
         }
       ],

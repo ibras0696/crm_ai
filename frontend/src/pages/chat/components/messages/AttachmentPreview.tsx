@@ -18,6 +18,10 @@ import { useAttachmentDownloadUrl } from '../../hooks/useAttachmentDownloadUrl'
 const ATTACHMENT_PRELOAD_ROOT_MARGIN = '240px'
 const WAVEFORM_BARS = 32
 
+function buildAttachmentPreviewUrl(chatId: string, fileId: string): string {
+  return `/api/v1/chat/chats/${encodeURIComponent(chatId)}/attachments/${encodeURIComponent(fileId)}/preview`
+}
+
 function generateWaveformBars(seed: string, count: number): number[] {
   let hash = 5381
   for (let i = 0; i < seed.length; i++) {
@@ -100,8 +104,8 @@ export function AttachmentPreview({
 
   const mediaKind = inferMediaKind(attachment.content_type, attachment.original_name)
   const playbackType = normalizeAttachmentMimeForPlayback(attachment.content_type)
-  const shouldAutoLoadMedia = mediaKind === 'image'
-  const autoLoadEnabled = shouldAutoLoadMedia && (forceEagerLoad || (isMessageVisible && isElementVisible))
+  const previewUrl = mediaKind === 'image' ? buildAttachmentPreviewUrl(chatId, attachment.file_id) : ''
+  const autoLoadEnabled = false
 
   const {
     downloadUrl,
@@ -163,7 +167,7 @@ export function AttachmentPreview({
   }, [attachment.file_id])
 
   useEffect(() => {
-    if (!downloadUrl || mediaKind !== 'image') return
+    if (!downloadUrl || mediaKind !== 'video') return
     let cancelled = false
     void resolveCachedMediaObjectUrl({
       cacheId: `${chatId}:${attachment.file_id}`,
@@ -187,13 +191,13 @@ export function AttachmentPreview({
   }, [attachment.content_type, attachment.file_id, attachment.size, chatId, downloadUrl, mediaKind, playbackType])
 
   useEffect(() => {
-    if (!renderMediaUrl || mediaKind !== 'image') return
+    if (!previewUrl || mediaKind !== 'image') return
     runOnIdle(() => {
       const image = new Image()
       image.decoding = 'async'
-      image.src = renderMediaUrl
+      image.src = previewUrl
     })
-  }, [renderMediaUrl, mediaKind])
+  }, [previewUrl, mediaKind])
 
   useEffect(() => {
     if (loading || errorText || mediaKind !== 'audio') return
@@ -250,6 +254,7 @@ export function AttachmentPreview({
   }
 
   const resolveMediaPreviewUrlForAction = async () => {
+    if (mediaKind === 'image' && previewUrl) return previewUrl
     if (cachedMediaUrl) return cachedMediaUrl
     const url = await resolveUrlForAction()
     if (mediaKind !== 'image' && mediaKind !== 'video') return url
@@ -344,7 +349,7 @@ export function AttachmentPreview({
     }
   }
 
-  if (!forceEagerLoad && !isElementVisible && !downloadUrl) {
+  if (mediaKind === 'image' && !forceEagerLoad && !isElementVisible) {
     return (
       <div ref={containerRef} className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
         Вложение готово к загрузке
@@ -368,7 +373,7 @@ export function AttachmentPreview({
     )
   }
 
-  if (mediaKind === 'image' && renderMediaUrl) {
+  if (mediaKind === 'image' && previewUrl) {
     return (
       <div ref={containerRef}>
         <button
@@ -377,14 +382,16 @@ export function AttachmentPreview({
           onClick={() => void openMediaPreview('image')}
         >
           <img
-            src={renderMediaUrl}
+            src={previewUrl}
             alt={attachment.original_name}
             loading="lazy"
             decoding="async"
             fetchPriority="low"
+            onError={() => setErrorText('Не удалось загрузить preview')}
             className="max-h-72 max-w-full rounded-lg border border-border/60 object-contain"
           />
         </button>
+        {errorText && <div className="mt-1 text-[11px] text-destructive">{errorText}</div>}
       </div>
     )
   }

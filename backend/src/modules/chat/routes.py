@@ -3,11 +3,14 @@ import hashlib
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from botocore.exceptions import BotoCoreError, ClientError
+from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 from kombu.exceptions import KombuError
 from pydantic import BaseModel
 
 from src.common.enums import UserRole
+from src.common.http_headers import content_disposition_inline
 from src.common.schemas import ApiResponse
 from src.config import settings
 from src.infrastructure.metrics_custom import (
@@ -40,6 +43,7 @@ from src.modules.chat.schemas import (
 )
 from src.modules.chat.service import ChatService, ChatServiceError
 from src.modules.chat.tasks import chat_cleanup_attachments
+from src.modules.files import storage as files_storage
 from src.modules.notifications.ws import manager as ws_manager
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -47,6 +51,7 @@ logger = logging.getLogger(__name__)
 
 CHAT_NOT_FOUND_MESSAGE = "Чат не найден"
 MESSAGE_NOT_FOUND_MESSAGE = "Сообщение не найдено"
+CHAT_ATTACHMENT_PREVIEW_CACHE_CONTROL = "private, max-age=86400, stale-while-revalidate=604800"
 
 
 class TypingEventRequest(BaseModel):
@@ -60,6 +65,17 @@ def _service_error(error: ChatServiceError) -> ApiResponse[None]:
         extra={"code": error.code, "message": error.message, "status_code": error.status_code},
     )
     return ApiResponse(ok=False, data=None, error={"code": error.code, "message": error.message})
+
+
+def _error_response(error: ChatServiceError) -> JSONResponse:
+    payload = _service_error(error)
+    return JSONResponse(status_code=error.status_code, content=payload.model_dump(mode="json"))
+
+
+def _etag_matches(if_none_match: str | None, etag: str) -> bool:
+    if not if_none_match or not etag:
+        return False
+    return any(token.strip() == etag for token in if_none_match.split(","))
 
 
 def _is_user_in_rollout(*, user_id: uuid.UUID, percent: int) -> bool:
@@ -586,6 +602,103 @@ async def get_attachment_download_url(
         CHAT_ATTACHMENT_DOWNLOAD_URL_REQUESTS_TOTAL.labels(status="ok").inc()
         item = ChatAttachmentDownloadOut(url=url, expires_in=600)
     return ApiResponse(data=item)
+
+
+@router.get("/chats/{chat_id}/attachments/{file_id}/preview")
+async def get_attachment_preview(
+    chat_id: uuid.UUID,
+    file_id: uuid.UUID,
+    request: Request,
+    current_user: CurrentUser = Depends(
+        require_roles(UserRole.OWNER, UserRole.ADMIN, UserRole.MANAGER, UserRole.EMPLOYEE, UserRole.READONLY),
+    ),
+    _: None = Depends(require_access(resource_type="chat", permission="can_read", resource_id_param="chat_id")),
+):
+    async with UnitOfWork() as uow:
+        service = ChatService(uow.session)
+        chat = await service.get_chat_for_user(
+            chat_id=chat_id,
+            org_id=current_user.org_id,
+            user_id=current_user.user_id,
+        )
+        if chat is None:
+            return JSONResponse(
+                status_code=404,
+                content=ApiResponse(
+                    ok=False,
+                    data=None,
+                    error={"code": "NOT_FOUND", "message": CHAT_NOT_FOUND_MESSAGE},
+                ).model_dump(mode="json"),
+            )
+        try:
+            db_file = await service.get_attachment_file_for_user(
+                chat=chat,
+                user_id=current_user.user_id,
+                file_id=file_id,
+            )
+        except ChatServiceError as error:
+            return _error_response(error)
+
+    content_type = str(db_file.content_type or "").lower()
+    if not content_type.startswith("image/"):
+        return JSONResponse(
+            status_code=415,
+            content=ApiResponse(
+                ok=False,
+                data=None,
+                error={"code": "UNSUPPORTED_MEDIA_TYPE", "message": "Preview доступен только для изображений"},
+            ).model_dump(mode="json"),
+        )
+
+    try:
+        meta = files_storage.head_object(db_file.s3_key, db_file.s3_bucket)
+    except (BotoCoreError, ClientError, KeyError, OSError, ValueError):
+        logger.exception(
+            "chat_attachment_preview_head_failed",
+            extra={"file_id": str(file_id), "chat_id": str(chat_id)},
+        )
+        return JSONResponse(
+            status_code=502,
+            content=ApiResponse(
+                ok=False,
+                data=None,
+                error={"code": "STORAGE_HEAD_ERROR", "message": "Не удалось проверить preview"},
+            ).model_dump(mode="json"),
+        )
+
+    etag = str(meta.get("ETag") or "").strip()
+    headers = {
+        "Cache-Control": CHAT_ATTACHMENT_PREVIEW_CACHE_CONTROL,
+        "Content-Disposition": content_disposition_inline(db_file.original_name),
+        "Vary": "Cookie, Authorization",
+    }
+    if etag:
+        headers["ETag"] = etag
+    if meta.get("LastModified"):
+        headers["Last-Modified"] = meta["LastModified"].strftime("%a, %d %b %Y %H:%M:%S GMT")
+
+    if etag and _etag_matches(request.headers.get("if-none-match"), etag):
+        return Response(status_code=304, headers=headers)
+
+    try:
+        stream, object_meta = files_storage.stream_file(db_file.s3_key, db_file.s3_bucket)
+    except (BotoCoreError, ClientError, KeyError, OSError, ValueError):
+        logger.exception(
+            "chat_attachment_preview_stream_failed",
+            extra={"file_id": str(file_id), "chat_id": str(chat_id)},
+        )
+        return JSONResponse(
+            status_code=502,
+            content=ApiResponse(
+                ok=False,
+                data=None,
+                error={"code": "STORAGE_STREAM_ERROR", "message": "Не удалось загрузить preview"},
+            ).model_dump(mode="json"),
+        )
+
+    if object_meta.get("ContentLength"):
+        headers["Content-Length"] = str(int(object_meta["ContentLength"]))
+    return StreamingResponse(stream, media_type=db_file.content_type, headers=headers)
 
 
 @router.get("/client-config", response_model=ApiResponse[ChatClientConfigOut])

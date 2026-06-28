@@ -1,5 +1,6 @@
 import asyncio
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from httpx import AsyncClient
@@ -369,7 +370,12 @@ async def test_chat_attachment_init_finish_send_and_download_url(client: AsyncCl
     )
     monkeypatch.setattr(
         "src.modules.chat.service.files_storage.head_object",
-        lambda _s3_key, _bucket: {"ContentLength": 13},
+        lambda _s3_key, _bucket: {
+            "ContentLength": 13,
+            "ContentType": "image/png",
+            "ETag": '"preview-etag"',
+            "LastModified": datetime(2026, 1, 1, tzinfo=UTC),
+        },
     )
     monkeypatch.setattr(
         "src.modules.chat.service.files_storage.generate_presigned_get_url",
@@ -424,6 +430,25 @@ async def test_chat_attachment_init_finish_send_and_download_url(client: AsyncCl
     assert download_url.status_code == 200, f"Get download URL failed: {download_url.text}"
     assert download_url.json()["ok"] is True
     assert download_url.json()["data"]["url"] == "https://download.example.com/get"
+
+    monkeypatch.setattr(
+        "src.modules.chat.routes.files_storage.stream_file",
+        lambda _s3_key, _bucket: (iter([b"preview-bytes"]), {"ContentLength": 13}),
+    )
+    preview = await client.get(
+        f"/api/v1/chat/chats/{chat_id}/attachments/{file_id}/preview",
+        headers=_headers(token),
+    )
+    assert preview.status_code == 200, f"Get preview failed: {preview.text}"
+    assert preview.headers["cache-control"].startswith("private")
+    assert preview.headers["etag"] == '"preview-etag"'
+    assert preview.content == b"preview-bytes"
+
+    cached_preview = await client.get(
+        f"/api/v1/chat/chats/{chat_id}/attachments/{file_id}/preview",
+        headers={**_headers(token), "If-None-Match": '"preview-etag"'},
+    )
+    assert cached_preview.status_code == 304
 
 
 @pytest.mark.asyncio

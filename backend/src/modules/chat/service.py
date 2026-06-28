@@ -394,6 +394,30 @@ class ChatService:
             inline=True,
         )
 
+    async def get_attachment_file_for_user(
+        self,
+        *,
+        chat: Chat,
+        user_id: uuid.UUID,
+        file_id: uuid.UUID,
+    ) -> File:
+        member = await self.repo.get_chat_member(chat_id=chat.id, user_id=user_id)
+        if member is None:
+            raise ChatServiceError(code="FORBIDDEN", message="Нет доступа к этому чату", status_code=403)
+
+        upload = await self.repo.get_upload_session_for_chat_file(
+            org_id=chat.org_id,
+            chat_id=chat.id,
+            file_id=file_id,
+        )
+        if upload is None or upload.status != "ready":
+            raise ChatServiceError(code="NOT_FOUND", message="Вложение не найдено", status_code=404)
+
+        db_file = await self.files_repo.get_by_id_for_org(file_id=file_id, org_id=chat.org_id)
+        if db_file is None or db_file.status not in self.CHAT_ALLOWED_ATTACHMENT_STATUSES:
+            raise ChatServiceError(code="NOT_FOUND", message="Вложение не готово к скачиванию", status_code=404)
+        return db_file
+
     async def list_messages_for_user(
         self,
         *,

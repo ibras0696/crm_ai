@@ -100,7 +100,8 @@ export function AttachmentPreview({
 
   const mediaKind = inferMediaKind(attachment.content_type, attachment.original_name)
   const playbackType = normalizeAttachmentMimeForPlayback(attachment.content_type)
-  const autoLoadEnabled = forceEagerLoad || (isMessageVisible && isElementVisible && mediaKind !== 'file')
+  const shouldAutoLoadMedia = mediaKind === 'image'
+  const autoLoadEnabled = shouldAutoLoadMedia && (forceEagerLoad || (isMessageVisible && isElementVisible))
 
   const {
     downloadUrl,
@@ -162,7 +163,7 @@ export function AttachmentPreview({
   }, [attachment.file_id])
 
   useEffect(() => {
-    if (!downloadUrl || (mediaKind !== 'image' && mediaKind !== 'video')) return
+    if (!downloadUrl || mediaKind !== 'image') return
     let cancelled = false
     void resolveCachedMediaObjectUrl({
       cacheId: `${chatId}:${attachment.file_id}`,
@@ -186,19 +187,11 @@ export function AttachmentPreview({
   }, [attachment.content_type, attachment.file_id, attachment.size, chatId, downloadUrl, mediaKind, playbackType])
 
   useEffect(() => {
-    if (!renderMediaUrl || mediaKind === 'file') return
+    if (!renderMediaUrl || mediaKind !== 'image') return
     runOnIdle(() => {
-      if (mediaKind === 'image') {
-        const image = new Image()
-        image.decoding = 'async'
-        image.src = renderMediaUrl
-        return
-      }
-      if (mediaKind === 'video') {
-        const video = document.createElement('video')
-        video.preload = 'metadata'
-        video.src = renderMediaUrl
-      }
+      const image = new Image()
+      image.decoding = 'async'
+      image.src = renderMediaUrl
     })
   }, [renderMediaUrl, mediaKind])
 
@@ -279,11 +272,13 @@ export function AttachmentPreview({
 
   const toggleAudioPlayback = async () => {
     try {
-      if (!downloadUrl) {
-        await resolveUrlForAction()
-      }
+      const url = downloadUrl || await resolveUrlForAction()
       const audio = audioRef.current
       if (!audio || audioFailed) return
+      if (audio.src !== url) {
+        audio.src = url
+        audio.load()
+      }
       if (audio.paused) {
         await audio.play()
       } else {
@@ -357,7 +352,7 @@ export function AttachmentPreview({
     )
   }
 
-  if (loading && !downloadUrl) {
+  if (loading && !downloadUrl && mediaKind !== 'audio') {
     return (
       <div ref={containerRef} className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
         Загрузка вложения...
@@ -418,18 +413,45 @@ export function AttachmentPreview({
     )
   }
 
+  if (mediaKind === 'video') {
+    return (
+      <div ref={containerRef} className="max-w-full rounded-lg border border-border/60 bg-background/20 p-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void openMediaPreview('video')}
+            className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-colors active:scale-95 ${
+              isOutgoing
+                ? 'bg-white/25 text-white hover:bg-white/35'
+                : 'bg-primary text-primary-foreground hover:bg-primary/90'
+            }`}
+            aria-label="Открыть видео"
+          >
+            <Play size={18} weight="fill" className="translate-x-px" />
+          </button>
+          <div className="min-w-0 flex-1">
+            <div className={`truncate text-xs font-medium ${isOutgoing ? 'text-white' : 'text-foreground'}`}>
+              {attachment.original_name}
+            </div>
+            <div className={`text-[11px] ${isOutgoing ? 'text-white/65' : 'text-muted-foreground'}`}>
+              Видео · {formatFileSize(attachment.size)}
+            </div>
+          </div>
+        </div>
+        {errorText && <div className="mt-2 text-[11px] text-destructive">{errorText}</div>}
+      </div>
+    )
+  }
+
   if (mediaKind === 'audio') {
     return (
       <div ref={containerRef} className="max-w-full">
         <audio
           ref={audioRef}
-          preload="metadata"
+          preload="none"
           className="hidden"
           onError={() => setAudioFailed(true)}
-        >
-          {downloadUrl && <source src={downloadUrl} type={playbackType || undefined} />}
-          {downloadUrl && <source src={downloadUrl} />}
-        </audio>
+        />
         {!audioFailed ? (
           <div className="flex w-full min-w-0 max-w-full items-center gap-2.5">
             {/* Circular play/pause */}

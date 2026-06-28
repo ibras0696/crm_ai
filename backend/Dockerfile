@@ -9,6 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    ffmpeg \
     libpq-dev \
     procps \
     && rm -rf /var/lib/apt/lists/*

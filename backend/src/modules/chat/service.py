@@ -330,6 +330,7 @@ class ChatService:
 
         db_file.status = "ready"
         db_file.size = uploaded_size
+        db_file.preview_status = self._initial_preview_status(db_file.content_type)
         upload.status = "ready"
         await self.session.flush()
         return db_file
@@ -393,6 +394,39 @@ class ChatService:
             content_type=db_file.content_type,
             inline=True,
         )
+
+    async def get_attachment_preview(
+        self,
+        *,
+        chat: Chat,
+        user_id: uuid.UUID,
+        file_id: uuid.UUID,
+        expires_in: int = 3600,
+    ) -> dict:
+        db_file = await self.get_attachment_file_for_user(chat=chat, user_id=user_id, file_id=file_id)
+        preview_status = str(db_file.preview_status or self._initial_preview_status(db_file.content_type))
+        payload = {
+            "status": preview_status,
+            "url": None,
+            "expires_in": None,
+            "content_type": db_file.preview_content_type,
+            "size": db_file.preview_size,
+            "meta": db_file.preview_meta,
+        }
+        if preview_status != "ready" or not db_file.preview_s3_key:
+            return payload
+
+        preview_bucket = db_file.preview_s3_bucket or settings.S3_BUCKET
+        payload["url"] = files_storage.generate_presigned_get_url(
+            s3_key=db_file.preview_s3_key,
+            bucket=preview_bucket,
+            expires_in=int(max(60, expires_in)),
+            filename=f"{db_file.original_name or db_file.filename}.preview",
+            content_type=db_file.preview_content_type,
+            inline=True,
+        )
+        payload["expires_in"] = int(max(60, expires_in))
+        return payload
 
     async def get_attachment_file_for_user(
         self,
@@ -496,6 +530,8 @@ class ChatService:
             return
 
         try:
+            if db_file.preview_s3_key:
+                files_storage.delete_file(db_file.preview_s3_key, db_file.preview_s3_bucket or settings.S3_BUCKET)
             files_storage.delete_file(db_file.s3_key, db_file.s3_bucket)
         except (BotoCoreError, ClientError, KeyError, OSError, ValueError) as exc:
             raise ChatServiceError(
@@ -550,9 +586,20 @@ class ChatService:
                     "content_type": db_file.content_type,
                     "size": int(db_file.size),
                     "status": str(db_file.status or "ready"),
+                    "preview_status": db_file.preview_status,
+                    "preview_content_type": db_file.preview_content_type,
+                    "preview_size": db_file.preview_size,
+                    "preview_meta": db_file.preview_meta,
                 }
             )
         return result
+
+    @staticmethod
+    def _initial_preview_status(content_type: str | None) -> str:
+        normalized = str(content_type or "").strip().lower()
+        if normalized.startswith(("image/", "video/", "audio/")):
+            return "pending"
+        return "unsupported"
 
     @staticmethod
     def _normalize_message_meta(*, meta: dict | None, attachments: list[dict]) -> dict | None:

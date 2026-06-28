@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 
 
 import { Pause, Play } from '@phosphor-icons/react'
 
-import type { ChatAttachmentInfo } from '@/lib/api'
+import { chatApi, type ChatAttachmentInfo } from '@/lib/api'
 
 import {
   clamp01,
@@ -17,10 +17,6 @@ import { useAttachmentDownloadUrl } from '../../hooks/useAttachmentDownloadUrl'
 
 const ATTACHMENT_PRELOAD_ROOT_MARGIN = '240px'
 const WAVEFORM_BARS = 32
-
-function buildAttachmentPreviewUrl(chatId: string, fileId: string): string {
-  return `/api/v1/chat/chats/${encodeURIComponent(chatId)}/attachments/${encodeURIComponent(fileId)}/preview`
-}
 
 function generateWaveformBars(seed: string, count: number): number[] {
   let hash = 5381
@@ -97,6 +93,10 @@ export function AttachmentPreview({
   const [audioDuration, setAudioDuration] = useState(0)
   const [isDownloadingFile, setIsDownloadingFile] = useState(false)
   const [cachedMediaUrl, setCachedMediaUrl] = useState('')
+  const [previewUrl, setPreviewUrl] = useState('')
+  const [previewStatus, setPreviewStatus] = useState(attachment.preview_status || '')
+  const [previewMetaOverride, setPreviewMetaOverride] = useState<Record<string, unknown> | null>(null)
+  const [previewPollAttempt, setPreviewPollAttempt] = useState(0)
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -104,7 +104,6 @@ export function AttachmentPreview({
 
   const mediaKind = inferMediaKind(attachment.content_type, attachment.original_name)
   const playbackType = normalizeAttachmentMimeForPlayback(attachment.content_type)
-  const previewUrl = mediaKind === 'image' ? buildAttachmentPreviewUrl(chatId, attachment.file_id) : ''
   const autoLoadEnabled = false
 
   const {
@@ -120,6 +119,13 @@ export function AttachmentPreview({
     telemetryEnabled,
   })
   const renderMediaUrl = cachedMediaUrl || downloadUrl
+  const previewMeta = previewMetaOverride ?? attachment.preview_meta
+  const waveformBars = Array.isArray(previewMeta?.waveform)
+    ? previewMeta.waveform
+      .map((value) => (typeof value === 'number' ? clamp01(value) : 0))
+      .slice(0, WAVEFORM_BARS)
+    : null
+  const previewDurationMs = typeof previewMeta?.duration_ms === 'number' ? previewMeta.duration_ms : undefined
 
   useEffect(() => {
     if (!isMessageVisible) {
@@ -147,7 +153,7 @@ export function AttachmentPreview({
     setIsAudioPlaying(false)
     setAudioCurrentTime(0)
     setAudioDuration(0)
-  }, [attachment.file_id])
+  }, [attachment.file_id, attachment.preview_status])
 
   useEffect(() => {
     cachedMediaUrlRef.current = cachedMediaUrl
@@ -164,7 +170,50 @@ export function AttachmentPreview({
       if (previousUrl) revokeCachedMediaObjectUrl(previousUrl)
       return ''
     })
-  }, [attachment.file_id])
+    setPreviewUrl('')
+    setPreviewStatus(attachment.preview_status || '')
+    setPreviewMetaOverride(null)
+    setPreviewPollAttempt(0)
+  }, [attachment.file_id, attachment.preview_status])
+
+  useEffect(() => {
+    if (!['image', 'video', 'audio'].includes(mediaKind) || (!forceEagerLoad && !isElementVisible)) return
+    if (previewUrl || previewStatus === 'unsupported' || previewStatus === 'failed') return
+
+    let cancelled = false
+    let timerId = 0
+    void chatApi.getAttachmentPreview(chatId, attachment.file_id).then((response) => {
+      if (cancelled) return
+      const data = response.data?.data
+      if (!data) return
+      setPreviewStatus(data.status)
+      if (data.meta) setPreviewMetaOverride(data.meta)
+      if (data.status === 'ready' && data.url) {
+        setPreviewUrl(data.url)
+      } else if ((data.status === 'pending' || data.status === 'processing') && previewPollAttempt < 10) {
+        timerId = window.setTimeout(() => {
+          if (!cancelled) setPreviewPollAttempt((value) => value + 1)
+        }, 2500)
+      }
+    }).catch(() => {
+      if (!cancelled) setErrorText('Не удалось получить preview')
+    })
+
+    return () => {
+      cancelled = true
+      if (timerId) window.clearTimeout(timerId)
+    }
+  }, [
+    attachment.file_id,
+    chatId,
+    forceEagerLoad,
+    isElementVisible,
+    mediaKind,
+    previewPollAttempt,
+    previewStatus,
+    previewUrl,
+    setErrorText,
+  ])
 
   useEffect(() => {
     if (!downloadUrl || mediaKind !== 'video') return
@@ -254,7 +303,6 @@ export function AttachmentPreview({
   }
 
   const resolveMediaPreviewUrlForAction = async () => {
-    if (mediaKind === 'image' && previewUrl) return previewUrl
     if (cachedMediaUrl) return cachedMediaUrl
     const url = await resolveUrlForAction()
     if (mediaKind !== 'image' && mediaKind !== 'video') return url
@@ -302,7 +350,7 @@ export function AttachmentPreview({
   }
 
   // WebM/Opus recordings often have NaN duration in metadata — use server hint as fallback
-  const effectiveDuration = audioDuration > 0 ? audioDuration : (hintDurationMs ?? 0) / 1000
+  const effectiveDuration = audioDuration > 0 ? audioDuration : (previewDurationMs ?? hintDurationMs ?? 0) / 1000
 
   const audioProgressPercent = (() => {
     if (effectiveDuration <= 0) return 0
@@ -390,6 +438,47 @@ export function AttachmentPreview({
             onError={() => setErrorText('Не удалось загрузить preview')}
             className="max-h-72 max-w-full rounded-lg border border-border/60 object-contain"
           />
+        </button>
+        {errorText && <div className="mt-1 text-[11px] text-destructive">{errorText}</div>}
+      </div>
+    )
+  }
+
+  if (mediaKind === 'image') {
+    return (
+      <div ref={containerRef} className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+        {previewStatus === 'failed' ? 'Preview недоступен' : 'Preview готовится'}
+      </div>
+    )
+  }
+
+  if (mediaKind === 'video' && previewUrl) {
+    return (
+      <div ref={containerRef} className="max-w-full">
+        <button
+          type="button"
+          className="group relative block max-w-full overflow-hidden rounded-lg border border-border/60 bg-background/20"
+          onClick={() => void openMediaPreview('video')}
+        >
+          <img
+            src={previewUrl}
+            alt={attachment.original_name}
+            loading="lazy"
+            decoding="async"
+            fetchPriority="low"
+            onError={() => setErrorText('Не удалось загрузить preview')}
+            className="max-h-80 max-w-full object-contain"
+          />
+          <span
+            className={`absolute left-3 top-3 inline-flex h-10 w-10 items-center justify-center rounded-full transition-colors ${
+              isOutgoing
+                ? 'bg-white/25 text-white group-hover:bg-white/35'
+                : 'bg-primary text-primary-foreground group-hover:bg-primary/90'
+            }`}
+            aria-hidden="true"
+          >
+            <Play size={18} weight="fill" className="translate-x-px" />
+          </span>
         </button>
         {errorText && <div className="mt-1 text-[11px] text-destructive">{errorText}</div>}
       </div>
@@ -484,7 +573,7 @@ export function AttachmentPreview({
                 className="flex h-9 w-full cursor-pointer items-center gap-[3px] rounded-md px-0.5"
                 aria-label="Перемотать голосовое сообщение"
               >
-                {generateWaveformBars(attachment.file_id, WAVEFORM_BARS).map((height, i) => {
+                {(waveformBars ?? generateWaveformBars(attachment.file_id, WAVEFORM_BARS)).map((height, i) => {
                   const ratio = (i + 0.5) / WAVEFORM_BARS
                   const progress = audioProgressPercent / 100
                   const played = ratio < progress

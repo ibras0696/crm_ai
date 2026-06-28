@@ -54,11 +54,24 @@ class ChatAttachmentOut(BaseModel):
     content_type: str
     size: int
     status: str
+    preview_status: str | None = None
+    preview_content_type: str | None = None
+    preview_size: int | None = None
+    preview_meta: dict | None = None
 
 
 class ChatAttachmentDownloadOut(BaseModel):
     url: str
     expires_in: int
+
+
+class ChatAttachmentPreviewOut(BaseModel):
+    status: str
+    url: str | None = None
+    expires_in: int | None = None
+    content_type: str | None = None
+    size: int | None = None
+    meta: dict | None = None
 
 
 class UpdateReadCursorRequest(BaseModel):

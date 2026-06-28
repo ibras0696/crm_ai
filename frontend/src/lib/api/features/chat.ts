@@ -25,10 +25,15 @@ export interface ChatMessageInfo {
 
 export interface ChatAttachmentInfo {
   file_id: string
+  filename?: string
   original_name: string
   content_type: string
   size: number
   status: string
+  preview_status?: string | null
+  preview_content_type?: string | null
+  preview_size?: number | null
+  preview_meta?: Record<string, unknown> | null
 }
 
 export interface ChatMessageMeta {
@@ -67,6 +72,19 @@ export interface ChatAttachmentResult {
   content_type: string
   size: number
   status: string
+  preview_status?: string | null
+  preview_content_type?: string | null
+  preview_size?: number | null
+  preview_meta?: Record<string, unknown> | null
+}
+
+export interface ChatAttachmentPreviewInfo {
+  status: string
+  url?: string | null
+  expires_in?: number | null
+  content_type?: string | null
+  size?: number | null
+  meta?: Record<string, unknown> | null
 }
 
 export interface ChatMemberInfo {
@@ -136,6 +154,8 @@ export const chatApi = {
     api.post<ApiResponse<null>>(`/chat/chats/${chatId}/attachments/${fileId}/abort-upload`, {}),
   getAttachmentDownloadUrl: (chatId: string, fileId: string) =>
     api.get<ApiResponse<{ url: string; expires_in: number }>>(`/chat/chats/${chatId}/attachments/${fileId}/download-url`),
+  getAttachmentPreview: (chatId: string, fileId: string) =>
+    api.get<ApiResponse<ChatAttachmentPreviewInfo>>(`/chat/chats/${chatId}/attachments/${fileId}/preview`),
   getClientConfig: () =>
     api.get<ApiResponse<ChatClientConfigInfo>>('/chat/client-config'),
   sendTelemetry: (payload: ChatTelemetryPayload) =>

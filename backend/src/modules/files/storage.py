@@ -1,7 +1,6 @@
 """S3/MinIO storage service."""
 
 import uuid
-from collections.abc import Iterator
 from contextlib import suppress
 from typing import BinaryIO
 
@@ -139,23 +138,11 @@ def download_file(s3_key: str, bucket: str) -> tuple[bytes, str]:
     return resp["Body"].read(), resp["ContentType"]
 
 
-def stream_file(s3_key: str, bucket: str, chunk_size: int = 1024 * 1024) -> tuple[Iterator[bytes], dict]:
-    """Open an S3 object for chunked streaming. The iterator closes the S3 body."""
+def upload_bytes_to_key(*, data: bytes, s3_key: str, bucket: str, content_type: str) -> None:
+    """Upload bytes to an explicit S3 key."""
     s3 = get_s3_client()
-    resp = s3.get_object(Bucket=bucket, Key=s3_key)
-    body = resp["Body"]
-
-    def _iter() -> Iterator[bytes]:
-        try:
-            while True:
-                chunk = body.read(chunk_size)
-                if not chunk:
-                    break
-                yield chunk
-        finally:
-            body.close()
-
-    return _iter(), resp
+    ensure_bucket()
+    s3.put_object(Bucket=bucket, Key=s3_key, Body=data, ContentType=content_type)
 
 
 def delete_file(s3_key: str, bucket: str):

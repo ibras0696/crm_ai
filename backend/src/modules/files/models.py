@@ -1,7 +1,7 @@
 import uuid
 
 from sqlalchemy import BigInteger, ForeignKey, String
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.common.base_model import BaseDBModel
@@ -34,6 +34,12 @@ class File(BaseDBModel):
     size: Mapped[int] = mapped_column(BigInteger, nullable=False)
     s3_key: Mapped[str] = mapped_column(String(1000), nullable=False, unique=True)
     s3_bucket: Mapped[str] = mapped_column(String(255), nullable=False)
+    preview_s3_key: Mapped[str | None] = mapped_column(String(1000), nullable=True, unique=True)
+    preview_s3_bucket: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    preview_content_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    preview_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    preview_status: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    preview_meta: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     folder_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("folders.id", ondelete="SET NULL"),

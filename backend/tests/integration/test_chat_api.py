@@ -4,6 +4,10 @@ from datetime import UTC, datetime
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+
+from src.infrastructure.database import async_session_factory
+from src.modules.files.models import File
 
 
 def _headers(token: str) -> dict:
@@ -379,7 +383,15 @@ async def test_chat_attachment_init_finish_send_and_download_url(client: AsyncCl
     )
     monkeypatch.setattr(
         "src.modules.chat.service.files_storage.generate_presigned_get_url",
-        lambda **_kwargs: "https://download.example.com/get",
+        lambda **kwargs: (
+            "https://preview.example.com/get"
+            if kwargs.get("s3_key") == "org/chat/preview/preview.webp"
+            else "https://download.example.com/get"
+        ),
+    )
+    monkeypatch.setattr(
+        "src.modules.chat.routes.chat_generate_attachment_preview.delay",
+        lambda **_kwargs: None,
     )
 
     init_upload = await client.post(
@@ -405,8 +417,23 @@ async def test_chat_attachment_init_finish_send_and_download_url(client: AsyncCl
     assert finish_upload.status_code == 200, f"Finish upload failed: {finish_upload.text}"
     assert finish_upload.json()["ok"] is True
     assert finish_upload.json()["data"]["status"] == "ready"
+    assert finish_upload.json()["data"]["preview_status"] == "pending"
     assert finish_upload.json()["data"]["filename"] == "preview.png"
     assert finish_upload.json()["data"]["original_name"] == "preview.png"
+
+    async with async_session_factory() as session:
+        db_file = (
+            await session.execute(
+                select(File).where(File.id == uuid.UUID(file_id)),
+            )
+        ).scalar_one()
+        db_file.preview_status = "ready"
+        db_file.preview_s3_key = "org/chat/preview/preview.webp"
+        db_file.preview_s3_bucket = "crm-files-test"
+        db_file.preview_content_type = "image/webp"
+        db_file.preview_size = 321
+        db_file.preview_meta = {"width": 640, "height": 360}
+        await session.commit()
 
     send_message = await client.post(
         f"/api/v1/chat/chats/{chat_id}/messages",
@@ -422,6 +449,8 @@ async def test_chat_attachment_init_finish_send_and_download_url(client: AsyncCl
     assert message_meta["attachments"][0]["file_id"] == file_id
     assert message_meta["attachments"][0]["filename"] == "preview.png"
     assert message_meta["attachments"][0]["original_name"] == "preview.png"
+    assert message_meta["attachments"][0]["preview_status"] == "ready"
+    assert message_meta["attachments"][0]["preview_content_type"] == "image/webp"
 
     download_url = await client.get(
         f"/api/v1/chat/chats/{chat_id}/attachments/{file_id}/download-url",
@@ -431,24 +460,20 @@ async def test_chat_attachment_init_finish_send_and_download_url(client: AsyncCl
     assert download_url.json()["ok"] is True
     assert download_url.json()["data"]["url"] == "https://download.example.com/get"
 
-    monkeypatch.setattr(
-        "src.modules.chat.routes.files_storage.stream_file",
-        lambda _s3_key, _bucket: (iter([b"preview-bytes"]), {"ContentLength": 13}),
-    )
     preview = await client.get(
         f"/api/v1/chat/chats/{chat_id}/attachments/{file_id}/preview",
         headers=_headers(token),
     )
     assert preview.status_code == 200, f"Get preview failed: {preview.text}"
-    assert preview.headers["cache-control"].startswith("private")
-    assert preview.headers["etag"] == '"preview-etag"'
-    assert preview.content == b"preview-bytes"
-
-    cached_preview = await client.get(
-        f"/api/v1/chat/chats/{chat_id}/attachments/{file_id}/preview",
-        headers={**_headers(token), "If-None-Match": '"preview-etag"'},
-    )
-    assert cached_preview.status_code == 304
+    assert preview.json()["ok"] is True
+    assert preview.json()["data"] == {
+        "status": "ready",
+        "url": "https://preview.example.com/get",
+        "expires_in": 3600,
+        "content_type": "image/webp",
+        "size": 321,
+        "meta": {"width": 640, "height": 360},
+    }
 
 
 @pytest.mark.asyncio

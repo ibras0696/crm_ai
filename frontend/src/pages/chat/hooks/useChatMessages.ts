@@ -1,4 +1,4 @@
-import { useCallback, useEffect, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
+import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject, type SetStateAction } from 'react'
 
 import { chatApi, type ChatInfo, type ChatMemberInfo, type ChatMessageInfo } from '@/lib/api'
 
@@ -10,6 +10,8 @@ import {
   saveCachedChatMessages,
   saveCachedChats,
 } from '../chatCache'
+
+const CHAT_MESSAGES_REFRESH_COOLDOWN_MS = 15_000
 
 interface UseChatMessagesParams {
   selectedChatId: string | null
@@ -68,6 +70,9 @@ export function useChatMessages({
   setIsNearBottom,
   setErrorText,
 }: UseChatMessagesParams) {
+  const lastMessagesRefreshAtRef = useRef<Record<string, number>>({})
+  const lastReadCursorSentRef = useRef<Record<string, number>>({})
+
   useEffect(() => {
     let cancelled = false
 
@@ -175,19 +180,25 @@ export function useChatMessages({
           }
         }
 
+        const lastRefreshAt = lastMessagesRefreshAtRef.current[selectedChatId] ?? 0
+        const canUseRecentCache = hasCachedMessages && Date.now() - lastRefreshAt < CHAT_MESSAGES_REFRESH_COOLDOWN_MS
+        if (canUseRecentCache) {
+          return
+        }
+
         if (!hasCachedMessages) {
           setLoadingMessages(true)
         }
 
-        const [messagesResponse, membersResponse, presenceResponse] = await Promise.all([
+        const [messagesResponse, membersResponse] = await Promise.all([
           chatApi.listMessages(selectedChatId, {
             limit: MESSAGE_PAGE_SIZE,
             latest: true,
           }),
           chatApi.listMembers(selectedChatId),
-          chatApi.getPresence(selectedChatId),
         ])
         if (cancelled) return
+        lastMessagesRefreshAtRef.current[selectedChatId] = Date.now()
 
         if (messagesResponse.data.ok && messagesResponse.data.data) {
           const nextMessages = messagesResponse.data.data
@@ -204,7 +215,9 @@ export function useChatMessages({
           setNewMessagesCount(0)
 
           const lastSeqNo = nextMessages[nextMessages.length - 1]?.seq_no
-          if (typeof lastSeqNo === 'number') {
+          const lastCursorSent = lastReadCursorSentRef.current[selectedChatId] ?? 0
+          if (typeof lastSeqNo === 'number' && lastSeqNo > lastCursorSent) {
+            lastReadCursorSentRef.current[selectedChatId] = lastSeqNo
             await chatApi.updateReadCursor(selectedChatId, { last_read_seq_no: lastSeqNo })
           }
           requestAnimationFrame(scrollMessagesToBottom)
@@ -219,12 +232,6 @@ export function useChatMessages({
           if (cacheScope) void saveCachedChatMembers(cacheScope, selectedChatId, membersResponse.data.data)
         } else {
           if (!hasCachedMembers) setChatMembers([])
-        }
-
-        if (presenceResponse.data.ok && presenceResponse.data.data) {
-          setPresence(presenceResponse.data.data)
-        } else {
-          setPresence({})
         }
       } catch (error) {
         if (!hasCachedMessages) setMessages([])

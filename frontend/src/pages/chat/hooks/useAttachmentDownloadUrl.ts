@@ -111,9 +111,6 @@ export function useAttachmentDownloadUrl({
         forceRefresh,
         allowStaleOnRefreshWindow: true,
       })
-      if (telemetryEnabled) {
-        void chatApi.sendTelemetry({ event: 'attachment_fetch', value: 1, meta: { cached: Boolean(downloadUrl) } })
-      }
       setDownloadUrl(url)
       return url
     } catch (error: unknown) {
@@ -126,7 +123,7 @@ export function useAttachmentDownloadUrl({
     } finally {
       setLoading(false)
     }
-  }, [chatId, downloadUrl, fileId, telemetryEnabled])
+  }, [chatId, fileId, telemetryEnabled])
 
   useEffect(() => {
     if (!enabled) return

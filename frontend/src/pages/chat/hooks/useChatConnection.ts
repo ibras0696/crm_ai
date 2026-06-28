@@ -6,6 +6,9 @@ import { chatApi } from '@/lib/api'
 import { TYPING_TTL_MS } from '../chatHelpers'
 import { saveCachedChatMembers, saveCachedChatMessages, saveCachedChats } from '../chatCache'
 
+const PRESENCE_POLL_INTERVAL_MS = 60_000
+const CHAT_TELEMETRY_MIN_INTERVAL_MS = 60_000
+
 interface UseChatConnectionParams {
   selectedChatId: string | null
   cacheScope: string | null
@@ -48,6 +51,7 @@ export function useChatConnection({
   const hasConnectedOnceRef = useRef(false)
   const lastDisconnectedAtRef = useRef<number | null>(null)
   const reconnectAttemptRef = useRef(0)
+  const telemetrySentAtRef = useRef<Record<string, number>>({})
 
   useEffect(() => {
     selectedChatIdRef.current = selectedChatId
@@ -71,7 +75,7 @@ export function useChatConnection({
     void refreshPresence()
     const intervalId = window.setInterval(() => {
       void refreshPresence()
-    }, 20_000)
+    }, PRESENCE_POLL_INTERVAL_MS)
 
     return () => {
       cancelled = true
@@ -176,6 +180,10 @@ export function useChatConnection({
   const sendTelemetry = useCallback(
     (event: 'ws_reconnect' | 'message_lag', value?: number, meta?: Record<string, unknown>) => {
       if (!telemetryEnabled) return
+      const now = Date.now()
+      const lastSentAt = telemetrySentAtRef.current[event] ?? 0
+      if (now - lastSentAt < CHAT_TELEMETRY_MIN_INTERVAL_MS) return
+      telemetrySentAtRef.current[event] = now
       void chatApi.sendTelemetry({
         event,
         ...(typeof value === 'number' ? { value } : {}),
@@ -222,6 +230,7 @@ export function useChatConnection({
   }, [selectedChatIdRef])
 
   useEffect(() => {
+    if (!realtimeEnabled) return
     let socket: WebSocket | null = null
     let reconnectTimer: number | null = null
     let pingTimer: number | null = null
@@ -426,6 +435,7 @@ export function useChatConnection({
     setTypingUsers,
     userId,
     backfillSelectedChat,
+    realtimeEnabled,
     sendTelemetry,
   ])
 

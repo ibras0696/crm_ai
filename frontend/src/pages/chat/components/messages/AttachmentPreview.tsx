@@ -12,6 +12,7 @@ import {
   normalizeAttachmentMimeForPlayback,
   type MediaPreviewState,
 } from '../../chatHelpers'
+import { resolveCachedMediaObjectUrl, revokeCachedMediaObjectUrl } from '../../chatMediaCache'
 import { useAttachmentDownloadUrl } from '../../hooks/useAttachmentDownloadUrl'
 
 const ATTACHMENT_PRELOAD_ROOT_MARGIN = '240px'
@@ -91,9 +92,11 @@ export function AttachmentPreview({
   const [audioCurrentTime, setAudioCurrentTime] = useState(0)
   const [audioDuration, setAudioDuration] = useState(0)
   const [isDownloadingFile, setIsDownloadingFile] = useState(false)
+  const [cachedMediaUrl, setCachedMediaUrl] = useState('')
 
   const containerRef = useRef<HTMLDivElement | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const cachedMediaUrlRef = useRef('')
 
   const mediaKind = inferMediaKind(attachment.content_type, attachment.original_name)
   const playbackType = normalizeAttachmentMimeForPlayback(attachment.content_type)
@@ -111,6 +114,7 @@ export function AttachmentPreview({
     enabled: autoLoadEnabled,
     telemetryEnabled,
   })
+  const renderMediaUrl = cachedMediaUrl || downloadUrl
 
   useEffect(() => {
     if (!isMessageVisible) {
@@ -141,21 +145,62 @@ export function AttachmentPreview({
   }, [attachment.file_id])
 
   useEffect(() => {
-    if (!downloadUrl || mediaKind === 'file') return
+    cachedMediaUrlRef.current = cachedMediaUrl
+  }, [cachedMediaUrl])
+
+  useEffect(() => () => {
+    if (cachedMediaUrlRef.current) {
+      revokeCachedMediaObjectUrl(cachedMediaUrlRef.current)
+    }
+  }, [])
+
+  useEffect(() => {
+    setCachedMediaUrl((previousUrl) => {
+      if (previousUrl) revokeCachedMediaObjectUrl(previousUrl)
+      return ''
+    })
+  }, [attachment.file_id])
+
+  useEffect(() => {
+    if (!downloadUrl || (mediaKind !== 'image' && mediaKind !== 'video')) return
+    let cancelled = false
+    void resolveCachedMediaObjectUrl({
+      cacheId: `${chatId}:${attachment.file_id}`,
+      fileId: attachment.file_id,
+      sourceUrl: downloadUrl,
+      contentType: playbackType || attachment.content_type,
+      sizeBytes: attachment.size,
+    }).then((objectUrl) => {
+      if (!objectUrl || cancelled) {
+        if (objectUrl) revokeCachedMediaObjectUrl(objectUrl)
+        return
+      }
+      setCachedMediaUrl((previousUrl) => {
+        if (previousUrl && previousUrl !== objectUrl) revokeCachedMediaObjectUrl(previousUrl)
+        return objectUrl
+      })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [attachment.content_type, attachment.file_id, attachment.size, chatId, downloadUrl, mediaKind, playbackType])
+
+  useEffect(() => {
+    if (!renderMediaUrl || mediaKind === 'file') return
     runOnIdle(() => {
       if (mediaKind === 'image') {
         const image = new Image()
         image.decoding = 'async'
-        image.src = downloadUrl
+        image.src = renderMediaUrl
         return
       }
       if (mediaKind === 'video') {
         const video = document.createElement('video')
         video.preload = 'metadata'
-        video.src = downloadUrl
+        video.src = renderMediaUrl
       }
     })
-  }, [downloadUrl, mediaKind])
+  }, [renderMediaUrl, mediaKind])
 
   useEffect(() => {
     if (loading || errorText || mediaKind !== 'audio') return
@@ -209,6 +254,27 @@ export function AttachmentPreview({
   const resolveUrlForAction = async () => {
     if (downloadUrl) return downloadUrl
     return ensureDownloadUrl(false)
+  }
+
+  const resolveMediaPreviewUrlForAction = async () => {
+    if (cachedMediaUrl) return cachedMediaUrl
+    const url = await resolveUrlForAction()
+    if (mediaKind !== 'image' && mediaKind !== 'video') return url
+
+    const objectUrl = await resolveCachedMediaObjectUrl({
+      cacheId: `${chatId}:${attachment.file_id}`,
+      fileId: attachment.file_id,
+      sourceUrl: url,
+      contentType: playbackType || attachment.content_type,
+      sizeBytes: attachment.size,
+    })
+    if (!objectUrl) return url
+
+    setCachedMediaUrl((previousUrl) => {
+      if (previousUrl && previousUrl !== objectUrl) revokeCachedMediaObjectUrl(previousUrl)
+      return objectUrl
+    })
+    return objectUrl
   }
 
   const toggleAudioPlayback = async () => {
@@ -270,7 +336,7 @@ export function AttachmentPreview({
 
   const openMediaPreview = async (kind: 'image' | 'video') => {
     try {
-      const url = await resolveUrlForAction()
+      const url = await resolveMediaPreviewUrlForAction()
       window.requestAnimationFrame(() => {
         onOpenMediaPreview?.({
           kind,
@@ -307,7 +373,7 @@ export function AttachmentPreview({
     )
   }
 
-  if (mediaKind === 'image' && downloadUrl) {
+  if (mediaKind === 'image' && renderMediaUrl) {
     return (
       <div ref={containerRef}>
         <button
@@ -316,7 +382,7 @@ export function AttachmentPreview({
           onClick={() => void openMediaPreview('image')}
         >
           <img
-            src={downloadUrl}
+            src={renderMediaUrl}
             alt={attachment.original_name}
             loading="lazy"
             decoding="async"
@@ -328,13 +394,13 @@ export function AttachmentPreview({
     )
   }
 
-  if (mediaKind === 'video' && downloadUrl) {
+  if (mediaKind === 'video' && renderMediaUrl) {
     return (
       <div ref={containerRef} className="max-w-full rounded-lg border border-border/60 bg-background/20 p-2">
         <video
           controls
           preload="metadata"
-          src={downloadUrl}
+          src={renderMediaUrl}
           className="max-h-80 max-w-full rounded-md"
         >
           Ваш браузер не поддерживает видео.

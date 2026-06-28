@@ -137,10 +137,18 @@ export function useChatMessages({
         return
       }
 
-      setLoadingMessages(true)
       setLoadingOlderMessages(false)
       setHasMoreMessages(true)
       setErrorText('')
+      setMessages([])
+      setChatMembers([])
+      setPresence({})
+      setTypingUsers({})
+      setReplyToMessageId(null)
+      setMenuOpenMessageId(null)
+      setAckedOwnMessages({})
+      setNewMessagesCount(0)
+      setLoadingMessages(false)
       let hasCachedMessages = false
       let hasCachedMembers = false
 
@@ -165,6 +173,10 @@ export function useChatMessages({
               setChatMembers(cachedState.members)
             }
           }
+        }
+
+        if (!hasCachedMessages) {
+          setLoadingMessages(true)
         }
 
         const [messagesResponse, membersResponse, presenceResponse] = await Promise.all([

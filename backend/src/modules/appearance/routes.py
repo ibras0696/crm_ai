@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.schemas import ApiResponse
 from src.infrastructure.database import get_async_session
-from src.modules.auth.dependencies import CurrentUser
+from src.modules.auth.dependencies import CurrentUser, get_current_user
 
 from .repository import AppearanceRepository
 from .schemas import AppearanceRead, AppearanceUpdate
@@ -25,7 +25,7 @@ _DEFAULTS = AppearanceRead(
 
 @router.get("", response_model=ApiResponse[AppearanceRead])
 async def get_appearance(
-    current_user: CurrentUser,
+    current_user: CurrentUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> ApiResponse[AppearanceRead]:
     row = await _repo.get(session, current_user.user_id)
@@ -36,7 +36,7 @@ async def get_appearance(
 @router.put("", response_model=ApiResponse[AppearanceRead])
 async def update_appearance(
     body: AppearanceUpdate,
-    current_user: CurrentUser,
+    current_user: CurrentUser = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ) -> ApiResponse[AppearanceRead]:
     patch = body.model_dump(exclude_none=True)

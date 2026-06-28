@@ -16,7 +16,7 @@ import { resolveCachedMediaObjectUrl, revokeCachedMediaObjectUrl } from '../../c
 import { useAttachmentDownloadUrl } from '../../hooks/useAttachmentDownloadUrl'
 
 const ATTACHMENT_PRELOAD_ROOT_MARGIN = '240px'
-const WAVEFORM_BARS = 40
+const WAVEFORM_BARS = 32
 
 function generateWaveformBars(seed: string, count: number): number[] {
   let hash = 5381
@@ -448,32 +448,37 @@ export function AttachmentPreview({
                 : <Play size={18} weight="fill" className="translate-x-px" />}
             </button>
 
-            {/* Waveform + time */}
-            <div className="min-w-0 flex-1">
+            <div className="w-44 min-w-0 flex-none sm:w-52">
               <button
                 type="button"
                 onClick={handleAudioTrackSeek}
-                className="flex h-8 w-full cursor-pointer items-center gap-[2px]"
+                className="flex h-9 w-full cursor-pointer items-center gap-[3px] rounded-md px-0.5"
                 aria-label="Перемотать голосовое сообщение"
               >
                 {generateWaveformBars(attachment.file_id, WAVEFORM_BARS).map((height, i) => {
-                  const ratio = i / WAVEFORM_BARS
+                  const ratio = (i + 0.5) / WAVEFORM_BARS
                   const progress = audioProgressPercent / 100
                   const played = ratio < progress
-                  const isCursor = isAudioPlaying && Math.abs(ratio - progress) < 2 / WAVEFORM_BARS
+                  const distanceFromProgress = Math.abs(ratio - progress)
+                  const activeRange = 4 / WAVEFORM_BARS
+                  const isCursor = isAudioPlaying && distanceFromProgress < 1.5 / WAVEFORM_BARS
+                  const isNearCursor = isAudioPlaying && distanceFromProgress < activeRange
+                  const activeBoost = isNearCursor ? 1 + (1 - distanceFromProgress / activeRange) * 0.45 : 1
                   const barH = Math.round(height * 22)
                   return (
                     <span
                       key={i}
-                      className={`flex-1 rounded-full transition-all duration-75 ${
+                      className={`block flex-1 rounded-full transition-all duration-100 ${
                         played
                           ? isOutgoing ? 'bg-white' : 'bg-primary'
                           : isOutgoing ? 'bg-white/40' : 'bg-muted-foreground/25'
-                      }`}
+                      } ${isCursor ? 'motion-safe:animate-pulse' : ''}`}
                       style={{
-                        height: `${isCursor ? Math.min(barH * 1.3, 26) : barH}px`,
-                        minHeight: '3px',
-                        opacity: played ? 1 : (isOutgoing ? 0.6 : 0.45),
+                        height: `${Math.min(barH * activeBoost, 30)}px`,
+                        minHeight: isCursor ? '8px' : '4px',
+                        opacity: played || isNearCursor ? 1 : (isOutgoing ? 0.65 : 0.5),
+                        transform: `scaleY(${isNearCursor ? activeBoost : 1})`,
+                        transformOrigin: 'center',
                       }}
                     />
                   )

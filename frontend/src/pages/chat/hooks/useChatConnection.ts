@@ -4,9 +4,11 @@ import type { ChatInfo, ChatMemberInfo, ChatMessageInfo } from '@/lib/api'
 import { chatApi } from '@/lib/api'
 
 import { TYPING_TTL_MS } from '../chatHelpers'
+import { saveCachedChatMembers, saveCachedChatMessages, saveCachedChats } from '../chatCache'
 
 interface UseChatConnectionParams {
   selectedChatId: string | null
+  cacheScope: string | null
   selectedChatIdRef: MutableRefObject<string | null>
   getLastKnownSeqNo: () => number
   userId: string | undefined
@@ -25,6 +27,7 @@ interface UseChatConnectionParams {
 
 export function useChatConnection({
   selectedChatId,
+  cacheScope,
   selectedChatIdRef,
   getLastKnownSeqNo,
   userId,
@@ -116,7 +119,9 @@ export function useChatConnection({
         const unique = delta.filter((message) => !existingIds.has(message.id))
         appendedCount = unique.length
         if (unique.length === 0) return prev
-        return [...prev, ...unique]
+        const next = [...prev, ...unique]
+        if (cacheScope) void saveCachedChatMessages(cacheScope, chatId, next)
+        return next
       })
       if (appendedCount > 0) {
         if (shouldStickToBottom) {
@@ -148,12 +153,14 @@ export function useChatConnection({
           ...chat,
           updated_at: latestDelta.created_at,
         }
+        if (cacheScope) void saveCachedChats(cacheScope, next)
         return next
       })
     } catch {
       // best-effort on reconnect; next reconnect will retry
     }
   }, [
+    cacheScope,
     getLastKnownSeqNo,
     messagesViewportRef,
     realtimeEnabled,
@@ -291,6 +298,7 @@ export function useChatConnection({
               const updatedChat: ChatInfo = { ...chat, updated_at: incomingMessage.created_at }
               next.splice(index, 1)
               next.unshift(updatedChat)
+              if (cacheScope) void saveCachedChats(cacheScope, next)
               return next
             })
 
@@ -303,7 +311,9 @@ export function useChatConnection({
 
             setMessages((prev) => {
               if (prev.some((x) => x.id === incomingMessage.id)) return prev
-              return [...prev, incomingMessage]
+              const next = [...prev, incomingMessage]
+              if (cacheScope) void saveCachedChatMessages(cacheScope, payload.chat_id!, next)
+              return next
             })
 
             if (incomingMessage.sender_id === userId) {
@@ -332,6 +342,7 @@ export function useChatConnection({
                   ? chat.member_ids
                   : [...chat.member_ids, joinedMember.user_id],
               }
+              if (cacheScope) void saveCachedChats(cacheScope, next)
               return next
             })
 
@@ -339,7 +350,11 @@ export function useChatConnection({
               setChatMembers((prev) => (
                 prev.some((member) => member.user_id === joinedMember.user_id)
                   ? prev
-                  : [...prev, joinedMember]
+                  : (() => {
+                      const next = [...prev, joinedMember]
+                      if (cacheScope) void saveCachedChatMembers(cacheScope, payload.chat_id!, next)
+                      return next
+                    })()
               ))
             }
             return
@@ -365,13 +380,15 @@ export function useChatConnection({
             && payload.user_id
             && typeof payload.last_read_seq_no === 'number'
           ) {
-            setChatMembers((prev) =>
-              prev.map((member) =>
+            setChatMembers((prev) => {
+              const next = prev.map((member) =>
                 member.user_id === payload.user_id
                   ? { ...member, last_read_seq_no: Math.max(member.last_read_seq_no, payload.last_read_seq_no!) }
                   : member,
-              ),
-            )
+              )
+              if (cacheScope) void saveCachedChatMembers(cacheScope, payload.chat_id!, next)
+              return next
+            })
           }
         } catch {
           // ignore unrelated ws frames
@@ -398,6 +415,7 @@ export function useChatConnection({
     }
   }, [
     messagesViewportRef,
+    cacheScope,
     scrollMessagesToBottom,
     selectedChatIdRef,
     setAckedOwnMessages,

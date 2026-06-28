@@ -10,11 +10,17 @@ import { useChatComposer } from './hooks/useChatComposer'
 import { useChatMessages } from './hooks/useChatMessages'
 import { useChatConnection } from './hooks/useChatConnection'
 import { useChatRuntimeConfig } from './hooks/useChatRuntimeConfig'
+import {
+  createChatCacheScope,
+  deleteCachedChat,
+  saveCachedChatMembers,
+  saveCachedChats,
+} from './chatCache'
 
 const CHAT_SIDEBAR_COLLAPSED_STORAGE_KEY = 'chat.sidebar.collapsed.v1'
 
 export default function ChatPage() {
-  const { members, user } = useAuth()
+  const { members, org, user } = useAuth()
   const chatRuntimeConfig = useChatRuntimeConfig()
 
   const [chats, setChats] = useState<ChatInfo[]>([])
@@ -66,6 +72,8 @@ export default function ChatPage() {
   const messagesViewportRef = useRef<HTMLDivElement | null>(null)
   const messagesRef = useRef<ChatMessageInfo[]>([])
 
+  const chatCacheScope = useMemo(() => createChatCacheScope(user?.id, org?.id), [org?.id, user?.id])
+
   const scrollMessagesToBottom = useCallback(() => {
     const viewport = messagesViewportRef.current
     if (!viewport) return
@@ -85,6 +93,7 @@ export default function ChatPage() {
     stopTyping,
   } = useChatConnection({
     selectedChatId,
+    cacheScope: chatCacheScope,
     selectedChatIdRef,
     userId: user?.id,
     telemetryEnabled: chatRuntimeConfig.telemetryEnabled,
@@ -108,6 +117,7 @@ export default function ChatPage() {
     handleCopyMessage,
   } = useChatMessages({
     selectedChatId,
+    cacheScope: chatCacheScope,
     userId: user?.id,
     loadingMessages,
     loadingOlderMessages,
@@ -442,7 +452,11 @@ export default function ChatPage() {
       })
       if (response.data.ok && response.data.data) {
         const created = response.data.data
-        setChats((prev) => [created, ...prev])
+        setChats((prev) => {
+          const next = [created, ...prev]
+          if (chatCacheScope) void saveCachedChats(chatCacheScope, next)
+          return next
+        })
         setSelectedChatId(created.id)
         setNewChatTitle('')
         setNewChatType('group')
@@ -469,9 +483,14 @@ export default function ChatPage() {
         return
       }
       const createdMember = response.data.data
-      setChatMembers((prev) => (prev.some((member) => member.user_id === createdMember.user_id) ? prev : [...prev, createdMember]))
-      setChats((prev) =>
-        prev.map((chat) =>
+      setChatMembers((prev) => {
+        if (prev.some((member) => member.user_id === createdMember.user_id)) return prev
+        const next = [...prev, createdMember]
+        if (chatCacheScope && selectedChatId) void saveCachedChatMembers(chatCacheScope, selectedChatId, next)
+        return next
+      })
+      setChats((prev) => {
+        const next = prev.map((chat) =>
           chat.id === selectedChatId
             ? {
                 ...chat,
@@ -480,8 +499,10 @@ export default function ChatPage() {
                   : [...chat.member_ids, createdMember.user_id],
               }
             : chat,
-        ),
-      )
+        )
+        if (chatCacheScope) void saveCachedChats(chatCacheScope, next)
+        return next
+      })
       setAddingMemberUserId('')
       setAddMemberOpen(false)
     } catch (error) {
@@ -503,6 +524,10 @@ export default function ChatPage() {
       }
       setChats((prev) => {
         const next = prev.filter((chat) => chat.id !== selectedChat.id)
+        if (chatCacheScope) {
+          void saveCachedChats(chatCacheScope, next)
+          void deleteCachedChat(chatCacheScope, selectedChat.id)
+        }
         setSelectedChatId(next[0]?.id || null)
         return next
       })

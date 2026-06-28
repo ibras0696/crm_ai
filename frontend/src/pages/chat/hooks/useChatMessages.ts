@@ -3,9 +3,17 @@ import { useCallback, useEffect, type Dispatch, type MutableRefObject, type SetS
 import { chatApi, type ChatInfo, type ChatMemberInfo, type ChatMessageInfo } from '@/lib/api'
 
 import { MESSAGE_PAGE_SIZE, extractApiError } from '../chatHelpers'
+import {
+  loadCachedChats,
+  loadCachedChatState,
+  saveCachedChatMembers,
+  saveCachedChatMessages,
+  saveCachedChats,
+} from '../chatCache'
 
 interface UseChatMessagesParams {
   selectedChatId: string | null
+  cacheScope: string | null
   userId: string | undefined
   loadingMessages: boolean
   loadingOlderMessages: boolean
@@ -34,6 +42,7 @@ interface UseChatMessagesParams {
 
 export function useChatMessages({
   selectedChatId,
+  cacheScope,
   userId,
   loadingMessages,
   loadingOlderMessages,
@@ -60,37 +69,60 @@ export function useChatMessages({
   setErrorText,
 }: UseChatMessagesParams) {
   useEffect(() => {
+    let cancelled = false
+
     const loadChats = async () => {
       setLoadingChats(true)
       setErrorText('')
+      let hasCachedChats = false
       try {
+        if (cacheScope) {
+          const cachedChats = await loadCachedChats(cacheScope)
+          if (!cancelled && cachedChats.length > 0) {
+            hasCachedChats = true
+            setChats(cachedChats)
+            setSelectedChatId((prev) => prev ?? cachedChats[0]?.id ?? null)
+          }
+        }
+
         const response = await chatApi.listChats()
+        if (cancelled) return
         if (response.data.ok && response.data.data) {
           const nextChats = response.data.data
           setChats(nextChats)
+          if (cacheScope) void saveCachedChats(cacheScope, nextChats)
           if (nextChats.length > 0) {
             setSelectedChatId((prev) => prev ?? nextChats[0]?.id ?? null)
           } else {
             setSelectedChatId(null)
           }
         } else {
-          setChats([])
-          setSelectedChatId(null)
+          if (!hasCachedChats) {
+            setChats([])
+            setSelectedChatId(null)
+          }
           setErrorText(response.data.error?.message || 'Не удалось загрузить чаты')
         }
       } catch (error) {
-        setChats([])
-        setSelectedChatId(null)
+        if (!hasCachedChats) {
+          setChats([])
+          setSelectedChatId(null)
+        }
         setErrorText(extractApiError(error, 'Не удалось загрузить чаты'))
       } finally {
-        setLoadingChats(false)
+        if (!cancelled) setLoadingChats(false)
       }
     }
 
     void loadChats()
-  }, [setChats, setErrorText, setLoadingChats, setSelectedChatId])
+    return () => {
+      cancelled = true
+    }
+  }, [cacheScope, setChats, setErrorText, setLoadingChats, setSelectedChatId])
 
   useEffect(() => {
+    let cancelled = false
+
     const loadMessages = async () => {
       if (!selectedChatId) {
         setMessages([])
@@ -109,8 +141,32 @@ export function useChatMessages({
       setLoadingOlderMessages(false)
       setHasMoreMessages(true)
       setErrorText('')
+      let hasCachedMessages = false
+      let hasCachedMembers = false
 
       try {
+        if (cacheScope) {
+          const cachedState = await loadCachedChatState(cacheScope, selectedChatId)
+          if (!cancelled) {
+            if (cachedState.messages.length > 0) {
+              hasCachedMessages = true
+              setMessages(cachedState.messages)
+              setHasMoreMessages(cachedState.messages.length >= MESSAGE_PAGE_SIZE)
+              const ownDelivered = Object.fromEntries(
+                cachedState.messages
+                  .filter((message) => message.sender_id === userId)
+                  .map((message) => [message.id, true]),
+              )
+              setAckedOwnMessages(ownDelivered)
+              requestAnimationFrame(scrollMessagesToBottom)
+            }
+            if (cachedState.members.length > 0) {
+              hasCachedMembers = true
+              setChatMembers(cachedState.members)
+            }
+          }
+        }
+
         const [messagesResponse, membersResponse, presenceResponse] = await Promise.all([
           chatApi.listMessages(selectedChatId, {
             limit: MESSAGE_PAGE_SIZE,
@@ -119,10 +175,12 @@ export function useChatMessages({
           chatApi.listMembers(selectedChatId),
           chatApi.getPresence(selectedChatId),
         ])
+        if (cancelled) return
 
         if (messagesResponse.data.ok && messagesResponse.data.data) {
           const nextMessages = messagesResponse.data.data
           setMessages(nextMessages)
+          if (cacheScope) void saveCachedChatMessages(cacheScope, selectedChatId, nextMessages)
           setHasMoreMessages(nextMessages.length === MESSAGE_PAGE_SIZE)
 
           const ownDelivered = Object.fromEntries(
@@ -139,15 +197,16 @@ export function useChatMessages({
           }
           requestAnimationFrame(scrollMessagesToBottom)
         } else {
-          setMessages([])
+          if (!hasCachedMessages) setMessages([])
           setHasMoreMessages(true)
           setErrorText(messagesResponse.data.error?.message || 'Не удалось загрузить сообщения')
         }
 
         if (membersResponse.data.ok && membersResponse.data.data) {
           setChatMembers(membersResponse.data.data)
+          if (cacheScope) void saveCachedChatMembers(cacheScope, selectedChatId, membersResponse.data.data)
         } else {
-          setChatMembers([])
+          if (!hasCachedMembers) setChatMembers([])
         }
 
         if (presenceResponse.data.ok && presenceResponse.data.data) {
@@ -156,20 +215,24 @@ export function useChatMessages({
           setPresence({})
         }
       } catch (error) {
-        setMessages([])
-        setChatMembers([])
+        if (!hasCachedMessages) setMessages([])
+        if (!hasCachedMembers) setChatMembers([])
         setPresence({})
         setTypingUsers({})
-        setAckedOwnMessages({})
+        if (!hasCachedMessages) setAckedOwnMessages({})
         setHasMoreMessages(true)
         setErrorText(extractApiError(error, 'Не удалось загрузить сообщения'))
       } finally {
-        setLoadingMessages(false)
+        if (!cancelled) setLoadingMessages(false)
       }
     }
 
     void loadMessages()
+    return () => {
+      cancelled = true
+    }
   }, [
+    cacheScope,
     scrollMessagesToBottom,
     selectedChatId,
     setAckedOwnMessages,
@@ -208,7 +271,9 @@ export function useChatMessages({
         setMessages((prev) => {
           const existingIds = new Set(prev.map((x) => x.id))
           const uniqueOlder = older.filter((x) => !existingIds.has(x.id))
-          return [...uniqueOlder, ...prev]
+          const next = [...uniqueOlder, ...prev]
+          if (cacheScope) void saveCachedChatMessages(cacheScope, selectedChatId, next)
+          return next
         })
         setHasMoreMessages(older.length === MESSAGE_PAGE_SIZE)
 
@@ -228,6 +293,7 @@ export function useChatMessages({
     }
   }, [
     hasMoreMessages,
+    cacheScope,
     loadingMessages,
     loadingOlderMessages,
     messages,
@@ -262,7 +328,11 @@ export function useChatMessages({
     try {
       const response = await chatApi.deleteMessage(messageId)
       if (response.data.ok) {
-        setMessages((prev) => prev.filter((message) => message.id !== messageId))
+        setMessages((prev) => {
+          const next = prev.filter((message) => message.id !== messageId)
+          if (cacheScope && selectedChatId) void saveCachedChatMessages(cacheScope, selectedChatId, next)
+          return next
+        })
         setMenuOpenMessageId(null)
       } else {
         setErrorText(response.data.error?.message || 'Не удалось удалить сообщение')
@@ -270,7 +340,7 @@ export function useChatMessages({
     } catch (error) {
       setErrorText(extractApiError(error, 'Не удалось удалить сообщение'))
     }
-  }, [setErrorText, setMenuOpenMessageId, setMessages])
+  }, [cacheScope, selectedChatId, setErrorText, setMenuOpenMessageId, setMessages])
 
   const handleCopyMessage = useCallback(async (text: string) => {
     try {

@@ -12,7 +12,11 @@ import {
   normalizeAttachmentMimeForPlayback,
   type MediaPreviewState,
 } from '../../chatHelpers'
-import { resolveCachedMediaObjectUrl, revokeCachedMediaObjectUrl } from '../../chatMediaCache'
+import {
+  resolveCachedMediaObjectUrl,
+  resolveCachedMediaObjectUrlFromCache,
+  revokeCachedMediaObjectUrl,
+} from '../../chatMediaCache'
 import { useAttachmentDownloadUrl } from '../../hooks/useAttachmentDownloadUrl'
 
 const ATTACHMENT_PRELOAD_ROOT_MARGIN = '240px'
@@ -67,6 +71,10 @@ function runOnIdle(task: () => void) {
   window.setTimeout(task, 16)
 }
 
+function buildPreviewCacheId(chatId: string, fileId: string, contentType?: string | null, size?: number | null): string {
+  return `preview:${chatId}:${fileId}:${contentType || 'unknown'}:${size ?? 0}`
+}
+
 export function AttachmentPreview({
   chatId,
   attachment,
@@ -101,6 +109,7 @@ export function AttachmentPreview({
   const containerRef = useRef<HTMLDivElement | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const cachedMediaUrlRef = useRef('')
+  const previewUrlRef = useRef('')
 
   const mediaKind = inferMediaKind(attachment.content_type, attachment.original_name)
   const playbackType = normalizeAttachmentMimeForPlayback(attachment.content_type)
@@ -120,6 +129,13 @@ export function AttachmentPreview({
   })
   const renderMediaUrl = cachedMediaUrl || downloadUrl
   const previewMeta = previewMetaOverride ?? attachment.preview_meta
+  const hasPreviewMeta = Boolean(previewMeta)
+  const initialPreviewCacheId = buildPreviewCacheId(
+    chatId,
+    attachment.file_id,
+    attachment.preview_content_type,
+    attachment.preview_size,
+  )
   const waveformBars = Array.isArray(previewMeta?.waveform)
     ? previewMeta.waveform
       .map((value) => (typeof value === 'number' ? clamp01(value) : 0))
@@ -159,9 +175,16 @@ export function AttachmentPreview({
     cachedMediaUrlRef.current = cachedMediaUrl
   }, [cachedMediaUrl])
 
+  useEffect(() => {
+    previewUrlRef.current = previewUrl
+  }, [previewUrl])
+
   useEffect(() => () => {
     if (cachedMediaUrlRef.current) {
       revokeCachedMediaObjectUrl(cachedMediaUrlRef.current)
+    }
+    if (previewUrlRef.current) {
+      revokeCachedMediaObjectUrl(previewUrlRef.current)
     }
   }, [])
 
@@ -170,7 +193,10 @@ export function AttachmentPreview({
       if (previousUrl) revokeCachedMediaObjectUrl(previousUrl)
       return ''
     })
-    setPreviewUrl('')
+    setPreviewUrl((previousUrl) => {
+      if (previousUrl) revokeCachedMediaObjectUrl(previousUrl)
+      return ''
+    })
     setPreviewStatus(attachment.preview_status || '')
     setPreviewMetaOverride(null)
     setPreviewPollAttempt(0)
@@ -178,7 +204,28 @@ export function AttachmentPreview({
 
   useEffect(() => {
     if (!['image', 'video', 'audio'].includes(mediaKind) || (!forceEagerLoad && !isElementVisible)) return
+    if ((mediaKind === 'image' || mediaKind === 'video') && !previewUrl) {
+      let cancelled = false
+      void resolveCachedMediaObjectUrlFromCache(initialPreviewCacheId).then((objectUrl) => {
+        if (!objectUrl || cancelled) {
+          if (objectUrl) revokeCachedMediaObjectUrl(objectUrl)
+          return
+        }
+        setPreviewUrl((previousUrl) => {
+          if (previousUrl && previousUrl !== objectUrl) revokeCachedMediaObjectUrl(previousUrl)
+          return objectUrl
+        })
+      })
+      return () => {
+        cancelled = true
+      }
+    }
+  }, [forceEagerLoad, initialPreviewCacheId, isElementVisible, mediaKind, previewUrl])
+
+  useEffect(() => {
+    if (!['image', 'video', 'audio'].includes(mediaKind) || (!forceEagerLoad && !isElementVisible)) return
     if (previewUrl || previewStatus === 'unsupported' || previewStatus === 'failed') return
+    if (mediaKind === 'audio' && previewStatus === 'ready' && hasPreviewMeta) return
 
     let cancelled = false
     let timerId = 0
@@ -189,7 +236,25 @@ export function AttachmentPreview({
       setPreviewStatus(data.status)
       if (data.meta) setPreviewMetaOverride(data.meta)
       if (data.status === 'ready' && data.url) {
-        setPreviewUrl(data.url)
+        const previewCacheId = buildPreviewCacheId(chatId, attachment.file_id, data.content_type, data.size)
+        if (mediaKind === 'image' || mediaKind === 'video') {
+          void resolveCachedMediaObjectUrl({
+            cacheId: previewCacheId,
+            fileId: attachment.file_id,
+            sourceUrl: data.url,
+            contentType: data.content_type || attachment.preview_content_type || 'application/octet-stream',
+            sizeBytes: data.size ?? attachment.preview_size ?? undefined,
+          }).then((objectUrl) => {
+            if (!objectUrl || cancelled) {
+              if (objectUrl) revokeCachedMediaObjectUrl(objectUrl)
+              return
+            }
+            setPreviewUrl((previousUrl) => {
+              if (previousUrl && previousUrl !== objectUrl) revokeCachedMediaObjectUrl(previousUrl)
+              return objectUrl
+            })
+          })
+        }
       } else if ((data.status === 'pending' || data.status === 'processing') && previewPollAttempt < 10) {
         timerId = window.setTimeout(() => {
           if (!cancelled) setPreviewPollAttempt((value) => value + 1)
@@ -205,6 +270,8 @@ export function AttachmentPreview({
     }
   }, [
     attachment.file_id,
+    attachment.preview_content_type,
+    attachment.preview_size,
     chatId,
     forceEagerLoad,
     isElementVisible,
@@ -212,6 +279,7 @@ export function AttachmentPreview({
     previewPollAttempt,
     previewStatus,
     previewUrl,
+    hasPreviewMeta,
     setErrorText,
   ])
 

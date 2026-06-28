@@ -168,6 +168,16 @@ export async function resolveCachedMediaObjectUrl(options: ResolveCachedMediaUrl
   return null
 }
 
+export async function resolveCachedMediaObjectUrlFromCache(cacheId: string): Promise<string | null> {
+  try {
+    const cachedBlob = await readCachedMediaBlob(cacheId)
+    if (cachedBlob) return URL.createObjectURL(cachedBlob)
+  } catch {
+    return null
+  }
+  return null
+}
+
 export function revokeCachedMediaObjectUrl(url: string) {
   if (!url.startsWith('blob:')) return
   URL.revokeObjectURL(url)

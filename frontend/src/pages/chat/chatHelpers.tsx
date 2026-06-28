@@ -185,6 +185,20 @@ export function parseAttachmentSize(item: Record<string, unknown>): number {
   return 0
 }
 
+function parseOptionalNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return Math.floor(value)
+  if (typeof value === 'string') {
+    const parsed = Number.parseInt(value, 10)
+    if (Number.isFinite(parsed) && parsed >= 0) return parsed
+  }
+  return null
+}
+
+function pickPreviewMeta(item: Record<string, unknown>): Record<string, unknown> | null {
+  const value = item.preview_meta ?? item.previewMeta
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
 export function inferContentTypeFromName(filename: string): string {
   const ext = filename.toLowerCase().split('.').pop() || ''
   if (!ext) return 'application/octet-stream'
@@ -235,10 +249,15 @@ export function normalizeAttachmentRecord(
 
   return {
     file_id: fileId,
+    filename: pickFirstString(item, ['filename', 'name', 'title']) || undefined,
     original_name: originalName,
     content_type: contentType,
     size: parseAttachmentSize(item),
     status,
+    preview_status: pickFirstString(item, ['preview_status', 'previewStatus']) || null,
+    preview_content_type: pickFirstString(item, ['preview_content_type', 'previewContentType']) || null,
+    preview_size: parseOptionalNumber(item.preview_size ?? item.previewSize),
+    preview_meta: pickPreviewMeta(item),
   }
 }
 

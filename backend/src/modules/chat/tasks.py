@@ -13,11 +13,13 @@ from botocore.exceptions import BotoCoreError, ClientError
 from PIL import Image, ImageOps
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from src.config import settings
 from src.infrastructure.celery_app import celery
 from src.infrastructure.celery_base import BaseTaskWithRetry
 from src.infrastructure.database_sync import sync_session_factory
+from src.modules.chat.models import ChatMessage
 from src.modules.files import storage as files_storage
 from src.modules.files.models import File
 
@@ -191,6 +193,63 @@ def _count_attachment_references_sync(*, session: Session, org_id: uuid.UUID, fi
     return int(result.scalar_one() or 0)
 
 
+def _update_attachment_preview_meta_sync(*, session: Session, db_file: File) -> int:
+    file_id_text = str(db_file.id)
+    predicate = text(
+        """
+        (
+          COALESCE(chat_messages.meta->'attachment_ids', '[]'::jsonb) ? :file_id_text
+          OR EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements(COALESCE(chat_messages.meta->'attachments', '[]'::jsonb)) AS elem
+              WHERE elem->>'file_id' = :file_id_text
+          )
+        )
+        """
+    )
+    messages = (
+        session.execute(
+            select(ChatMessage).where(ChatMessage.org_id == db_file.org_id, predicate),
+            {"file_id_text": file_id_text},
+        )
+        .scalars()
+        .all()
+    )
+
+    updated = 0
+    preview_payload = {
+        "preview_status": db_file.preview_status,
+        "preview_content_type": db_file.preview_content_type,
+        "preview_size": db_file.preview_size,
+        "preview_meta": db_file.preview_meta,
+    }
+    for message in messages:
+        meta = dict(message.meta or {})
+        attachments_raw = meta.get("attachments")
+        if not isinstance(attachments_raw, list):
+            continue
+
+        changed = False
+        attachments: list[object] = []
+        for item in attachments_raw:
+            if not isinstance(item, dict) or str(item.get("file_id") or "") != file_id_text:
+                attachments.append(item)
+                continue
+            next_item = dict(item)
+            next_item.update(preview_payload)
+            attachments.append(next_item)
+            changed = True
+
+        if not changed:
+            continue
+        meta["attachments"] = attachments
+        message.meta = meta
+        flag_modified(message, "meta")
+        updated += 1
+
+    return updated
+
+
 @celery.task(name="chat_cleanup_attachments", bind=True, base=BaseTaskWithRetry)
 def chat_cleanup_attachments(self, *, org_id: str, file_ids: list[str]) -> dict[str, int]:
     """Delete orphan chat attachments from storage and metadata table."""
@@ -289,8 +348,13 @@ def chat_generate_attachment_preview(self, *, org_id: str, file_id: str) -> dict
         else:
             db_file.preview_status = "unsupported"
             db_file.preview_meta = {"reason": "unsupported_content_type"}
+            updated_messages = _update_attachment_preview_meta_sync(session=session, db_file=db_file)
             session.commit()
-            return {"status": "unsupported", "file_id": str(file_uuid)}
+            return {
+                "status": "unsupported",
+                "file_id": str(file_uuid),
+                "messages_updated": updated_messages,
+            }
 
         db_file.preview_status = "processing"
         session.commit()
@@ -308,6 +372,7 @@ def chat_generate_attachment_preview(self, *, org_id: str, file_id: str) -> dict
         except (BotoCoreError, ClientError, KeyError, OSError, ValueError, subprocess.SubprocessError) as exc:
             db_file.preview_status = "failed"
             db_file.preview_meta = {"error": exc.__class__.__name__}
+            _update_attachment_preview_meta_sync(session=session, db_file=db_file)
             session.commit()
             raise
 
@@ -317,6 +382,12 @@ def chat_generate_attachment_preview(self, *, org_id: str, file_id: str) -> dict
         db_file.preview_size = len(preview_data)
         db_file.preview_status = "ready"
         db_file.preview_meta = preview_meta
+        updated_messages = _update_attachment_preview_meta_sync(session=session, db_file=db_file)
         session.commit()
 
-    return {"status": "ready", "file_id": str(file_uuid), "size": len(preview_data)}
+    return {
+        "status": "ready",
+        "file_id": str(file_uuid),
+        "size": len(preview_data),
+        "messages_updated": updated_messages,
+    }

@@ -6,6 +6,7 @@ import Sidebar from './Sidebar'
 import Header from './Header'
 import BottomNav from './BottomNav'
 import { useTranslation } from 'react-i18next'
+import { IncomingCallNotification } from '../calls/IncomingCallNotification'
 
 export default function AppLayout() {
   const { isAuthenticated, isLoading } = useAuth()
@@ -49,6 +50,7 @@ export default function AppLayout() {
         </main>
         <BottomNav onMorePress={() => setMobileMenuOpen(true)} />
       </div>
+      <IncomingCallNotification />
     </div>
   )
 }

@@ -8,6 +8,7 @@ from src.modules.appearance.routes import router as appearance_router
 from src.modules.audit.routes import router as audit_router
 from src.modules.auth.routes import router as auth_router
 from src.modules.billing.routes import router as billing_router
+from src.modules.calls.routes import router as calls_router
 from src.modules.chat.routes import router as chat_router
 from src.modules.docs.routes import router as docs_router
 from src.modules.files.routes import router as files_router
@@ -40,3 +41,4 @@ router.include_router(schedule_router)
 router.include_router(access_router)
 router.include_router(superadmin_router)
 router.include_router(appearance_router)
+router.include_router(calls_router)

@@ -82,6 +82,10 @@ x-backend-env: &backend_env
   DOCS_ONLYOFFICE_JWT_SECRET: ${DOCS_ONLYOFFICE_JWT_SECRET:-your-jwt-secret-key-change-in-production}
   DOCS_ONLYOFFICE_CALLBACK_URL: ${DOCS_ONLYOFFICE_CALLBACK_URL:-http://api:8000/api/v1/docs/integrations/onlyoffice/callback}
   DOCS_ONLYOFFICE_EDITOR_LANG: ${DOCS_ONLYOFFICE_EDITOR_LANG:-ru}
+  LIVEKIT_URL: ${LIVEKIT_URL:-ws://livekit:7880}
+  LIVEKIT_PUBLIC_URL: ${LIVEKIT_PUBLIC_URL:-wss://crm.py-it.ru/livekit}
+  LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-CHANGE_ME_LIVEKIT_API_KEY}
+  LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-CHANGE_ME_LIVEKIT_API_SECRET}
   YOOKASSA_SHOP_ID: ${YOOKASSA_SHOP_ID:-}
   YOOKASSA_SECRET_KEY: ${YOOKASSA_SECRET_KEY:-}
   YOOKASSA_RETURN_URL: ${YOOKASSA_RETURN_URL:-http://localhost:5173/billing/success}
@@ -291,6 +295,55 @@ services:
     depends_on:
       api:
         condition: service_healthy
+
+  livekit:
+    image: livekit/livekit-server:v1.8.4
+    restart: always
+    ports:
+      - "${LIVEKIT_BIND_HOST:-0.0.0.0}:${LIVEKIT_HOST_PORT:-7880}:7880"
+      - "${LIVEKIT_BIND_HOST:-0.0.0.0}:${LIVEKIT_TCP_PORT:-7881}:7881"
+      - "${LIVEKIT_TURN_UDP_PORT:-3478}:3478/udp"
+      - "${LIVEKIT_RTC_PORT_RANGE:-52000-52100}:52000-52100/udp"
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-CHANGE_ME_LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET:-CHANGE_ME_LIVEKIT_API_SECRET}"
+      TZ: ${TZ:-Europe/Moscow}
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    command: --config /etc/livekit.yaml
+    networks:
+      default:
+        aliases:
+          - livekit
+
+  egress:
+    image: livekit/egress:v1.8.4
+    restart: always
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      EGRESS_CONFIG_BODY: |
+        api_key: ${LIVEKIT_API_KEY:-CHANGE_ME_LIVEKIT_API_KEY}
+        api_secret: ${LIVEKIT_API_SECRET:-CHANGE_ME_LIVEKIT_API_SECRET}
+        ws_url: ws://livekit:7880
+        redis:
+          address: redis:6379
+        s3:
+          access_key: ${S3_ACCESS_KEY:-CHANGE_ME_S3_ACCESS_KEY}
+          secret: ${S3_SECRET_KEY:-CHANGE_ME_S3_SECRET_KEY}
+          endpoint: http://minio:9000
+          bucket: ${S3_BUCKET:-crm-files}
+          force_path_style: true
+    depends_on:
+      livekit:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      default:
+        aliases:
+          - egress
 
   node-exporter:
     image: prom/node-exporter:v1.8.2

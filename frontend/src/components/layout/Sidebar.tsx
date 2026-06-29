@@ -11,6 +11,7 @@ import {
   BarChart2,
   PanelsTopLeft,
   BookOpen,
+  Phone,
   Shield,
   ChevronLeft,
   ChevronRight,
@@ -34,6 +35,7 @@ const mainNav = [
 const moduleNav = [
   { to: '/tables', icon: FileText, labelKey: 'sidebar.modules.tables' },
   { to: '/chat', icon: MessageSquare, labelKey: 'sidebar.modules.chat' },
+  { to: '/calls', icon: Phone, labelKey: 'sidebar.modules.calls' },
   { to: '/docs', icon: Folder, labelKey: 'sidebar.modules.docs' },
   { to: '/knowledge', icon: BookOpen, labelKey: 'sidebar.modules.knowledge' },
   { to: '/schedule', icon: Calendar, labelKey: 'sidebar.modules.schedule' },

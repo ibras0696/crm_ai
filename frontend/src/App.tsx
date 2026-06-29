@@ -25,6 +25,8 @@ import SchedulePage from './pages/schedule/SchedulePage'
 import ReportsV2Page from './pages/reports-v2/ReportsV2Page'
 import AIPage from './pages/ai/AIPage'
 import ChatPage from './pages/chat/ChatPage'
+import CallPage from './pages/calls/CallPage'
+import CallHistoryPage from './pages/calls/CallHistoryPage'
 import GuidePage from './pages/guide/GuidePage'
 import AppLayout from './components/layout/AppLayout'
 import { useAuth } from './contexts/AuthContext'
@@ -63,6 +65,8 @@ export default function App() {
         <Route path="/docs" element={<DocsPage />} />
         <Route path="/knowledge" element={<KnowledgePage />} />
         <Route path="/chat" element={<ChatPage />} />
+        <Route path="/calls" element={<CallPage />} />
+        <Route path="/calls/history" element={<CallHistoryPage />} />
         <Route path="/schedule" element={<SchedulePage />} />
         <Route
           path="/reports-v2"

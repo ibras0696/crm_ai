@@ -2,6 +2,9 @@
 export { default } from './core/client'
 export * from './core/types'
 
+// Calls domain: callsApi, RoomOut, JoinRoomResponse, ...
+export * from './calls'
+
 // Auth domain: authApi, profileApi, UserInfo, TokenResponse, ...
 export * from './auth'
 

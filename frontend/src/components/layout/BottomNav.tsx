@@ -3,7 +3,7 @@ import {
   House,
   Robot,
   ChatCircle,
-  Table,
+  PhoneCall,
   DotsThreeOutline,
 } from '@phosphor-icons/react'
 import { cn } from '@/lib/utils'
@@ -16,7 +16,7 @@ const navItems = [
   { to: '/dashboard', label: 'Главная', Icon: House },
   { to: '/ai',        label: 'AI',       Icon: Robot },
   { to: '/chat',      label: 'Чат',      Icon: ChatCircle },
-  { to: '/tables',    label: 'Таблицы',  Icon: Table },
+  { to: '/calls',     label: 'Созвон',   Icon: PhoneCall },
 ] as const
 
 export default function BottomNav({ onMorePress }: BottomNavProps) {

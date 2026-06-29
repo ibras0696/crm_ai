@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 
 import { Pause, Play } from '@phosphor-icons/react'
 
@@ -107,10 +107,13 @@ export function AttachmentPreview({
   const [previewMetaOverride, setPreviewMetaOverride] = useState<Record<string, unknown> | null>(null)
   const [previewPollAttempt, setPreviewPollAttempt] = useState(0)
 
-  const containerRef = useRef<HTMLDivElement | null>(null)
+  const containerRef = useRef<HTMLElement | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const cachedMediaUrlRef = useRef('')
   const previewUrlRef = useRef('')
+  const setContainerElement = useCallback((node: HTMLDivElement | HTMLButtonElement | null) => {
+    containerRef.current = node
+  }, [])
 
   const mediaKind = inferMediaKind(attachment.content_type, attachment.original_name)
   const playbackType = normalizeAttachmentMimeForPlayback(attachment.content_type)
@@ -494,7 +497,7 @@ export function AttachmentPreview({
 
   if (mediaKind === 'image' && !forceEagerLoad && !isElementVisible) {
     return (
-      <div ref={containerRef} className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+      <div ref={setContainerElement} className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
         Вложение готово к загрузке
       </div>
     )
@@ -502,7 +505,7 @@ export function AttachmentPreview({
 
   if (loading && !downloadUrl && mediaKind !== 'audio') {
     return (
-      <div ref={containerRef} className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+      <div ref={setContainerElement} className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
         Загрузка вложения...
       </div>
     )
@@ -510,7 +513,7 @@ export function AttachmentPreview({
 
   if (errorText && !downloadUrl) {
     return (
-      <div ref={containerRef} className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+      <div ref={setContainerElement} className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
         {errorText}
       </div>
     )
@@ -518,7 +521,7 @@ export function AttachmentPreview({
 
   if (mediaKind === 'image' && previewUrl) {
     return (
-      <div ref={containerRef}>
+      <div ref={setContainerElement}>
         <button
           type="button"
           className="block max-w-full"
@@ -542,7 +545,7 @@ export function AttachmentPreview({
   if (mediaKind === 'image') {
     return (
       <button
-        ref={containerRef}
+        ref={setContainerElement}
         type="button"
         onClick={() => void openMediaPreview('image')}
         disabled={isOpeningMedia}
@@ -556,7 +559,7 @@ export function AttachmentPreview({
 
   if (mediaKind === 'video' && previewUrl) {
     return (
-      <div ref={containerRef} className="max-w-full">
+      <div ref={setContainerElement} className="max-w-full">
         <button
           type="button"
           className="group relative block max-w-full overflow-hidden rounded-lg border border-border/60 bg-background/20"
@@ -589,7 +592,7 @@ export function AttachmentPreview({
 
   if (mediaKind === 'video' && renderMediaUrl) {
     return (
-      <div ref={containerRef} className="max-w-full rounded-lg border border-border/60 bg-background/20 p-2">
+      <div ref={setContainerElement} className="max-w-full rounded-lg border border-border/60 bg-background/20 p-2">
         <video
           controls
           preload="metadata"
@@ -613,7 +616,7 @@ export function AttachmentPreview({
 
   if (mediaKind === 'video') {
     return (
-      <div ref={containerRef} className="max-w-full rounded-lg border border-border/60 bg-background/20 p-3">
+      <div ref={setContainerElement} className="max-w-full rounded-lg border border-border/60 bg-background/20 p-3">
         <div className="flex min-w-0 items-center gap-3">
           <button
             type="button"
@@ -643,7 +646,7 @@ export function AttachmentPreview({
 
   if (mediaKind === 'audio') {
     return (
-      <div ref={containerRef} className="max-w-full">
+      <div ref={setContainerElement} className="max-w-full">
         <audio
           ref={audioRef}
           preload="none"
@@ -728,7 +731,7 @@ export function AttachmentPreview({
   }
 
   return (
-    <div ref={containerRef}>
+    <div ref={setContainerElement}>
       <button
         type="button"
         onClick={() => void handleFileDownload()}

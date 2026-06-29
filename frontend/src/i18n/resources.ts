@@ -15,6 +15,7 @@ export const resources = {
         modules: {
           tables: 'Таблицы',
           chat: 'Чат',
+          calls: 'Созвон',
           docs: 'Документы',
           knowledge: 'База знаний',
           schedule: 'Расписание',

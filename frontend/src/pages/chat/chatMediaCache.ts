@@ -3,6 +3,8 @@ const CHAT_MEDIA_CACHE_MANIFEST_KEY = 'crm.chat.mediaCache.manifest.v1'
 const CHAT_MEDIA_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 const CHAT_MEDIA_CACHE_MAX_ITEM_BYTES = 25 * 1024 * 1024
 const CHAT_MEDIA_CACHE_MAX_TOTAL_BYTES = 250 * 1024 * 1024
+const CHAT_MEDIA_OBJECT_URL_TTL_MS = 15 * 60 * 1000
+const CHAT_MEDIA_OBJECT_URL_MAX_TOTAL_BYTES = 100 * 1024 * 1024
 
 interface ChatMediaCacheMeta {
   key: string
@@ -16,6 +18,14 @@ interface ChatMediaCacheMeta {
 
 type ChatMediaCacheManifest = Record<string, ChatMediaCacheMeta>
 
+interface ChatMediaObjectUrlEntry {
+  cacheId: string
+  url: string
+  size: number
+  lastAccessedAt: number
+  refCount: number
+}
+
 interface ResolveCachedMediaUrlOptions {
   cacheId: string
   fileId: string
@@ -23,6 +33,9 @@ interface ResolveCachedMediaUrlOptions {
   contentType: string
   sizeBytes?: number
 }
+
+const objectUrlPool = new Map<string, ChatMediaObjectUrlEntry>()
+const objectUrlCacheIds = new Map<string, string>()
 
 function canUseBrowserMediaCache(): boolean {
   return typeof window !== 'undefined' && 'caches' in window && typeof URL.createObjectURL === 'function'
@@ -55,6 +68,58 @@ function writeManifest(manifest: ChatMediaCacheManifest) {
 
 function isFresh(meta: ChatMediaCacheMeta, now = Date.now()): boolean {
   return now - meta.cachedAt <= CHAT_MEDIA_CACHE_TTL_MS
+}
+
+function releaseObjectUrlEntry(entry: ChatMediaObjectUrlEntry) {
+  objectUrlPool.delete(entry.cacheId)
+  objectUrlCacheIds.delete(entry.url)
+  URL.revokeObjectURL(entry.url)
+}
+
+function pruneObjectUrlPool() {
+  const now = Date.now()
+  for (const entry of objectUrlPool.values()) {
+    if (entry.refCount <= 0 && now - entry.lastAccessedAt > CHAT_MEDIA_OBJECT_URL_TTL_MS) {
+      releaseObjectUrlEntry(entry)
+    }
+  }
+
+  let totalBytes = Array.from(objectUrlPool.values()).reduce((sum, entry) => sum + entry.size, 0)
+  if (totalBytes <= CHAT_MEDIA_OBJECT_URL_MAX_TOTAL_BYTES) return
+
+  const releasable = Array.from(objectUrlPool.values())
+    .filter((entry) => entry.refCount <= 0)
+    .sort((left, right) => left.lastAccessedAt - right.lastAccessedAt)
+  for (const entry of releasable) {
+    if (totalBytes <= CHAT_MEDIA_OBJECT_URL_MAX_TOTAL_BYTES) break
+    releaseObjectUrlEntry(entry)
+    totalBytes -= entry.size
+  }
+}
+
+function retainObjectUrl(cacheId: string, blob: Blob): string {
+  const existing = objectUrlPool.get(cacheId)
+  if (existing) {
+    return retainExistingObjectUrl(existing)
+  }
+
+  const url = URL.createObjectURL(blob)
+  objectUrlPool.set(cacheId, {
+    cacheId,
+    url,
+    size: blob.size,
+    lastAccessedAt: Date.now(),
+    refCount: 1,
+  })
+  objectUrlCacheIds.set(url, cacheId)
+  pruneObjectUrlPool()
+  return url
+}
+
+function retainExistingObjectUrl(entry: ChatMediaObjectUrlEntry): string {
+  entry.refCount = 1
+  entry.lastAccessedAt = Date.now()
+  return entry.url
 }
 
 async function deleteCachedMedia(cacheId: string, manifest: ChatMediaCacheManifest, cache: Cache) {
@@ -157,11 +222,14 @@ async function cacheMediaFromSource({
 
 export async function resolveCachedMediaObjectUrl(options: ResolveCachedMediaUrlOptions): Promise<string | null> {
   try {
+    const pooled = objectUrlPool.get(options.cacheId)
+    if (pooled) return retainExistingObjectUrl(pooled)
+
     const cachedBlob = await readCachedMediaBlob(options.cacheId)
-    if (cachedBlob) return URL.createObjectURL(cachedBlob)
+    if (cachedBlob) return retainObjectUrl(options.cacheId, cachedBlob)
 
     const sourceBlob = await cacheMediaFromSource(options)
-    if (sourceBlob) return URL.createObjectURL(sourceBlob)
+    if (sourceBlob) return retainObjectUrl(options.cacheId, sourceBlob)
   } catch {
     return null
   }
@@ -170,8 +238,13 @@ export async function resolveCachedMediaObjectUrl(options: ResolveCachedMediaUrl
 
 export async function resolveCachedMediaObjectUrlFromCache(cacheId: string): Promise<string | null> {
   try {
+    const pooled = objectUrlPool.get(cacheId)
+    if (pooled) {
+      return retainExistingObjectUrl(pooled)
+    }
+
     const cachedBlob = await readCachedMediaBlob(cacheId)
-    if (cachedBlob) return URL.createObjectURL(cachedBlob)
+    if (cachedBlob) return retainObjectUrl(cacheId, cachedBlob)
   } catch {
     return null
   }
@@ -180,5 +253,18 @@ export async function resolveCachedMediaObjectUrlFromCache(cacheId: string): Pro
 
 export function revokeCachedMediaObjectUrl(url: string) {
   if (!url.startsWith('blob:')) return
-  URL.revokeObjectURL(url)
+  const cacheId = objectUrlCacheIds.get(url)
+  if (!cacheId) {
+    URL.revokeObjectURL(url)
+    return
+  }
+  const entry = objectUrlPool.get(cacheId)
+  if (!entry) {
+    objectUrlCacheIds.delete(url)
+    URL.revokeObjectURL(url)
+    return
+  }
+  entry.refCount = 0
+  entry.lastAccessedAt = Date.now()
+  pruneObjectUrlPool()
 }

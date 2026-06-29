@@ -403,7 +403,6 @@ export function MessageViewport(props: Record<string, unknown>) {
                                 attachment={attachment}
                                 onOpenMediaPreview={setMediaPreview}
                                 isMessageVisible
-                                forceEagerLoad={!chatRealtimeEnabled}
                                 telemetryEnabled={chatTelemetryEnabled}
                                 hintDurationMs={voiceHintMs?.duration_ms}
                                 isOutgoing={own}

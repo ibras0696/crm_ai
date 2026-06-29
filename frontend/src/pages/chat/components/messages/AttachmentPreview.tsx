@@ -21,6 +21,92 @@ import { useAttachmentDownloadUrl } from '../../hooks/useAttachmentDownloadUrl'
 
 const ATTACHMENT_PRELOAD_ROOT_MARGIN = '240px'
 const WAVEFORM_BARS = 32
+const PREVIEW_URL_REFRESH_BUFFER_MS = 60_000
+const PREVIEW_STATUS_CACHE_TTL_MS = 10 * 60_000
+
+interface CachedAttachmentPreview {
+  data: {
+    status: string
+    url?: string | null
+    expires_in?: number | null
+    content_type?: string | null
+    size?: number | null
+    meta?: Record<string, unknown> | null
+  }
+  expiresAt: number
+  promise?: Promise<CachedAttachmentPreview['data']>
+}
+
+const attachmentPreviewCache = new Map<string, CachedAttachmentPreview>()
+
+function getPreviewCacheKey(chatId: string, fileId: string): string {
+  return `${chatId}:${fileId}`
+}
+
+function shouldRequestPreviewUrl(status: string, hasAttachmentPreviewMeta: boolean): boolean {
+  if (status === 'ready') return true
+  if (status === 'pending' || status === 'processing' || status === 'unsupported' || status === 'failed') return false
+  return hasAttachmentPreviewMeta
+}
+
+function getPreviewDataExpiresAt(data: CachedAttachmentPreview['data']): number {
+  const now = Date.now()
+  if (data.url && typeof data.expires_in === 'number' && Number.isFinite(data.expires_in)) {
+    return now + Math.max(30_000, data.expires_in * 1000 - PREVIEW_URL_REFRESH_BUFFER_MS)
+  }
+  return now + PREVIEW_STATUS_CACHE_TTL_MS
+}
+
+async function fetchAttachmentPreview(
+  chatId: string,
+  fileId: string,
+  cacheKey: string,
+): Promise<CachedAttachmentPreview['data']> {
+  const existing = attachmentPreviewCache.get(cacheKey)
+  const promise = (async () => {
+    const response = await chatApi.getAttachmentPreview(chatId, fileId)
+    const payload = response.data?.data
+    if (!payload) throw new Error('Не удалось получить preview')
+    const data = {
+      status: payload.status,
+      url: payload.url,
+      expires_in: payload.expires_in,
+      content_type: payload.content_type,
+      size: payload.size,
+      meta: payload.meta,
+    }
+    attachmentPreviewCache.set(cacheKey, {
+      data,
+      expiresAt: getPreviewDataExpiresAt(data),
+    })
+    return data
+  })()
+
+  attachmentPreviewCache.set(cacheKey, {
+    data: existing?.data ?? { status: 'pending' },
+    expiresAt: existing?.expiresAt ?? 0,
+    promise,
+  })
+
+  try {
+    return await promise
+  } catch (error) {
+    attachmentPreviewCache.delete(cacheKey)
+    throw error
+  }
+}
+
+async function resolveAttachmentPreview(
+  chatId: string,
+  fileId: string,
+): Promise<CachedAttachmentPreview['data']> {
+  const cacheKey = getPreviewCacheKey(chatId, fileId)
+  const cached = attachmentPreviewCache.get(cacheKey)
+  const now = Date.now()
+  if (cached?.promise) return cached.promise
+  if (cached?.data && cached.expiresAt > now) return cached.data
+  return fetchAttachmentPreview(chatId, fileId, cacheKey)
+}
 
 function generateWaveformBars(seed: string, count: number): number[] {
   let hash = 5381
@@ -105,7 +191,6 @@ export function AttachmentPreview({
   const [previewUrl, setPreviewUrl] = useState('')
   const [previewStatus, setPreviewStatus] = useState(attachment.preview_status || '')
   const [previewMetaOverride, setPreviewMetaOverride] = useState<Record<string, unknown> | null>(null)
-  const [previewPollAttempt, setPreviewPollAttempt] = useState(0)
 
   const containerRef = useRef<HTMLElement | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -203,7 +288,6 @@ export function AttachmentPreview({
     })
     setPreviewStatus(attachment.preview_status || '')
     setPreviewMetaOverride(null)
-    setPreviewPollAttempt(0)
   }, [attachment.file_id, attachment.preview_status])
 
   useEffect(() => {
@@ -230,12 +314,11 @@ export function AttachmentPreview({
     if (!['image', 'video', 'audio'].includes(mediaKind) || (!forceEagerLoad && !isElementVisible)) return
     if (previewUrl || previewStatus === 'unsupported' || previewStatus === 'failed') return
     if (mediaKind === 'audio' && previewStatus === 'ready' && hasPreviewMeta) return
+    if (!shouldRequestPreviewUrl(previewStatus, hasPreviewMeta)) return
 
     let cancelled = false
-    let timerId = 0
-    void chatApi.getAttachmentPreview(chatId, attachment.file_id).then((response) => {
+    void resolveAttachmentPreview(chatId, attachment.file_id).then((data) => {
       if (cancelled) return
-      const data = response.data?.data
       if (!data) return
       setPreviewStatus(data.status)
       if (data.meta) setPreviewMetaOverride(data.meta)
@@ -259,10 +342,6 @@ export function AttachmentPreview({
             })
           })
         }
-      } else if ((data.status === 'pending' || data.status === 'processing') && previewPollAttempt < 10) {
-        timerId = window.setTimeout(() => {
-          if (!cancelled) setPreviewPollAttempt((value) => value + 1)
-        }, 2500)
       }
     }).catch(() => {
       if (!cancelled) setErrorText('Не удалось получить preview')
@@ -270,7 +349,6 @@ export function AttachmentPreview({
 
     return () => {
       cancelled = true
-      if (timerId) window.clearTimeout(timerId)
     }
   }, [
     attachment.file_id,
@@ -280,7 +358,6 @@ export function AttachmentPreview({
     forceEagerLoad,
     isElementVisible,
     mediaKind,
-    previewPollAttempt,
     previewStatus,
     previewUrl,
     hasPreviewMeta,

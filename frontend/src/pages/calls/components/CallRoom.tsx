@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { LiveKitRoom, RoomAudioRenderer } from '@livekit/components-react'
 import '@livekit/components-styles'
 import { useCallRoom } from '../../../hooks/useCallRoom'
@@ -145,6 +145,20 @@ export function CallRoom({
     onLeave()
   }
 
+  const handleConnected = useCallback(() => {
+    setConnectionError(null)
+  }, [])
+
+  const handleDisconnected = useCallback((reason?: unknown) => {
+    if (reason) {
+      setConnectionError('Связь со звонком потеряна. Проверьте сеть и попробуйте переподключиться.')
+    }
+  }, [])
+
+  const handleLiveKitError = useCallback((err: Error) => {
+    setConnectionError(err.message)
+  }, [])
+
   // Full-screen overlay — escapes AppLayout (sidebar, header, bottom-nav)
   return (
     <div className="fixed inset-0 z-[100] bg-zinc-950">
@@ -176,13 +190,9 @@ export function CallRoom({
           connect={true}
           audio={initialAudio}
           video={initialVideo}
-          onConnected={() => setConnectionError(null)}
-          onDisconnected={(reason) => {
-            if (reason) {
-              setConnectionError('Связь со звонком потеряна. Проверьте сеть и попробуйте переподключиться.')
-            }
-          }}
-          onError={(err) => setConnectionError(err.message)}
+          onConnected={handleConnected}
+          onDisconnected={handleDisconnected}
+          onError={handleLiveKitError}
           className="h-full"
         >
           {connectionError && (

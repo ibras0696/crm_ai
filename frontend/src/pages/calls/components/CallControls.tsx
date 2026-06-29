@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { useLocalParticipant } from '@livekit/components-react'
+import { useConnectionState, useLocalParticipant } from '@livekit/components-react'
+import { ConnectionState } from 'livekit-client'
 import {
   Microphone,
   MicrophoneSlash,
@@ -43,27 +44,42 @@ export function CallControls({
 }: Props) {
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled, isScreenShareEnabled } =
     useLocalParticipant()
+  const connectionState = useConnectionState()
   const [screenShareError, setScreenShareError] = useState<string | null>(null)
   const [showMore, setShowMore] = useState(false)
+  const [micPending, setMicPending] = useState(false)
+  const [cameraPending, setCameraPending] = useState(false)
+  const [screenSharePending, setScreenSharePending] = useState(false)
+  const controlsDisabled = connectionState !== ConnectionState.Connected
 
   const toggleMic = async () => {
+    if (controlsDisabled || micPending) return
+    setMicPending(true)
     try {
       await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled)
     } catch {
       // permission denied or device error
+    } finally {
+      setMicPending(false)
     }
   }
 
   const toggleCamera = async () => {
+    if (controlsDisabled || cameraPending) return
+    setCameraPending(true)
     try {
       await localParticipant.setCameraEnabled(!isCameraEnabled)
     } catch {
       // permission denied or device error
+    } finally {
+      setCameraPending(false)
     }
   }
 
   const toggleScreenShare = async () => {
+    if (controlsDisabled || screenSharePending) return
     setScreenShareError(null)
+    setScreenSharePending(true)
     try {
       await localParticipant.setScreenShareEnabled(!isScreenShareEnabled)
     } catch (err) {
@@ -76,11 +92,13 @@ export function CallControls({
       if (!isCancelled) {
         setScreenShareError('Демонстрация экрана недоступна в этом браузере')
       }
+    } finally {
+      setScreenSharePending(false)
     }
   }
 
-  const handleMoreAction = (fn: () => void) => {
-    fn()
+  const handleMoreAction = (fn: () => void | Promise<void>) => {
+    void fn()
     setShowMore(false)
   }
 
@@ -104,14 +122,15 @@ export function CallControls({
             {/* Screen share */}
             <button
               onClick={() => handleMoreAction(toggleScreenShare)}
-              className={`flex flex-col items-center gap-1 px-2 py-2.5 rounded-xl transition-colors ${
+              disabled={controlsDisabled || screenSharePending}
+              className={`flex flex-col items-center gap-1 px-2 py-2.5 rounded-xl transition-colors disabled:cursor-wait disabled:opacity-60 ${
                 isScreenShareEnabled
                   ? 'bg-primary text-primary-foreground'
                   : 'bg-white/10 text-white hover:bg-white/20'
               }`}
             >
               {isScreenShareEnabled ? <Screencast size={20} weight="fill" /> : <Monitor size={20} />}
-              <span className="text-[10px] font-medium">Экран</span>
+              <span className="text-[10px] font-medium">{screenSharePending ? '...' : 'Экран'}</span>
             </button>
 
             {/* Chat */}
@@ -171,43 +190,46 @@ export function CallControls({
         {/* Mic — always visible */}
         <button
           onClick={toggleMic}
+          disabled={controlsDisabled || micPending}
           title={isMicrophoneEnabled ? 'Выключить микрофон' : 'Включить микрофон'}
-          className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-colors ${
+          className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-colors disabled:cursor-wait disabled:opacity-60 ${
             isMicrophoneEnabled
               ? 'bg-white/10 hover:bg-white/20 text-white'
               : 'bg-destructive hover:bg-destructive/90 text-white'
           }`}
         >
           {isMicrophoneEnabled ? <Microphone size={20} weight="fill" /> : <MicrophoneSlash size={20} weight="fill" />}
-          <span className="text-[10px] font-medium">{isMicrophoneEnabled ? 'Микро' : 'Выкл'}</span>
+          <span className="text-[10px] font-medium">{micPending ? '...' : isMicrophoneEnabled ? 'Микро' : 'Выкл'}</span>
         </button>
 
         {/* Camera — always visible */}
         <button
           onClick={toggleCamera}
+          disabled={controlsDisabled || cameraPending}
           title={isCameraEnabled ? 'Выключить камеру' : 'Включить камеру'}
-          className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-colors ${
+          className={`flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-colors disabled:cursor-wait disabled:opacity-60 ${
             isCameraEnabled
               ? 'bg-white/10 hover:bg-white/20 text-white'
               : 'bg-destructive hover:bg-destructive/90 text-white'
           }`}
         >
           {isCameraEnabled ? <Camera size={20} weight="fill" /> : <CameraSlash size={20} weight="fill" />}
-          <span className="text-[10px] font-medium">{isCameraEnabled ? 'Камера' : 'Выкл'}</span>
+          <span className="text-[10px] font-medium">{cameraPending ? '...' : isCameraEnabled ? 'Камера' : 'Выкл'}</span>
         </button>
 
         {/* ── Desktop-only buttons ──────────────────────────── */}
         <button
           onClick={toggleScreenShare}
+          disabled={controlsDisabled || screenSharePending}
           title={isScreenShareEnabled ? 'Остановить демонстрацию' : 'Демонстрация экрана'}
-          className={`hidden md:flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-colors ${
+          className={`hidden md:flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-colors disabled:cursor-wait disabled:opacity-60 ${
             isScreenShareEnabled
               ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
               : 'bg-white/10 hover:bg-white/20 text-white'
           }`}
         >
           {isScreenShareEnabled ? <Screencast size={20} weight="fill" /> : <Monitor size={20} />}
-          <span className="text-[10px] font-medium">Экран</span>
+          <span className="text-[10px] font-medium">{screenSharePending ? '...' : 'Экран'}</span>
         </button>
 
         {isHost && (

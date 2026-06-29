@@ -9,6 +9,11 @@ import { useAuth } from '../../contexts/AuthContext'
 
 type Phase = 'idle' | 'lobby' | 'room'
 
+interface JoinPreferences {
+  audio: boolean
+  video: boolean
+}
+
 function formatAgo(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime()
   const m = Math.floor(diffMs / 60000)
@@ -24,6 +29,7 @@ export default function CallPage() {
   const [phase, setPhase] = useState<Phase>('idle')
   const [slug, setSlug] = useState<string | null>(null)
   const [room, setRoom] = useState<RoomOut | null>(null)
+  const [joinPreferences, setJoinPreferences] = useState<JoinPreferences>({ audio: true, video: true })
   const [activeRooms, setActiveRooms] = useState<RoomOut[]>([])
   const [roomsLoading, setRoomsLoading] = useState(true)
 
@@ -65,7 +71,8 @@ export default function CallPage() {
     setPhase('lobby')
   }
 
-  const handleReadyToJoin = () => {
+  const handleReadyToJoin = (preferences: JoinPreferences) => {
+    setJoinPreferences(preferences)
     setPhase('room')
   }
 
@@ -82,7 +89,15 @@ export default function CallPage() {
   }
 
   if (phase === 'room' && slug) {
-    return <CallRoom slug={slug} onLeave={handleLeave} isHost={room?.host_id === user?.id} />
+    return (
+      <CallRoom
+        slug={slug}
+        onLeave={handleLeave}
+        isHost={room?.host_id === user?.id}
+        initialAudio={joinPreferences.audio}
+        initialVideo={joinPreferences.video}
+      />
+    )
   }
 
   return (

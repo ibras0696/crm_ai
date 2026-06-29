@@ -14,6 +14,8 @@ interface Props {
   onLeave: () => void
   isHost?: boolean
   hostId?: string
+  initialAudio?: boolean
+  initialVideo?: boolean
 }
 
 function CallRoomInner({ slug, onLeave, isHost = false, hostId }: Props) {
@@ -120,8 +122,15 @@ function CallRoomInner({ slug, onLeave, isHost = false, hostId }: Props) {
   )
 }
 
-export function CallRoom({ slug, onLeave, isHost = false }: Omit<Props, 'hostId'>) {
+export function CallRoom({
+  slug,
+  onLeave,
+  isHost = false,
+  initialAudio = true,
+  initialVideo = true,
+}: Omit<Props, 'hostId'>) {
   const { token, liveKitUrl, hostId, isLoading, error, joinRoom, leaveRoom } = useCallRoom()
+  const [connectionError, setConnectionError] = useState<string | null>(null)
 
   // Only join on mount — do NOT call leaveRoom in cleanup.
   // Cleanup would fire on page refresh and incorrectly mark the user as left.
@@ -165,11 +174,22 @@ export function CallRoom({ slug, onLeave, isHost = false }: Omit<Props, 'hostId'
           serverUrl={liveKitUrl}
           token={token}
           connect={true}
-          audio={false}
-          video={false}
-          onDisconnected={handleLeave}
+          audio={initialAudio}
+          video={initialVideo}
+          onConnected={() => setConnectionError(null)}
+          onDisconnected={(reason) => {
+            if (reason) {
+              setConnectionError('Связь со звонком потеряна. Проверьте сеть и попробуйте переподключиться.')
+            }
+          }}
+          onError={(err) => setConnectionError(err.message)}
           className="h-full"
         >
+          {connectionError && (
+            <div className="absolute left-1/2 top-3 z-20 -translate-x-1/2 rounded-full bg-destructive/90 px-3 py-1 text-xs text-white shadow-lg">
+              {connectionError}
+            </div>
+          )}
           <CallRoomInner slug={slug} onLeave={handleLeave} isHost={isHost} hostId={hostId ?? undefined} />
         </LiveKitRoom>
       )}

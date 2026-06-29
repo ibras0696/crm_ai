@@ -7,7 +7,7 @@ import type { RoomOut } from '../../../lib/api/calls'
 interface Props {
   slug: string
   room: RoomOut | null
-  onJoin: () => void
+  onJoin: (preferences: { audio: boolean; video: boolean }) => void
   onCancel: () => void
 }
 
@@ -148,7 +148,7 @@ export function PreCallLobby({ room, onJoin, onCancel }: Props) {
 
       {/* Join button */}
       <button
-        onClick={onJoin}
+        onClick={() => onJoin({ audio: micOn, video: camOn })}
         className="flex items-center gap-2 px-8 py-3 bg-primary hover:bg-primary/90 text-primary-foreground rounded-2xl font-medium transition-colors text-sm"
       >
         Войти в созвон

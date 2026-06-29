@@ -100,6 +100,7 @@ export function AttachmentPreview({
   const [audioCurrentTime, setAudioCurrentTime] = useState(0)
   const [audioDuration, setAudioDuration] = useState(0)
   const [isDownloadingFile, setIsDownloadingFile] = useState(false)
+  const [isOpeningMedia, setIsOpeningMedia] = useState(false)
   const [cachedMediaUrl, setCachedMediaUrl] = useState('')
   const [previewUrl, setPreviewUrl] = useState('')
   const [previewStatus, setPreviewStatus] = useState(attachment.preview_status || '')
@@ -451,6 +452,30 @@ export function AttachmentPreview({
   }
 
   const openMediaPreview = async (kind: 'image' | 'video') => {
+    setErrorText('')
+    if (kind === 'image' && previewUrl) {
+      onOpenMediaPreview?.({
+        kind,
+        url: previewUrl,
+        originalName: attachment.original_name,
+      })
+      void resolveMediaPreviewUrlForAction().then((url) => {
+        if (!url || url === previewUrl) return
+        window.requestAnimationFrame(() => {
+          onOpenMediaPreview?.({
+            kind,
+            url,
+            originalName: attachment.original_name,
+          })
+        })
+      }).catch((error: unknown) => {
+        setErrorText(error instanceof Error ? error.message : 'Не удалось открыть оригинал')
+      })
+      return
+    }
+
+    if (isOpeningMedia) return
+    setIsOpeningMedia(true)
     try {
       const url = await resolveMediaPreviewUrlForAction()
       window.requestAnimationFrame(() => {
@@ -462,6 +487,8 @@ export function AttachmentPreview({
       })
     } catch (error: unknown) {
       setErrorText(error instanceof Error ? error.message : 'Не удалось открыть вложение')
+    } finally {
+      setIsOpeningMedia(false)
     }
   }
 
@@ -514,9 +541,16 @@ export function AttachmentPreview({
 
   if (mediaKind === 'image') {
     return (
-      <div ref={containerRef} className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-        {previewStatus === 'failed' ? 'Preview недоступен' : 'Preview готовится'}
-      </div>
+      <button
+        ref={containerRef}
+        type="button"
+        onClick={() => void openMediaPreview('image')}
+        disabled={isOpeningMedia}
+        className="rounded-md border border-border/60 bg-muted/20 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/35 disabled:cursor-wait disabled:opacity-70"
+      >
+        {isOpeningMedia ? 'Открытие...' : previewStatus === 'failed' ? 'Открыть фото' : 'Preview готовится'}
+        {errorText && <span className="mt-1 block text-[11px] text-destructive">{errorText}</span>}
+      </button>
     )
   }
 

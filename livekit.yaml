@@ -20,6 +20,8 @@ turn:
   domain: "crm.py-it.ru"
   tls_port: 0
   udp_port: 3478
+  relay_range_start: 52101
+  relay_range_end: 52200
   external_tls: false
 
 # Room defaults

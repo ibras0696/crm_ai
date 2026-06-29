@@ -226,6 +226,7 @@ services:
       - "${LIVEKIT_TCP_PORT:-7881}:7881"
       - "3478:3478/udp"
       - "52000-52100:52000-52100/udp"
+      - "52101-52200:52101-52200/udp"
     volumes:
       - ./livekit.yaml:/etc/livekit.yaml
     command: --config /etc/livekit.yaml

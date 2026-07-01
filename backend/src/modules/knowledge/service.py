@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.common.optimistic_lock import optimistic_lock_matches
 from src.modules.knowledge.errors import KnowledgeModuleError
+from src.modules.knowledge.html_sanitizer import sanitize_knowledge_html
 from src.modules.knowledge.models import KBPage
 from src.modules.knowledge.repository import KnowledgeRepository
 from src.modules.knowledge.schemas import CreatePageRequest, UpdatePageRequest
@@ -28,6 +29,8 @@ class KnowledgeService:
             title=body.title,
             slug=_build_slug(body.title),
             content=body.content,
+            sanitized_content=sanitize_knowledge_html(body.content) if body.content_type == "html" else None,
+            content_type=body.content_type,
             parent_id=parent_id,
             icon=body.icon,
             position=position,
@@ -61,6 +64,12 @@ class KnowledgeService:
                 org_id=org_id,
                 current_page_id=page.id,
                 parent_id=updates["parent_id"],
+            )
+        next_content_type = updates.get("content_type", page.content_type)
+        if "content" in updates or "content_type" in updates:
+            next_content = updates.get("content", page.content)
+            updates["sanitized_content"] = (
+                sanitize_knowledge_html(next_content) if next_content_type == "html" else None
             )
         for field, value in updates.items():
             setattr(page, field, value)

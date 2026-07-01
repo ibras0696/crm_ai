@@ -140,6 +140,55 @@ async def test_knowledge_pages_enforce_plan_limit(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_knowledge_html_pages_store_sanitized_preview(client: AsyncClient):
+    email = f"kb-html-{uuid.uuid4().hex[:8]}@example.com"
+    reg = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "StrongPass123!",
+            "first_name": "KB",
+            "last_name": "Html",
+            "org_name": "Knowledge Html Org",
+            "accepted_privacy_policy": True,
+        },
+    )
+    assert reg.status_code == 201
+    token = reg.json()["data"]["access_token"]
+
+    unsafe_html = """
+    <section onclick="alert(1)">
+      <h1 style="color: red; position: fixed">Guide</h1>
+      <script>alert(1)</script>
+      <iframe src="https://evil.example"></iframe>
+      <a href="javascript:alert(1)" target="_self">bad link</a>
+      <img src="https://example.com/a.png" onerror="alert(1)" />
+    </section>
+    """
+    created = await client.post(
+        "/api/v1/knowledge/pages",
+        json={"title": "HTML guide", "content_type": "html", "content": unsafe_html},
+        headers=_headers(token),
+    )
+    assert created.status_code == 200
+    body = created.json()["data"]
+    assert body["content_type"] == "html"
+    assert body["content"] == unsafe_html
+
+    sanitized = body["sanitized_content"]
+    assert "Guide" in sanitized
+    assert "<script" not in sanitized
+    assert "<iframe" not in sanitized
+    assert "alert(1)" not in sanitized
+    assert "onclick" not in sanitized
+    assert "onerror" not in sanitized
+    assert "javascript:" not in sanitized
+    assert "position:" not in sanitized
+    assert "color: red" in sanitized
+    assert 'src="https://example.com/a.png"' in sanitized
+
+
+@pytest.mark.asyncio
 async def test_delete_root_page_removes_full_subtree(client: AsyncClient):
     email = f"kb-tree-{uuid.uuid4().hex[:8]}@example.com"
     reg = await client.post(

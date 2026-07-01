@@ -1,7 +1,7 @@
 ﻿import { type DragEvent as ReactDragEvent, type ReactNode, useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { isAxiosError } from 'axios'
 import EmojiPicker, { Theme } from 'emoji-picker-react'
-import { knowledgeApi, type KBPageInfo } from '@/lib/api'
+import { knowledgeApi, type KBContentType, type KBPageInfo } from '@/lib/api'
 import { linkifyHtmlContent } from '@/lib/linkify'
 import { cn } from '@/lib/utils'
 import { Plus, Trash2, ChevronRight, ChevronDown, FileText, FolderOpen, X, Save, Edit3, Search, Bold, Italic, Code, Heading1, Heading2, Heading3, List, ListOrdered, Link, Quote, Minus, Eye, EyeOff, PanelLeftClose, PanelLeftOpen, Smile } from 'lucide-react'
@@ -10,6 +10,8 @@ interface KBPage {
   id: string
   title: string
   content: string
+  sanitized_content: string
+  content_type: KBContentType
   icon: string | null
   parent_id: string | null
   slug: string
@@ -23,6 +25,8 @@ function normalizePage(p: KBPageInfo): KBPage {
     id: p.id,
     title: p.title,
     content: p.content ?? '',
+    sanitized_content: p.sanitized_content ?? '',
+    content_type: p.content_type ?? 'text',
     icon: p.icon ?? null,
     parent_id: p.parent_id,
     slug: p.slug,
@@ -210,6 +214,8 @@ function TreeNode({ page, pages, selected, onSelect, onDelete, onMove, onQuickCr
         <div className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-sm active:cursor-grabbing">
           {page.icon ? (
             <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center text-sm leading-none">{page.icon}</span>
+          ) : page.content_type === 'html' ? (
+            <Code className="h-3.5 w-3.5 shrink-0 opacity-60" />
           ) : children.length > 0 ? (
             <FolderOpen className="h-3.5 w-3.5 shrink-0 opacity-60" />
           ) : (
@@ -277,10 +283,21 @@ export default function KnowledgePage() {
   const [selected, setSelected] = useState<KBPage | null>(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState({ title: '', content: '', icon: '' })
+  const [draft, setDraft] = useState<{ title: string; content: string; icon: string; content_type: KBContentType }>({
+    title: '',
+    content: '',
+    icon: '',
+    content_type: 'text',
+  })
   const [saving, setSaving] = useState(false)
   const [showNew, setShowNew] = useState(false)
-  const [newForm, setNewForm] = useState({ title: '', content: '', parent_id: '', icon: '' })
+  const [newForm, setNewForm] = useState<{
+    title: string
+    content: string
+    parent_id: string
+    icon: string
+    content_type: KBContentType
+  }>({ title: '', content: '', parent_id: '', icon: '', content_type: 'text' })
   const [search, setSearch] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [errorText, setErrorText] = useState('')
@@ -322,6 +339,7 @@ export default function KnowledgePage() {
       content: '',
       parent_id: parentId || '',
       icon: '',
+      content_type: 'text',
     })
     setShowNew(true)
   }, [])
@@ -344,7 +362,7 @@ export default function KnowledgePage() {
   )
 
   const handleSelect = (p: KBPage) => {
-    setSelected(p); setDraft({ title: p.title, content: p.content, icon: p.icon || '' }); setEditing(false)
+    setSelected(p); setDraft({ title: p.title, content: p.content, icon: p.icon || '', content_type: p.content_type }); setEditing(false)
     if (typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches) {
       setSidebarOpen(false)
     }
@@ -358,6 +376,7 @@ export default function KnowledgePage() {
       const r = await knowledgeApi.update(selected.id, {
         title: draft.title,
         content: draft.content,
+        content_type: draft.content_type,
         icon: draft.icon.trim() || undefined,
         expected_updated_at: selected.updated_at || new Date().toISOString(),
       })
@@ -384,6 +403,7 @@ export default function KnowledgePage() {
       const r = await knowledgeApi.create({
         title: newForm.title,
         content: newForm.content,
+        content_type: newForm.content_type,
         parent_id: newForm.parent_id || undefined,
         icon: newForm.icon.trim() || undefined,
       })
@@ -391,9 +411,9 @@ export default function KnowledgePage() {
         const created = normalizePage(r.data.data)
         setPages(prev => [...prev, created])
         setSelected(created)
-        setDraft({ title: created.title, content: created.content, icon: created.icon || '' })
+        setDraft({ title: created.title, content: created.content, icon: created.icon || '', content_type: created.content_type })
         setShowNew(false)
-        setNewForm({ title: '', content: '', parent_id: '', icon: '' })
+        setNewForm({ title: '', content: '', parent_id: '', icon: '', content_type: 'text' })
       } else {
         setErrorText(r.data.error?.message || 'Не удалось создать страницу')
       }
@@ -453,7 +473,7 @@ export default function KnowledgePage() {
     }
   }
 
-  const filtered = search ? pages.filter(p => p.title.toLowerCase().includes(search.toLowerCase()) || (p.content || '').toLowerCase().includes(search.toLowerCase())) : pages
+  const filtered = search ? pages.filter(p => p.title.toLowerCase().includes(search.toLowerCase()) || (p.content || '').toLowerCase().includes(search.toLowerCase()) || (p.sanitized_content || '').toLowerCase().includes(search.toLowerCase())) : pages
   const roots = buildTree(filtered)
 
   return (
@@ -612,6 +632,24 @@ export default function KnowledgePage() {
                 </button>
               )}
             </div>
+            <div className="grid grid-cols-2 gap-2 rounded-lg border border-border bg-background p-1">
+              {([
+                ['text', 'Markdown'],
+                ['html', 'HTML'],
+              ] as const).map(([type, label]) => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => setNewForm((f) => ({ ...f, content_type: type }))}
+                  className={cn(
+                    'h-8 rounded-md text-sm transition-colors',
+                    newForm.content_type === type ? 'bg-primary text-white' : 'text-muted-foreground hover:bg-secondary',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Родительская страница (необязательно)</label>
               <select value={newForm.parent_id} onChange={e => setNewForm(f => ({ ...f, parent_id: e.target.value }))} className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary">
@@ -619,7 +657,18 @@ export default function KnowledgePage() {
                 {pages.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
               </select>
             </div>
-            <textarea value={newForm.content} onChange={e => setNewForm(f => ({ ...f, content: e.target.value }))} placeholder="Содержимое (необязательно)" rows={3} className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary resize-none" />
+            <textarea
+              value={newForm.content}
+              onChange={e => setNewForm(f => ({ ...f, content: e.target.value }))}
+              placeholder={newForm.content_type === 'html' ? '<section><h1>Заголовок</h1><p>HTML будет очищен перед показом.</p></section>' : 'Содержимое (необязательно)'}
+              rows={newForm.content_type === 'html' ? 6 : 3}
+              className="w-full px-3 py-2 rounded-lg border border-input bg-background text-sm outline-none focus:border-primary resize-none font-mono"
+            />
+            {newForm.content_type === 'html' && (
+              <p className="text-xs text-muted-foreground">
+                Скрипты, обработчики событий, iframe и опасные ссылки будут удалены при сохранении.
+              </p>
+            )}
             <div className="flex gap-3">
               <button onClick={() => setShowNew(false)} className="flex-1 h-10 rounded-lg border border-border text-sm hover:bg-secondary transition-colors">Отмена</button>
               <button onClick={handleCreate} disabled={saving || !newForm.title.trim()} className="flex-1 h-10 rounded-lg bg-primary text-white text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-colors">{saving ? 'Создание...' : 'Создать'}</button>
@@ -666,13 +715,60 @@ function renderMarkdown(md: string): string {
   return linkifyHtmlContent(baseHtml)
 }
 
+function buildHtmlPageSrcDoc(sanitizedHtml: string): string {
+  return `<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <base target="_blank" />
+  <style>
+    :root { color-scheme: light dark; }
+    body {
+      margin: 0;
+      padding: 24px;
+      color: #111827;
+      background: #ffffff;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+      overflow-wrap: anywhere;
+    }
+    img, video, table { max-width: 100%; }
+    img { height: auto; }
+    table { border-collapse: collapse; }
+    th, td { border: 1px solid #d1d5db; padding: 8px; }
+    pre { overflow-x: auto; white-space: pre-wrap; }
+    a { color: #2563eb; }
+    @media (prefers-color-scheme: dark) {
+      body { color: #e5e7eb; background: #0b0f14; }
+      th, td { border-color: #374151; }
+      a { color: #60a5fa; }
+    }
+  </style>
+</head>
+<body>${sanitizedHtml}</body>
+</html>`
+}
+
+function SafeHtmlFrame({ html }: { html: string }) {
+  return (
+    <iframe
+      title="HTML-страница базы знаний"
+      className="h-full min-h-[520px] w-full rounded-lg border border-border bg-background"
+      sandbox="allow-popups allow-popups-to-escape-sandbox"
+      referrerPolicy="no-referrer"
+      srcDoc={buildHtmlPageSrcDoc(html)}
+    />
+  )
+}
+
 /* ─── KBEditor component ─── */
 function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSave, errorText, sidebarToggle }: {
   selected: KBPage
   editing: boolean
   setEditing: (v: boolean) => void
-  draft: { title: string; content: string; icon: string }
-  setDraft: (fn: (d: { title: string; content: string; icon: string }) => { title: string; content: string; icon: string }) => void
+  draft: { title: string; content: string; icon: string; content_type: KBContentType }
+  setDraft: (fn: (d: { title: string; content: string; icon: string; content_type: KBContentType }) => { title: string; content: string; icon: string; content_type: KBContentType }) => void
   saving: boolean
   onSave: () => Promise<void>
   errorText: string
@@ -680,6 +776,8 @@ function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSa
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [preview, setPreview] = useState(false)
+  const activeContentType = editing ? draft.content_type : selected.content_type
+  const isHtmlPage = activeContentType === 'html'
 
   const renderedHtml = useMemo(() => {
     const src = editing ? draft.content : selected.content
@@ -738,6 +836,11 @@ function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSa
               {selected.icon || '📄'}
             </span>
             <span className="truncate">{selected.title}</span>
+            {selected.content_type === 'html' && (
+              <span className="rounded-md border border-primary/20 bg-primary/10 px-1.5 py-0.5 text-[11px] font-semibold text-primary">
+                HTML
+              </span>
+            )}
           </h1>
         )}
         <div className="flex items-center gap-1 sm:gap-1.5">
@@ -751,7 +854,7 @@ function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSa
               <button onClick={onSave} disabled={saving} className="flex items-center gap-1.5 h-8 px-3 rounded-md bg-primary text-white text-sm hover:bg-primary/90 disabled:opacity-50 transition-colors">
                 <Save className="h-3.5 w-3.5" />{saving ? 'Сохранение...' : 'Сохранить'}
               </button>
-              <button onClick={() => { setEditing(false); setPreview(false); setDraft(() => ({ title: selected.title, content: selected.content, icon: selected.icon || '' })) }} className="h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"><X className="h-4 w-4" /></button>
+              <button onClick={() => { setEditing(false); setPreview(false); setDraft(() => ({ title: selected.title, content: selected.content, icon: selected.icon || '', content_type: selected.content_type })) }} className="h-8 w-8 rounded-md flex items-center justify-center text-muted-foreground hover:bg-secondary transition-colors"><X className="h-4 w-4" /></button>
             </>
           ) : (
             <button onClick={() => setEditing(true)} className="flex items-center gap-1.5 h-8 px-3 rounded-md border border-border text-sm hover:bg-secondary transition-colors">
@@ -770,11 +873,29 @@ function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSa
           >
             Без иконки
           </button>
+          <div className="ml-0 flex rounded-md border border-border bg-background p-0.5 sm:ml-2">
+            {([
+              ['text', 'Markdown'],
+              ['html', 'HTML'],
+            ] as const).map(([type, label]) => (
+              <button
+                key={type}
+                type="button"
+                onClick={() => setDraft(d => ({ ...d, content_type: type }))}
+                className={cn(
+                  'h-6 rounded px-2 text-xs transition-colors',
+                  draft.content_type === type ? 'bg-primary text-white' : 'hover:bg-secondary',
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
       {/* Toolbar */}
-      {editing && !preview && (
+      {editing && !preview && !isHtmlPage && (
         <div className="flex items-center gap-0.5 px-3 sm:px-5 py-1.5 border-b border-border bg-secondary/20 flex-wrap">
           {toolbarButtons.map((btn, i) =>
             'sep' in btn ? <div key={i} className="w-px h-5 bg-border mx-1" /> :
@@ -789,7 +910,20 @@ function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSa
         {editing && !preview ? (
           <textarea ref={textareaRef} value={draft.content} onChange={e => setDraft(d => ({ ...d, content: e.target.value }))}
             className="w-full h-full min-h-[400px] text-sm bg-transparent outline-none resize-none font-mono leading-relaxed"
-            placeholder="Содержимое страницы (поддерживается Markdown)..." />
+            placeholder={isHtmlPage ? '<section><h1>Заголовок</h1><p>HTML будет очищен на сервере.</p></section>' : 'Содержимое страницы (поддерживается Markdown)...'} />
+        ) : isHtmlPage ? (
+          <div className="flex h-full min-h-[520px] flex-col gap-3">
+            {editing && (
+              <div className="rounded-lg border border-primary/20 bg-primary/10 px-3 py-2 text-xs text-primary">
+                Показана последняя сохраненная безопасная версия. Сохраните страницу, чтобы обновить HTML-предпросмотр.
+              </div>
+            )}
+            {selected.sanitized_content ? (
+              <SafeHtmlFrame html={selected.sanitized_content} />
+            ) : (
+              <p className="text-muted-foreground italic">HTML-страница пуста или еще не сохранена.</p>
+            )}
+          </div>
         ) : (
           <div className="prose prose-sm dark:prose-invert max-w-none prose-p:break-words prose-li:break-words prose-pre:whitespace-pre-wrap prose-pre:break-words">
             {(editing ? draft.content : selected.content) ? (
@@ -807,7 +941,7 @@ function KBEditor({ selected, editing, setEditing, draft, setDraft, saving, onSa
       )}
       <div className="px-3 sm:px-5 py-2 border-t border-border text-xs text-muted-foreground flex flex-wrap items-center justify-between gap-1.5">
         <span>Изменено: {new Date(selected.updated_at || selected.created_at).toLocaleString('ru')}</span>
-        {editing && <span className="text-primary/60">Markdown поддерживается</span>}
+        {editing && <span className="text-primary/60">{isHtmlPage ? 'HTML будет очищен при сохранении' : 'Markdown поддерживается'}</span>}
       </div>
     </>
   )

@@ -1,7 +1,10 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
+
+KnowledgeContentType = Literal["text", "html"]
 
 
 class PageOut(BaseModel):
@@ -12,6 +15,8 @@ class PageOut(BaseModel):
     title: str
     slug: str
     content: str | None
+    sanitized_content: str | None
+    content_type: KnowledgeContentType = "text"
     icon: str | None
     position: int
     is_published: bool
@@ -26,6 +31,7 @@ class CreatePageRequest(BaseModel):
 
     title: str
     content: str | None = None
+    content_type: KnowledgeContentType = "text"
     parent_id: uuid.UUID | None = None
     icon: str | None = None
 
@@ -38,6 +44,7 @@ class UpdatePageRequest(BaseModel):
     expected_updated_at: datetime
     title: str | None = None
     content: str | None = None
+    content_type: KnowledgeContentType | None = None
     parent_id: uuid.UUID | None = None
     icon: str | None = None
     position: int | None = None

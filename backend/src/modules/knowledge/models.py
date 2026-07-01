@@ -22,6 +22,8 @@ class KBPage(BaseDBModel):
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     slug: Mapped[str] = mapped_column(String(500), nullable=False)
     content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sanitized_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    content_type: Mapped[str] = mapped_column(String(32), nullable=False, default="text", server_default=text("'text'"))
     icon: Mapped[str | None] = mapped_column(String(50), nullable=True)
     position: Mapped[int] = mapped_column(Integer, default=0)
     is_published: Mapped[bool] = mapped_column(Boolean, default=True, server_default=text("true"))

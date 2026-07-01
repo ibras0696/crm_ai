@@ -8,16 +8,7 @@ rtc:
   tcp_port: 7881
   port_range_start: 52000
   port_range_end: 52100
-  # Host networking exposes every host interface (docker bridges, wireguard,
-  # dozens of container veth pairs). Restrict ICE candidate gathering to the
-  # public interface only — otherwise LiveKit floods ICE with unreachable
-  # veth/docker0/wg0 candidates and connectivity checks never converge.
-  interfaces:
-    includes:
-      - eth0
-  # Pin the single public IP as the advertised address.
-  use_external_ip: false
-  node_ip: 147.45.170.197
+  use_external_ip: true
   enable_loopback_candidate: false
 
 logging:

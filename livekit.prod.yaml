@@ -8,7 +8,11 @@ rtc:
   tcp_port: 7881
   port_range_start: 52000
   port_range_end: 52100
-  use_external_ip: true
+  # Host networking exposes every host interface (docker bridges, wireguard).
+  # Pin the single public IP so LiveKit only advertises reachable ICE candidates
+  # instead of unroutable 172.x / 10.x addresses.
+  use_external_ip: false
+  node_ip: 147.45.170.197
   enable_loopback_candidate: false
 
 logging:

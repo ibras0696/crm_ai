@@ -35,7 +35,7 @@ boto3==1.36.2
 httpx==0.28.1
 
 # LiveKit WebRTC
-livekit-api>=0.7.0
+livekit-api==1.1.1
 
 # Rate limiting
 slowapi==0.1.9

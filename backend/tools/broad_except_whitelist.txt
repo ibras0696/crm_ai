@@ -9,6 +9,7 @@ src/modules/ai/internal/handlers/misc_actions.py
 src/modules/ai/limits.py
 src/modules/billing/service_sync.py
 src/modules/billing/token_wallet.py
+src/modules/calls/service.py
 src/modules/notifications/tasks.py
 src/modules/org/services/invites.py
 src/modules/schedule/models.py

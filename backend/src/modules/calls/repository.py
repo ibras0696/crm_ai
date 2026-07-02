@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.modules.calls.models import CallParticipant, CallRole, CallRoom, CallRoomStatus
@@ -60,6 +60,17 @@ class CallsRepository:
             stmt = stmt.where(CallRoom.status == status)
         stmt = stmt.order_by(CallRoom.created_at.desc())
         return list((await self.session.execute(stmt)).scalars().all())
+
+    async def delete_room(self, *, room_id: uuid.UUID) -> None:
+        """Hard-delete a room and its participants."""
+        await self.session.execute(
+            delete(CallParticipant).where(CallParticipant.room_id == room_id),
+            execution_options={"synchronize_session": False},
+        )
+        await self.session.execute(
+            delete(CallRoom).where(CallRoom.id == room_id),
+            execution_options={"synchronize_session": False},
+        )
 
     async def update_room_status(
         self,

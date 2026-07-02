@@ -80,27 +80,27 @@ async def test_list_rooms_empty(client: AsyncClient):
 
 
 @pytest.mark.asyncio
-async def test_end_room(client: AsyncClient):
-    token = await _register_owner(client, org_name="Calls End Org")
+async def test_delete_room(client: AsyncClient):
+    token = await _register_owner(client, org_name="Calls Delete Org")
 
     create_resp = await client.post(
         "/api/v1/calls/rooms",
-        json={"title": "Room to End"},
+        json={"title": "Room to Delete"},
         headers=_headers(token),
     )
     assert create_resp.status_code == 200
     slug = create_resp.json()["data"]["slug"]
 
-    end_resp = await client.delete(
+    del_resp = await client.delete(
         f"/api/v1/calls/rooms/{slug}",
         headers=_headers(token),
     )
-    assert end_resp.status_code == 200, f"End room failed: {end_resp.text}"
-    assert end_resp.json()["ok"] is True
+    assert del_resp.status_code == 200, f"Delete room failed: {del_resp.text}"
+    assert del_resp.json()["ok"] is True
 
+    # Room is permanently gone
     get_resp = await client.get(
         f"/api/v1/calls/rooms/{slug}",
         headers=_headers(token),
     )
-    assert get_resp.status_code == 200
-    assert get_resp.json()["data"]["status"] == "ended"
+    assert get_resp.status_code == 404

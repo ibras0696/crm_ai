@@ -59,6 +59,9 @@ export const callsApi = {
   leaveRoom: (slug: string) =>
     api.post<{ ok: boolean }>(`/calls/rooms/${slug}/leave`, {}),
 
+  deleteRoom: (slug: string) =>
+    api.delete<{ ok: boolean }>(`/calls/rooms/${slug}`),
+
   listRooms: () =>
     api.get<{ ok: boolean; data: RoomOut[] }>('/calls/rooms'),
 

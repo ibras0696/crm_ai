@@ -4,8 +4,12 @@ import { PreCallLobby } from './components/PreCallLobby'
 import { CallRoom } from './components/CallRoom'
 import { callsApi } from '../../lib/api/calls'
 import type { RoomOut } from '../../lib/api/calls'
-import { PhoneCall, ArrowRight, Clock, VideoCamera } from '@phosphor-icons/react'
+import { PhoneCall, ArrowRight, Clock, VideoCamera, Trash, LinkSimple, Check } from '@phosphor-icons/react'
 import { useAuth } from '../../contexts/AuthContext'
+
+function buildRoomLink(slug: string): string {
+  return `${window.location.origin}/calls?slug=${slug}`
+}
 
 type Phase = 'idle' | 'lobby' | 'room'
 
@@ -24,7 +28,7 @@ function formatAgo(iso: string): string {
 }
 
 export default function CallPage() {
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { user } = useAuth()
   const [phase, setPhase] = useState<Phase>('idle')
   const [slug, setSlug] = useState<string | null>(null)
@@ -32,6 +36,8 @@ export default function CallPage() {
   const [joinPreferences, setJoinPreferences] = useState<JoinPreferences>({ audio: true, video: true })
   const [activeRooms, setActiveRooms] = useState<RoomOut[]>([])
   const [roomsLoading, setRoomsLoading] = useState(true)
+  const [deletingSlug, setDeletingSlug] = useState<string | null>(null)
+  const [copiedSlug, setCopiedSlug] = useState<string | null>(null)
 
   const loadActiveRooms = useCallback(() => {
     callsApi.listRooms()
@@ -47,12 +53,26 @@ export default function CallPage() {
     return () => clearInterval(interval)
   }, [loadActiveRooms])
 
-  // Auto-join when URL contains ?slug= (incoming call accept or history rejoin)
+  // URL-driven room restore. `?slug=` opens the lobby (shared link / incoming call);
+  // `?slug=&joined=1` jumps straight back into the room so a page refresh mid-call
+  // does not drop the user back to the list. The backend still verifies the slug
+  // belongs to the caller's organization (cross-org / deleted → 404 → back to list).
   useEffect(() => {
     const urlSlug = searchParams.get('slug')
-    if (urlSlug && phase === 'idle') {
-      handleJoinWithSlug(urlSlug)
-    }
+    const wantRoom = searchParams.get('joined') === '1'
+    if (!urlSlug || phase !== 'idle') return
+    let cancelled = false
+    callsApi.getRoom(urlSlug)
+      .then((res) => {
+        if (cancelled) return
+        setRoom(res.data.data)
+        setSlug(urlSlug)
+        setPhase(wantRoom ? 'room' : 'lobby')
+      })
+      .catch(() => {
+        if (!cancelled) setSearchParams({}, { replace: true })
+      })
+    return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams])
 
@@ -62,6 +82,7 @@ export default function CallPage() {
     setRoom(newRoom)
     setSlug(newRoom.slug)
     setPhase('lobby')
+    setSearchParams({ slug: newRoom.slug })
   }
 
   const handleJoinWithSlug = async (roomSlug: string) => {
@@ -69,19 +90,45 @@ export default function CallPage() {
     setRoom(res.data.data)
     setSlug(roomSlug)
     setPhase('lobby')
+    setSearchParams({ slug: roomSlug })
   }
 
   const handleReadyToJoin = (preferences: JoinPreferences) => {
     setJoinPreferences(preferences)
     setPhase('room')
+    if (slug) setSearchParams({ slug, joined: '1' })
   }
 
   const handleLeave = () => {
     setPhase('idle')
     setSlug(null)
     setRoom(null)
+    setSearchParams({})
     // Refresh active rooms after leaving
     setTimeout(loadActiveRooms, 1000)
+  }
+
+  const handleCopyLink = async (roomSlug: string) => {
+    try {
+      await navigator.clipboard.writeText(buildRoomLink(roomSlug))
+      setCopiedSlug(roomSlug)
+      setTimeout(() => setCopiedSlug((s) => (s === roomSlug ? null : s)), 1500)
+    } catch {
+      // clipboard unavailable — ignore
+    }
+  }
+
+  const handleDeleteRoom = async (roomSlug: string) => {
+    if (!window.confirm('Удалить созвон? Это действие необратимо.')) return
+    setDeletingSlug(roomSlug)
+    try {
+      await callsApi.deleteRoom(roomSlug)
+      setActiveRooms((rooms) => rooms.filter((r) => r.slug !== roomSlug))
+    } catch {
+      // ignore — refresh will reconcile
+    } finally {
+      setDeletingSlug(null)
+    }
   }
 
   if (phase === 'lobby' && slug) {
@@ -167,6 +214,31 @@ export default function CallPage() {
                       {activeRoom.started_at ? formatAgo(activeRoom.started_at) : 'только что'}
                     </div>
                   </div>
+
+                  <button
+                    onClick={() => handleCopyLink(activeRoom.slug)}
+                    title="Скопировать ссылку"
+                    aria-label="Скопировать ссылку"
+                    className="shrink-0 flex items-center justify-center h-8 w-8 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  >
+                    {copiedSlug === activeRoom.slug ? (
+                      <Check size={15} weight="bold" className="text-green-500" />
+                    ) : (
+                      <LinkSimple size={15} />
+                    )}
+                  </button>
+
+                  {isMyRoom && (
+                    <button
+                      onClick={() => handleDeleteRoom(activeRoom.slug)}
+                      disabled={deletingSlug === activeRoom.slug}
+                      title="Удалить созвон"
+                      aria-label="Удалить созвон"
+                      className="shrink-0 flex items-center justify-center h-8 w-8 rounded-lg border border-border text-muted-foreground hover:text-red-500 hover:border-red-500/40 hover:bg-red-500/10 transition-colors disabled:opacity-40"
+                    >
+                      <Trash size={15} />
+                    </button>
+                  )}
 
                   <button
                     onClick={() => handleJoinWithSlug(activeRoom.slug)}

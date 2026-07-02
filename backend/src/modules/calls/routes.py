@@ -60,13 +60,13 @@ async def get_room(
 
 
 @router.delete("/rooms/{slug}", response_model=ApiResponse[None])
-async def end_room(
+async def delete_room(
     slug: str,
     current_user: CurrentUser = Depends(require_org),
 ):
     async with UnitOfWork() as uow:
         service = CallsService(uow.session)
-        await service.end_room(user=current_user, slug=slug)
+        await service.delete_room(user=current_user, slug=slug)
         await uow.commit()
     return ApiResponse(data=None)
 

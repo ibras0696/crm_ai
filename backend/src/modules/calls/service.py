@@ -173,21 +173,16 @@ class CallsService:
             raise NotFoundError("CallRoom")
         return room
 
-    async def end_room(self, *, user: CurrentUser, slug: str) -> None:
+    async def delete_room(self, *, user: CurrentUser, slug: str) -> None:
+        """Permanently remove a room (and its participants). Host only."""
         if not user.org_id:
             raise ForbiddenError("No organization context")
         room = await self.repo.get_room_by_slug(slug=slug, org_id=user.org_id)
         if room is None:
             raise NotFoundError("CallRoom")
         if room.host_id != user.user_id:
-            raise ForbiddenError("Only the host can end the call")
-        if room.status == CallRoomStatus.ended:
-            return
-        await self.repo.update_room_status(
-            room_id=room.id,
-            status=CallRoomStatus.ended,
-            ended_at=datetime.now(UTC),
-        )
+            raise ForbiddenError("Only the host can delete the call")
+        await self.repo.delete_room(room_id=room.id)
 
     async def list_rooms(
         self,

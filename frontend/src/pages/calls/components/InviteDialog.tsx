@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParticipants } from '@livekit/components-react'
-import { X, UserPlus, MagnifyingGlass, Check } from '@phosphor-icons/react'
+import { X, UserPlus, MagnifyingGlass, Check, LinkSimple } from '@phosphor-icons/react'
 import { orgApi, type MemberInfo } from '../../../lib/api'
 import { callsApi } from '../../../lib/api/calls'
 
@@ -16,6 +16,17 @@ export function InviteDialog({ slug, onClose }: Props) {
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
   const [search, setSearch] = useState('')
+  const [linkCopied, setLinkCopied] = useState(false)
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/calls?slug=${slug}`)
+      setLinkCopied(true)
+      setTimeout(() => setLinkCopied(false), 1500)
+    } catch {
+      // clipboard unavailable — ignore
+    }
+  }
 
   const participants = useParticipants()
   const participantIds = new Set(participants.map((p) => p.identity))
@@ -71,6 +82,24 @@ export function InviteDialog({ slug, onClose }: Props) {
           <h3 className="text-sm font-semibold">Пригласить участников</h3>
           <button onClick={onClose} className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors">
             <X size={16} />
+          </button>
+        </div>
+
+        {/* Share link */}
+        <div className="px-4 py-2 border-b border-border shrink-0">
+          <button
+            onClick={handleCopyLink}
+            className="w-full flex items-center justify-center gap-2 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+          >
+            {linkCopied ? (
+              <>
+                <Check size={15} weight="bold" className="text-green-500" /> Ссылка скопирована
+              </>
+            ) : (
+              <>
+                <LinkSimple size={15} /> Скопировать ссылку на созвон
+              </>
+            )}
           </button>
         </div>
 

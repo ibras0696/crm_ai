@@ -11,6 +11,23 @@ const api = axios.create({
 let refreshPromise: Promise<void> | null = null
 let authRedirectInProgress = false
 
+/**
+ * Refresh the auth cookie (single-flight). WebSocket connections authenticate via
+ * the access-token cookie only at connect time; call this before (re)connecting a
+ * long-lived socket so an expired cookie doesn't wedge it in a failed-auth loop.
+ */
+export function ensureFreshAuth(): Promise<void> {
+  if (!refreshPromise) {
+    refreshPromise = axios
+      .post('/api/v1/auth/refresh', {}, { withCredentials: true, timeout: 10_000 })
+      .then(() => undefined)
+      .finally(() => {
+        refreshPromise = null
+      })
+  }
+  return refreshPromise
+}
+
 api.interceptors.request.use((config) => {
   const locale = getPreferredLocale()
   if (config.headers && typeof config.headers.set === 'function') {

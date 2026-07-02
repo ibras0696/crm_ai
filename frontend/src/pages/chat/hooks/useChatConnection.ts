@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject, t
 
 import type { ChatInfo, ChatMemberInfo, ChatMessageInfo } from '@/lib/api'
 import { chatApi } from '@/lib/api'
+import { ensureFreshAuth } from '@/lib/api/core/client'
 
 import { TYPING_TTL_MS } from '../chatHelpers'
 import { saveCachedChatMembers, saveCachedChatMessages, saveCachedChats } from '../chatCache'
@@ -412,7 +413,11 @@ export function useChatConnection({
         clearTimers()
         lastDisconnectedAtRef.current = Date.now()
         if (closedByEffectCleanup) return
-        reconnectTimer = window.setTimeout(connect, 3000)
+        // Refresh the auth cookie before reconnecting so an expired access token
+        // doesn't wedge the socket in a failed-auth (1008) loop.
+        reconnectTimer = window.setTimeout(() => {
+          void ensureFreshAuth().catch(() => undefined).finally(connect)
+        }, 3000)
       }
     }
 

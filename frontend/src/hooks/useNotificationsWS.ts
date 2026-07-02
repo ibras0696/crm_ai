@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from 'react'
+import { ensureFreshAuth } from '@/lib/api/core/client'
 
 type NotificationHandler = (event: Record<string, unknown>) => void
 
@@ -6,6 +7,14 @@ type NotificationHandler = (event: Record<string, unknown>) => void
 let globalSocket: WebSocket | null = null
 const globalHandlers = new Set<NotificationHandler>()
 let globalReconnectTimer: ReturnType<typeof setTimeout> | null = null
+let globalPingTimer: ReturnType<typeof setInterval> | null = null
+
+function clearGlobalPing() {
+  if (globalPingTimer) {
+    clearInterval(globalPingTimer)
+    globalPingTimer = null
+  }
+}
 
 function connectWS() {
   if (globalSocket && globalSocket.readyState === WebSocket.OPEN) return
@@ -15,19 +24,32 @@ function connectWS() {
 
   globalSocket = new WebSocket(wsUrl)
 
+  globalSocket.onopen = () => {
+    // Keepalive: without periodic traffic the idle socket is dropped by
+    // Cloudflare (~100s) / nginx, causing a constant reconnect churn.
+    clearGlobalPing()
+    globalPingTimer = setInterval(() => {
+      if (globalSocket?.readyState === WebSocket.OPEN) globalSocket.send('ping')
+    }, 25_000)
+  }
+
   globalSocket.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data) as Record<string, unknown>
       globalHandlers.forEach((handler) => handler(data))
     } catch {
-      // ignore parse errors
+      // ignore parse errors (e.g. the 'pong' keepalive frame)
     }
   }
 
   globalSocket.onclose = () => {
+    clearGlobalPing()
     if (globalHandlers.size > 0) {
-      // reconnect after 3s if someone is still listening
-      globalReconnectTimer = setTimeout(connectWS, 3000)
+      // Refresh the auth cookie before reconnecting so an expired access token
+      // doesn't trap the socket in a failed-auth (1008) loop.
+      globalReconnectTimer = setTimeout(() => {
+        void ensureFreshAuth().catch(() => undefined).finally(connectWS)
+      }, 3000)
     }
   }
 
@@ -55,6 +77,7 @@ export function useNotificationsWS(onEvent: NotificationHandler) {
           clearTimeout(globalReconnectTimer)
           globalReconnectTimer = null
         }
+        clearGlobalPing()
         globalSocket?.close()
         globalSocket = null
       }
